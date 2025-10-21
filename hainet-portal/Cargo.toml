@@ -1,0 +1,45 @@
+# START OF FILE hainet-portal/Cargo.toml
+[package]
+name = "hainet-portal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "HAI-Net Portal - Chat interface for AI interaction"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+config = { workspace = true }
+futures = { workspace = true }
+
+# Tauri for desktop app
+tauri = { version = "1.0", features = ["api-all"] }
+tauri-build = { version = "1.0", features = [] }
+
+# WebSocket for real-time communication
+tungstenite = { workspace = true }
+
+[build-dependencies]
+tauri-build = { version = "1.0", features = [] }
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+
+[[bin]]
+name = "hainet-portal"
+path = "src/main.rs"
+
+[lib]
+name = "hainet_portal"
+path = "src/lib.rs"

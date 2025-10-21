@@ -1,0 +1,24 @@
+//! HAI-Net Core Library
+//! 
+//! Core functionality for the HAI-Net daemon including networking, storage,
+//! and service coordination.
+
+pub mod storage;
+
+use tracing::info;
+use anyhow::Result;
+
+pub use storage::{StorageManager, ContentAddressedStore, ContentHash, P2PFileSync};
+
+/// Initialize the HAI-Net core system
+pub async fn init() -> Result<()> {
+    info!("🌐 Initializing HAI-Net Core");
+    
+    // TODO: Initialize core components
+    // - Configuration loading
+    // - Network discovery
+    // - Storage system
+    // - Service registry
+    
+    Ok(())
+}

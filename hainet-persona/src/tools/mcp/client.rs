@@ -1,0 +1,413 @@
+//! # MCP Client - Official SDK Implementation
+//!
+//! This module implements the MCP client using the official `rmcp` SDK.
+//! It provides a complete, protocol-compliant client for interacting with MCP servers.
+
+use anyhow::{anyhow, Context, Result};
+use serde_json::Value;
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command as StdCommand;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
+
+// Re-export rmcp types for convenience
+pub use rmcp::model::*;
+use rmcp::transport::child_process::TokioChildProcess;
+use rmcp::{ClientHandler, RoleClient, ServiceExt};
+
+use super::config::{MCPServersConfig, ServerConfig};
+
+/// Server connection state
+struct ServerConnection {
+    peer: rmcp::Peer<RoleClient>,
+}
+
+/// MCP Client Manager
+///
+/// Manages connections to multiple MCP servers using the official rmcp SDK.
+/// Provides a high-level interface for tool calling, resource access, and prompt retrieval.
+pub struct MCPClientManager {
+    /// Active MCP clients by server name
+    clients: Arc<RwLock<HashMap<String, ServerConnection>>>,
+}
+
+impl MCPClientManager {
+    /// Create a new MCP client manager
+    pub fn new() -> Self {
+        info!("Initializing MCP Client Manager (rmcp SDK)");
+        Self {
+            clients: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Start an MCP server and connect to it
+    ///
+    /// # Arguments
+    /// * `name` - Unique identifier for this server
+    /// * `command` - Command to spawn the server process
+    pub async fn start_server(&self, name: &str, command: StdCommand) -> Result<()> {
+        info!("Starting MCP server: {}", name);
+
+        // Check if server already exists
+        {
+            let clients = self.clients.read().await;
+            if clients.contains_key(name) {
+                return Err(anyhow!("Server '{}' is already running", name));
+            }
+        }
+
+        // Convert std::process::Command to tokio::process::Command
+        let tokio_cmd = tokio::process::Command::from(command);
+
+        // Create transport from child process
+        let transport = TokioChildProcess::new(tokio_cmd)
+            .with_context(|| format!("Failed to create transport for '{}'", name))?;
+
+        // Create a minimal client handler (no special behavior needed)
+        struct MinimalClientHandler;
+        
+        impl ClientHandler for MinimalClientHandler {
+            fn create_message(
+                &self,
+                _params: CreateMessageRequestParam,
+                _context: rmcp::service::RequestContext<RoleClient>,
+            ) -> impl std::future::Future<Output = Result<CreateMessageResult, rmcp::model::ErrorData>> + Send + '_ {
+                async move {
+                    // Default implementation - could be extended for sampling support
+                    Err(rmcp::model::ErrorData {
+                        code: rmcp::model::ErrorCode::METHOD_NOT_FOUND,
+                        message: "Sampling not implemented".into(),
+                        data: None,
+                    })
+                }
+            }
+        }
+
+        // Start the client service
+        let handler = MinimalClientHandler;
+        let running = handler.serve(transport)
+            .await
+            .with_context(|| format!("Failed to initialize connection to server '{}'", name))?;
+
+        let peer = running.peer().clone();
+        
+        info!("Successfully connected to MCP server: {}", name);
+
+        // Store connection
+        let mut clients = self.clients.write().await;
+        clients.insert(
+            name.to_string(),
+            ServerConnection { peer },
+        );
+
+        Ok(())
+    }
+
+    /// Call a tool on a specific server
+    ///
+    /// # Arguments
+    /// * `server_name` - Name of the server to call
+    /// * `tool_name` - Name of the tool to invoke
+    /// * `arguments` - Tool arguments as JSON
+    pub async fn call_tool(
+        &self,
+        server_name: &str,
+        tool_name: &str,
+        arguments: Value,
+    ) -> Result<Value> {
+        debug!("Calling tool '{}' on server '{}'", tool_name, server_name);
+
+        let clients = self.clients.read().await;
+        let connection = clients
+            .get(server_name)
+            .ok_or_else(|| anyhow!("Server '{}' not found", server_name))?;
+
+        // Convert JSON Value to Map for rmcp
+        let args = if let Value::Object(map) = arguments {
+            Some(map)
+        } else if arguments.is_null() {
+            None
+        } else {
+            return Err(anyhow!("Tool arguments must be a JSON object or null"));
+        };
+
+        // Call the tool
+        let result = connection
+            .peer
+            .call_tool(CallToolRequestParam {
+                name: Cow::Owned(tool_name.to_string()),
+                arguments: args,
+            })
+            .await
+            .map_err(|e| anyhow!("Failed to call tool '{}' on '{}': {:?}", tool_name, server_name, e))?;
+
+        // Extract result from content
+        if let Some(content_item) = result.content.first() {
+            // Access the inner RawContent via the value field
+            match &**content_item {
+                RawContent::Text(text_content) => {
+                    // Try to parse as JSON, otherwise return as string
+                    if let Ok(json) = serde_json::from_str::<Value>(&text_content.text) {
+                        Ok(json)
+                    } else {
+                        Ok(Value::String(text_content.text.clone()))
+                    }
+                }
+                RawContent::Image(_) => Ok(Value::String("[Image response]".to_string())),
+                RawContent::Resource(_) => Ok(Value::String("[Resource response]".to_string())),
+                RawContent::Audio(_) => Ok(Value::String("[Audio response]".to_string())),
+                RawContent::ResourceLink(_) => Ok(Value::String("[Resource link response]".to_string())),
+            }
+        } else {
+            Ok(Value::Null)
+        }
+    }
+
+    /// List all available tools from a server
+    pub async fn list_tools(&self, server_name: &str) -> Result<Vec<Tool>> {
+        debug!("Listing tools from server '{}'", server_name);
+
+        let clients = self.clients.read().await;
+        let connection = clients
+            .get(server_name)
+            .ok_or_else(|| anyhow!("Server '{}' not found", server_name))?;
+
+        let result = connection
+            .peer
+            .list_all_tools()
+            .await
+            .map_err(|e| anyhow!("Failed to list tools from '{}': {:?}", server_name, e))?;
+
+        Ok(result)
+    }
+
+    /// List resources from a server
+    pub async fn list_resources(&self, server_name: &str) -> Result<Vec<Resource>> {
+        debug!("Listing resources from server '{}'", server_name);
+
+        let clients = self.clients.read().await;
+        let connection = clients
+            .get(server_name)
+            .ok_or_else(|| anyhow!("Server '{}' not found", server_name))?;
+
+        let result = connection
+            .peer
+            .list_all_resources()
+            .await
+            .map_err(|e| anyhow!("Failed to list resources from '{}': {:?}", server_name, e))?;
+
+        Ok(result)
+    }
+
+    /// Read a resource from a server
+    pub async fn read_resource(&self, server_name: &str, uri: &str) -> Result<String> {
+        debug!("Reading resource '{}' from server '{}'", uri, server_name);
+
+        let clients = self.clients.read().await;
+        let connection = clients
+            .get(server_name)
+            .ok_or_else(|| anyhow!("Server '{}' not found", server_name))?;
+
+        let result = connection
+            .peer
+            .read_resource(ReadResourceRequestParam {
+                uri: uri.to_string(),
+            })
+            .await
+            .map_err(|e| anyhow!("Failed to read resource '{}' from '{}': {:?}", uri, server_name, e))?;
+
+        // Extract content from first item
+        if let Some(content_item) = result.contents.first() {
+            match content_item {
+                ResourceContents::TextResourceContents { text, .. } => Ok(text.clone()),
+                ResourceContents::BlobResourceContents { blob, .. } => {
+                    Ok(format!("[Binary blob: {}]", blob))
+                }
+            }
+        } else {
+            Ok(String::new())
+        }
+    }
+
+    /// List prompts from a server
+    pub async fn list_prompts(&self, server_name: &str) -> Result<Vec<Prompt>> {
+        debug!("Listing prompts from server '{}'", server_name);
+
+        let clients = self.clients.read().await;
+        let connection = clients
+            .get(server_name)
+            .ok_or_else(|| anyhow!("Server '{}' not found", server_name))?;
+
+        let result = connection
+            .peer
+            .list_all_prompts()
+            .await
+            .map_err(|e| anyhow!("Failed to list prompts from '{}': {:?}", server_name, e))?;
+
+        Ok(result)
+    }
+
+    /// Get a prompt from a server
+    pub async fn get_prompt(
+        &self,
+        server_name: &str,
+        name: &str,
+        arguments: Option<Value>,
+    ) -> Result<GetPromptResult> {
+        debug!("Getting prompt '{}' from server '{}'", name, server_name);
+
+        let clients = self.clients.read().await;
+        let connection = clients
+            .get(server_name)
+            .ok_or_else(|| anyhow!("Server '{}' not found", server_name))?;
+
+        let args = arguments.and_then(|v| {
+            if let Value::Object(map) = v {
+                Some(map)
+            } else {
+                None
+            }
+        });
+
+        let result = connection
+            .peer
+            .get_prompt(GetPromptRequestParam {
+                name: name.to_string(),
+                arguments: args,
+            })
+            .await
+            .map_err(|e| anyhow!("Failed to get prompt '{}' from '{}': {:?}", name, server_name, e))?;
+
+        Ok(result)
+    }
+
+    /// Shutdown a specific server
+    pub async fn shutdown_server(&self, server_name: &str) -> Result<()> {
+        info!("Shutting down MCP server: {}", server_name);
+
+        let mut clients = self.clients.write().await;
+        if let Some(_connection) = clients.remove(server_name) {
+            info!("Server '{}' shut down successfully", server_name);
+            Ok(())
+        } else {
+            Err(anyhow!("Server '{}' not found", server_name))
+        }
+    }
+
+    /// Shutdown all servers
+    pub async fn shutdown_all(&self) -> Result<()> {
+        info!("Shutting down all MCP servers");
+
+        let mut clients = self.clients.write().await;
+        let count = clients.len();
+        clients.clear();
+
+        info!("Shut down {} MCP server(s)", count);
+        Ok(())
+    }
+
+    /// Get list of connected server names
+    pub async fn list_servers(&self) -> Vec<String> {
+        let clients = self.clients.read().await;
+        clients.keys().cloned().collect()
+    }
+
+    /// Check if a server is connected
+    pub async fn is_connected(&self, server_name: &str) -> bool {
+        let clients = self.clients.read().await;
+        clients.contains_key(server_name)
+    }
+
+    /// Load and start servers from a configuration file
+    pub async fn start_from_config<P: AsRef<Path>>(&self, config_path: P) -> Result<Vec<(String, Result<()>)>> {
+        let config = MCPServersConfig::load_from_file(config_path)?;
+        
+        let mut results = Vec::new();
+        
+        for (server_id, server_config) in config.enabled_servers() {
+            info!(
+                "Starting MCP server '{}' ({})", 
+                server_config.name, 
+                server_config.description
+            );
+            
+            let result = self.start_server_from_config(server_id, server_config).await;
+            results.push((server_id.clone(), result));
+        }
+        
+        Ok(results)
+    }
+
+    /// Start a single server from a ServerConfig
+    pub async fn start_server_from_config(
+        &self,
+        server_id: &str,
+        config: &ServerConfig,
+    ) -> Result<()> {
+        let mut cmd = StdCommand::new(&config.command);
+        cmd.args(&config.args);
+        
+        // Set working directory if specified
+        if let Some(working_dir) = &config.working_dir {
+            cmd.current_dir(working_dir);
+        }
+        
+        // Set up stdio
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::inherit());
+        
+        self.start_server(server_id, cmd).await
+    }
+
+    /// Start all enabled servers from the default configuration
+    pub async fn start_default_servers(&self) -> Result<Vec<(String, Result<()>)>> {
+        // Look for config in the standard location
+        let config_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("hainet-persona")
+            .join("mcp-servers.toml");
+        
+        if !config_path.exists() {
+            warn!(
+                "MCP server configuration not found at: {}",
+                config_path.display()
+            );
+            return Ok(Vec::new());
+        }
+        
+        self.start_from_config(config_path).await
+    }
+}
+
+impl Default for MCPClientManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for MCPClientManager {
+    fn drop(&mut self) {
+        debug!("MCPClientManager dropped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_client_manager_creation() {
+        let manager = MCPClientManager::new();
+        assert_eq!(manager.list_servers().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_server_connection_check() {
+        let manager = MCPClientManager::new();
+        assert!(!manager.is_connected("test-server").await);
+    }
+}

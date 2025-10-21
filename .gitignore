@@ -1,0 +1,139 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Build artifacts
+/debug/
+/release/
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+*.err
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Testing
+/coverage/
+*.profdata
+*.profraw
+
+# Documentation build
+/book/
+/target/doc/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Local development
+/local/
+/scratch/
+/experiments/
+
+# Node.js (for UI components)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+.next/
+out/
+
+# Tauri (for desktop UI)
+/hainet-portal/src-tauri/target/
+/hainet-portal/dist/
+/hainet-portal/build/
+
+# Blockchain data (local development)
+/hainet-chain/data/
+/hainet-chain/genesis.json.backup
+*.db
+*.db-shm
+*.db-wal
+
+# Private keys and secrets
+*.key
+*.pem
+*.p12
+secrets/
+.secrets/
+keystore/
+
+# MCP server development
+/mcp-servers/*/target/
+/mcp-servers/*/node_modules/
+
+# Hot-reload temp files
+.hot-reload-*
+.prompt-cache-*
+
+# Benchmark results
+/benches/target/
+/criterion/
+
+# Fuzzing
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+
+# Configuration overrides (keep templates)
+config.toml
+config.local.toml
+!config.template.toml
+
+# User-specific HAI-Net data
+/user-data/
+/local-hub-data/
+/mesh-data/
+
+# Compiled AI models (large files)
+*.onnx
+*.bin
+*.safetensors
+models/
+
+# Development databases
+dev.db
+test.db
+*.sqlite
+*.sqlite3
+
+# Lock files from package managers (except Cargo.lock in workspace root)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build-time generated files
+/hainet-seed/bundles/
+/hainet-seed/installers/
+
+# Documentation drafts
+/docs/drafts/
+*.draft.md

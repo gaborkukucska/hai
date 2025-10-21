@@ -1,0 +1,44 @@
+# START OF FILE hainet-core/Cargo.toml
+[package]
+name = "hainet-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "HAI-Net Core Daemon - Main networking and coordination service"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+config = { workspace = true }
+futures = { workspace = true }
+
+# Networking
+libp2p = { workspace = true }
+hyper = { workspace = true }
+
+# Storage
+sled = { workspace = true }
+blake3 = "1.5"
+hex = "0.4"
+
+# Crypto for identity
+ed25519-dalek = { workspace = true }
+sha3 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+
+[[bin]]
+name = "hainet-core"
+path = "src/main.rs"

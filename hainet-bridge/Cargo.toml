@@ -1,0 +1,42 @@
+# START OF FILE hainet-bridge/Cargo.toml
+[package]
+name = "hainet-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "HAI-Net Bridge - Secure gateway to external internet services"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+config = { workspace = true }
+futures = { workspace = true }
+
+# External service connectivity
+reqwest = { workspace = true }
+hyper = { workspace = true }
+
+# Privacy and security
+chacha20poly1305 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+
+[[bin]]
+name = "hainet-bridge"
+path = "src/main.rs"
+
+[lib]
+name = "hainet_bridge"
+path = "src/lib.rs"

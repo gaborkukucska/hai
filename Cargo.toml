@@ -1,0 +1,79 @@
+# START OF FILE Cargo.toml
+[workspace]
+resolver = "2"
+members = [
+    "hainet-core",
+    "hainet-persona",
+    "hainet-chain",
+    "hainet-seed",
+    "hainet-portal",
+    "hainet-bridge",
+    "mcp-servers/hainet-files",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hai-net/hai-net"
+homepage = "https://hai-net.org"
+authors = ["HAI-Net Contributors"]
+description = "HAI-Net: Decentralized AI Network Framework"
+
+[workspace.dependencies]
+# Networking - Multi-tier
+libp2p = "0.53"
+quinn = "0.11"
+tokio = { version = "1", features = ["full"] }
+hyper = "1.0"
+
+# Storage - Redundant  
+sled = "0.34"
+sqlx = "0.7"
+reed-solomon-erasure = "6.0"
+
+# Consensus
+raft = "0.7"
+tendermint = "0.34"
+
+# AI/ML (temporarily disabled due to dependency conflicts)
+# llama-cpp-rs = "0.1"
+# ort = "1.16"
+# tokenizers = "0.15"
+# candle-core = "0.3"
+
+# MCP (Model Context Protocol) - Official SDK
+rmcp = "0.8.2"
+rmcp-macros = "0.8.0"
+
+# Crypto
+ed25519-dalek = "2.0"
+x25519-dalek = "2.0"
+chacha20poly1305 = "0.10"
+sha3 = "0.10"
+bs58 = "0.5"
+
+# External bridges
+reqwest = "0.11"
+tungstenite = "0.21"
+
+# Utilities
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+config = "0.14"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+handlebars = "4.5"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+futures = "0.3"
+rand = "0.8"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+debug = true

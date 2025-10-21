@@ -1,0 +1,47 @@
+# START OF FILE hainet-chain/Cargo.toml
+[package]
+name = "hainet-chain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "HAI-Net Blockchain - Decentralized governance and identity"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+config = { workspace = true }
+futures = { workspace = true }
+
+# Consensus
+tendermint = { workspace = true }
+
+# Crypto
+ed25519-dalek = { workspace = true }
+sha3 = { workspace = true }
+bs58 = { workspace = true }
+rand = { workspace = true }
+
+# Storage
+sled = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+
+[[bin]]
+name = "hainet-chain"
+path = "src/main.rs"
+
+[lib]
+name = "hainet_chain"
+path = "src/lib.rs"

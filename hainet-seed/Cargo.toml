@@ -1,0 +1,48 @@
+# START OF FILE hainet-seed/Cargo.toml
+[package]
+name = "hainet-seed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "HAI-Net Seed - AI-guided installer and bootstrap system"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+config = { workspace = true }
+futures = { workspace = true }
+
+# For downloading and installing components
+reqwest = { workspace = true, features = ["json"] }
+
+# Crypto for identity generation
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }
+bs58 = "0.5"
+
+# CLI interface
+clap = { version = "4.0", features = ["derive"] }
+indicatif = "0.17"
+dialoguer = "0.11"
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+
+[[bin]]
+name = "hainet-seed"
+path = "src/main.rs"
+
+[lib]
+name = "hainet_seed"
+path = "src/lib.rs"
