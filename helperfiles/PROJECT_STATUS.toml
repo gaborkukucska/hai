@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-22T12:14:00+08:00
 
 [meta]
-last_updated = "2025-10-22T20:58:00+08:00"
+last_updated = "2025-10-22T22:36:00+08:00"
 project_name = "HAI-Net Seed"
-version = "0.02"
-current_phase = "Phase 1: Project-Based AI Agent Intelligence"
-current_cycle = "MCP Integration - Partial (Blocked)"
+version = "0.03"
+current_phase = "Phase 2: HAI-Net Portal (Multimodal AI Interface)"
+current_cycle = "2.1 - Core Portal Foundation"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -106,10 +106,14 @@ tests_written = 40
 cycles_completed = ["1.1", "1.2", "1.3"]
 
 [phases.phase_2]
-name = "Local Hub Networking"
-status = "planned"
-estimated_runs = 350
-estimated_weeks = "3-4"
+name = "HAI-Net Portal (Multimodal AI Interface)"
+status = "in_progress"
+start_date = "2025-10-22"
+estimated_tokens = 160000
+estimated_loc = 5800
+estimated_tests = 64
+cycles_planned = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"]
+cycles_completed = []
 
 [phases.phase_3]
 name = "Blockchain & Governance"
@@ -117,16 +121,17 @@ status = "planned"
 estimated_runs = 420
 estimated_weeks = "4-5"
 
-# Current cycle details - Phase 1 Complete!
+# Current cycle details - Phase 2.1 Starting!
 [current_cycle]
 id = "2.1"
-name = "Phase 2: Local Hub Networking - Device Discovery"
+name = "Core Portal Foundation (Tauri + React + Admin AI Bridge)"
 phase = "phase_2"
-status = "planned"
-estimated_tokens = 60000
-estimated_loc = 800
-estimated_tests = 15
-priority = "high"
+status = "in_progress"
+estimated_tokens = 35000
+estimated_loc = 1200
+estimated_tests = 12
+priority = "critical"
+goal = "Basic Tauri app with text chat working end-to-end with Admin AI, file attachments"
 
 # Completed cycles
 [[completed_cycles]]
@@ -404,13 +409,236 @@ name = "hainet-system"
 estimated_tokens = 10000
 features = ["System information queries", "Process management", "Resource availability", "Platform detection"]
 
-# Phase 2: Local Hub Networking (Future)
-[phase_details.phase_2]
-name = "Local Hub Networking"
+# Phase 2: HAI-Net Portal - Multimodal AI Interface
+[phase_details.phase_2_1]
+id = "2.1"
+name = "Core Portal Foundation"
+status = "in_progress"
+goal = "Basic Tauri app with text chat working end-to-end with Admin AI"
+estimated_tokens = 35000
+estimated_loc = 1200
+estimated_tests = 12
+priority = "critical"
+
+[[phase_details.phase_2_1.files_to_create]]
+path = "hainet-portal/src-tauri/Cargo.toml"
+description = "Tauri backend dependencies"
+
+[[phase_details.phase_2_1.files_to_create]]
+path = "hainet-portal/src-tauri/src/main.rs"
+description = "Tauri app entry point with bridge commands"
+
+[[phase_details.phase_2_1.files_to_create]]
+path = "hainet-portal/src-tauri/src/admin_bridge.rs"
+description = "Bridge to hainet-persona Admin AI"
+
+[[phase_details.phase_2_1.files_to_create]]
+path = "hainet-portal/package.json"
+description = "React frontend dependencies"
+
+[[phase_details.phase_2_1.files_to_create]]
+path = "hainet-portal/src/App.tsx"
+description = "Main React app component"
+
+[[phase_details.phase_2_1.files_to_create]]
+path = "hainet-portal/src/components/ChatInterface.tsx"
+description = "Chat UI with message list and input"
+
+[[phase_details.phase_2_1.files_to_create]]
+path = "hainet-portal/src/components/FileAttachment.tsx"
+description = "File drag & drop and picker"
+
+[[phase_details.phase_2_1.key_features]]
+feature = "Tauri desktop app with native OS integration"
+
+[[phase_details.phase_2_1.key_features]]
+feature = "Text chat interface with Admin AI"
+
+[[phase_details.phase_2_1.key_features]]
+feature = "File attachment capability (drag & drop)"
+
+[[phase_details.phase_2_1.key_features]]
+feature = "Message persistence and history"
+
+[[phase_details.phase_2_1.key_features]]
+feature = "Auto-scroll to latest message"
+
+[[phase_details.phase_2_1.key_features]]
+feature = "Typing indicators"
+
+[phase_details.phase_2_2]
+id = "2.2"
+name = "Speech-to-Text (STT) Input"
 status = "planned"
+goal = "Voice input as primary interaction mode"
+estimated_tokens = 25000
+estimated_loc = 800
+estimated_tests = 8
+dependencies = ["2.1"]
+
+[[phase_details.phase_2_2.key_features]]
+feature = "Microphone capture via Web Audio API"
+
+[[phase_details.phase_2_2.key_features]]
+feature = "Push-to-talk and voice activity detection (VAD)"
+
+[[phase_details.phase_2_2.key_features]]
+feature = "Whisper model integration via Ollama"
+
+[[phase_details.phase_2_2.key_features]]
+feature = "Real-time transcription display"
+
+[[phase_details.phase_2_2.key_features]]
+feature = "Audio level visualization (waveform)"
+
+[[phase_details.phase_2_2.key_features]]
+feature = "Microphone selection and settings"
+
+[phase_details.phase_2_3]
+id = "2.3"
+name = "Text-to-Speech (TTS) Output"
+status = "planned"
+goal = "Admin AI speaks responses by default"
+estimated_tokens = 20000
+estimated_loc = 600
+estimated_tests = 6
+dependencies = ["2.1"]
+
+[[phase_details.phase_2_3.key_features]]
+feature = "TTS engine with Ollama models (piper, coqui)"
+
+[[phase_details.phase_2_3.key_features]]
+feature = "Web Speech API fallback"
+
+[[phase_details.phase_2_3.key_features]]
+feature = "Voice selection and customization"
+
+[[phase_details.phase_2_3.key_features]]
+feature = "Interruptible speech playback"
+
+[[phase_details.phase_2_3.key_features]]
+feature = "Audio playback controls (play/pause/stop)"
+
+[[phase_details.phase_2_3.key_features]]
+feature = "Speaking rate and voice personality"
+
+[phase_details.phase_2_4]
+id = "2.4"
+name = "Vision Input (Webcam)"
+status = "planned"
+goal = "Admin AI can see user via webcam and understand visual context"
+estimated_tokens = 30000
+estimated_loc = 900
+estimated_tests = 10
+dependencies = ["2.1"]
+
+[[phase_details.phase_2_4.key_features]]
+feature = "Webcam capture via WebRTC MediaStream"
+
+[[phase_details.phase_2_4.key_features]]
+feature = "Vision model processing (llama3.2-vision, llava)"
+
+[[phase_details.phase_2_4.key_features]]
+feature = "Periodic frame capture during conversation"
+
+[[phase_details.phase_2_4.key_features]]
+feature = "Privacy controls (camera on/off, blur, capture frequency)"
+
+[[phase_details.phase_2_4.key_features]]
+feature = "OCR and gesture detection capabilities"
+
+[[phase_details.phase_2_4.key_features]]
+feature = "Visual context in conversations"
+
+[phase_details.phase_2_5]
+id = "2.5"
+name = "Dynamic UI Rendering"
+status = "planned"
+goal = "Admin AI can render custom UI components on-the-fly"
+estimated_tokens = 35000
+estimated_loc = 1100
+estimated_tests = 14
+dependencies = ["2.1"]
+
+[[phase_details.phase_2_5.key_features]]
+feature = "JSON schema system for UI components"
+
+[[phase_details.phase_2_5.key_features]]
+feature = "Admin AI generates UI schemas via LLM"
+
+[[phase_details.phase_2_5.key_features]]
+feature = "React component factory from JSON"
+
+[[phase_details.phase_2_5.key_features]]
+feature = "Safe sandbox execution (no arbitrary code)"
+
+[[phase_details.phase_2_5.key_features]]
+feature = "10+ component types (forms, charts, media, interactive)"
+
+[[phase_details.phase_2_5.key_features]]
+feature = "Event handling back to Admin AI"
+
+[phase_details.phase_2_6]
+id = "2.6"
+name = "Video Streaming Output"
+status = "planned"
+goal = "Admin AI can stream video if needed (tutorials, visualizations)"
+estimated_tokens = 20000
+estimated_loc = 700
+estimated_tests = 8
+dependencies = ["2.1"]
+
+[[phase_details.phase_2_6.key_features]]
+feature = "Full-screen video player overlay"
+
+[[phase_details.phase_2_6.key_features]]
+feature = "Local file and screen recording playback"
+
+[[phase_details.phase_2_6.key_features]]
+feature = "Generated visualization support"
+
+[[phase_details.phase_2_6.key_features]]
+feature = "Video player controls (play/pause/seek)"
+
+[[phase_details.phase_2_6.key_features]]
+feature = "Seamless chat integration"
+
+[phase_details.phase_2_7]
+id = "2.7"
+name = "Settings & System Status"
+status = "planned"
+goal = "Configuration UI and system monitoring"
+estimated_tokens = 15000
+estimated_loc = 500
+estimated_tests = 6
+dependencies = ["2.1", "2.2", "2.3", "2.4"]
+
+[[phase_details.phase_2_7.key_features]]
+feature = "Audio/video device selection"
+
+[[phase_details.phase_2_7.key_features]]
+feature = "Model preferences (STT, TTS, Vision)"
+
+[[phase_details.phase_2_7.key_features]]
+feature = "Privacy settings panel"
+
+[[phase_details.phase_2_7.key_features]]
+feature = "System resource monitoring"
+
+[[phase_details.phase_2_7.key_features]]
+feature = "Active projects display"
+
+[[phase_details.phase_2_7.key_features]]
+feature = "Theme customization (dark/light)"
+
+# Phase 3: Local Hub Networking (Future)
+[phase_details.phase_3_networking]
+name = "Local Hub Networking"
+status = "deferred"
 estimated_runs = 350
 estimated_weeks = "3-4"
 features = ["Device discovery (mDNS)", "P2P mesh protocol (libp2p)", "Content-addressed storage", "CRDT-based sync", "Resource coordinator"]
+note = "Deferred in favor of Phase 2 (Portal UI) for immediate testing capability"
 
 # Phase 3: Blockchain & Governance (Future)
 [phase_details.phase_3]
@@ -423,11 +651,12 @@ features = ["Identity system (DID + keypairs)", "Blockchain core (Tendermint)", 
 # Next steps (prioritized)
 [[next_steps]]
 priority = 1
-task = "Implement Phase 1.2 - Enhanced Agent State Machines"
-description = "Add new states (Conversation, Monitoring, Planning, Managing), create PM and Worker agent types"
-estimated_tokens = 40000
-estimated_sessions = "1-2"
-details_ref = "phase_details.phase_1_2"
+task = "Implement Phase 2.1 - Core Portal Foundation"
+description = "Build Tauri app with React frontend, text chat with Admin AI, file attachments"
+estimated_tokens = 35000
+estimated_sessions = "1"
+details_ref = "phase_details.phase_2_1"
+status = "in_progress"
 
 [[next_steps]]
 priority = 2
@@ -540,13 +769,23 @@ tokens_used = 20000
 
 # Architecture decisions
 [[architecture_decisions]]
+id = "AD-9"
+date = "2025-10-22"
+title = "Multimodal Voice-First UI"
+decision = "Portal UI prioritizes voice/video interaction over text. Admin AI speaks by default, processes webcam input, renders dynamic UI components."
+rationale = "More natural human-AI interaction, leverages modern AI capabilities (STT, TTS, vision), enables testing of full system"
+impact = "Requires Tauri desktop app, WebRTC integration, Ollama multimodal models (whisper, piper, llama3.2-vision)"
+status = "implementing"
+technologies = ["Tauri", "React", "WebRTC", "Web Audio API", "Ollama multimodal models"]
+
+[[architecture_decisions]]
 id = "AD-8"
 date = "2025-10-22"
 title = "Project-Based Agentic System"
 decision = "User requests become discrete projects with dedicated PM and Worker agents. Admin AI orchestrates multiple parallel projects."
 rationale = "Scalability, isolation, clear hierarchy, dynamic agent creation"
 impact = "Major architectural shift requiring new project management infrastructure"
-status = "implementing"
+status = "implemented"
 
 [[architecture_decisions]]
 id = "AD-7"
