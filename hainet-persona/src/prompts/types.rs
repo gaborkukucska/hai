@@ -29,11 +29,15 @@ impl std::fmt::Display for AgentType {
 /// Agent states (state machine)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AgentState {
-    Startup,  // Initializing
-    Idle,     // Ready, waiting for work
-    Planning, // Figuring out how to do something
-    Working,  // Actively executing
-    Error,    // Something went wrong
+    Startup,      // Initializing
+    Idle,         // Ready, waiting for work (Worker agents)
+    Conversation, // Admin AI casual interaction with user
+    Planning,     // Figuring out how to do something
+    Monitoring,   // Admin AI monitoring active projects
+    Managing,     // PM agent managing project execution
+    Working,      // Actively executing tasks (Worker agents)
+    Reporting,    // Worker reporting results to PM
+    Error,        // Something went wrong
 }
 
 /// Domains for PM agents

@@ -105,25 +105,50 @@ impl AgentStateMachine {
         match (&self.current_state, new_state) {
             // From Startup
             (Startup, Idle) => true,
+            (Startup, Conversation) => true, // Admin AI
             (Startup, Error) => true,
             
-            // From Idle
+            // From Idle (Worker agents)
             (Idle, Planning) => true,
             (Idle, Working) => false, // Must plan before working
             (Idle, Error) => true,
             
+            // From Conversation (Admin AI)
+            (Conversation, Planning) => true, // Complex intent detected
+            (Conversation, Monitoring) => true, // Project started
+            (Conversation, Error) => true,
+            
             // From Planning
-            (Planning, Working) => true,
+            (Planning, Working) => true, // Worker starts task
+            (Planning, Managing) => true, // PM starts managing
             (Planning, Idle) => true, // Can cancel planning
+            (Planning, Conversation) => true, // Admin returns to conversation
             (Planning, Error) => true,
             
-            // From Working
-            (Working, Idle) => true, // Task complete
+            // From Monitoring (Admin AI)
+            (Monitoring, Conversation) => true, // All projects complete
+            (Monitoring, Planning) => true, // New project requested
+            (Monitoring, Error) => true,
+            
+            // From Managing (PM agents)
+            (Managing, Planning) => true, // Replanning needed
+            (Managing, Idle) => true, // Project complete
+            (Managing, Error) => true,
+            
+            // From Working (Worker agents)
+            (Working, Reporting) => true, // Task done, report to PM
+            (Working, Idle) => true, // Task complete (direct)
             (Working, Planning) => false, // Must return to Idle first
             (Working, Error) => true,
             
+            // From Reporting (Worker agents)
+            (Reporting, Idle) => true, // PM validated, ready for next task
+            (Reporting, Working) => true, // PM rejected, redo task
+            (Reporting, Error) => true,
+            
             // From Error
             (Error, Idle) => true, // Recovery
+            (Error, Conversation) => true, // Admin recovery
             (Error, Startup) => true, // Restart
             
             // Same state (no-op)

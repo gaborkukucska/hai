@@ -11,7 +11,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::project::{Project, ProjectId, ProjectStatus};
 use super::task::{Task, TaskId, TaskStatus};
 use super::milestone::{Milestone, MilestoneId, MilestoneStatus};
-use crate::messaging::AgentId;
 
 /// SQLite storage backend for project management
 pub struct ProjectStorage {
