@@ -15,13 +15,13 @@ pub struct AdminAgent {
     id: AgentId,
     
     /// Shared context with other agents
-    context: Arc<AgentContext>,
+    _context: Arc<AgentContext>,
     
     /// Intent parser for understanding user requests
-    intent_parser: IntentParser,
+    _intent_parser: IntentParser,
     
     /// Task planner for breaking down requests
-    task_planner: TaskPlanner,
+    _task_planner: TaskPlanner,
     
     /// State machine managing agent lifecycle
     state_machine: AgentStateMachine,
@@ -37,9 +37,9 @@ impl AdminAgent {
         
         Self {
             id,
-            context,
-            intent_parser: IntentParser::new(),
-            task_planner: TaskPlanner::new(),
+            _context: context,
+            _intent_parser: IntentParser::new(),
+            _task_planner: TaskPlanner::new(),
             state_machine: AgentStateMachine::new(),
             running: false,
         }

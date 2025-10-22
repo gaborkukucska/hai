@@ -3,7 +3,7 @@
 //! Analyzes user requests to understand intent, extract entities, and classify request types.
 //! Uses AI provider system for natural language understanding.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -150,7 +150,7 @@ impl IntentParser {
     }
     
     /// Extract entities from text based on intent type
-    fn extract_entities(&self, text: &str, intent_type: &IntentType) -> HashMap<String, String> {
+    fn extract_entities(&self, text: &str, _intent_type: &IntentType) -> HashMap<String, String> {
         let mut entities = HashMap::new();
         
         // Simple entity extraction (will be enhanced with NER in full implementation)
@@ -200,7 +200,7 @@ impl IntentParser {
     }
     
     /// Suggest PM domain and action based on intent
-    fn suggest_domain_and_action(&self, text: &str, intent_type: &IntentType) -> (Option<String>, Option<String>) {
+    fn suggest_domain_and_action(&self, text: &str, _intent_type: &IntentType) -> (Option<String>, Option<String>) {
         // Communications domain
         if text.contains("email") || text.contains("message") || text.contains("chat") {
             return (Some("Communications".to_string()), Some("email_management".to_string()));

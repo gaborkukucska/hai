@@ -6,7 +6,6 @@
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::messaging::AgentId;
 use super::intent::Intent;
 
 /// Single step in a task execution plan

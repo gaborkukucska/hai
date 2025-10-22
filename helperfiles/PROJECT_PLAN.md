@@ -1169,12 +1169,129 @@ $ cargo build --package hainet-files
 
 ---
 
-## Phase 1: AI Agent Intelligence (~400 runs, 3-4 weeks)
+## Phase 1: Project-Based AI Agent Intelligence (~400 runs, 3-4 weeks)
 
-**Status:** 🚧 IN PROGRESS (Cycle 1.1 Foundation Complete)  
-**Start Date:** 2025-10-21  
+**Status:** 🚧 IN PROGRESS (Architecture Defined, Ready to Implement)  
+**Start Date:** 2025-10-22  
 **Estimated Completion:** 2025-11-15  
-**Priority:** Implement actual AI agents using Phase 0 infrastructure
+**Priority:** Implement project-based multi-agent system with Admin AI, PM agents, and Worker agents  
+**Architecture:** See `PROJECT_BASED_AGENTIC_SYSTEM.md` and `PHASE_1_DETAILED_PLAN.md`
+
+### Architectural Decision 8: Project-Based Agentic System (2025-10-22)
+
+**Rationale:** User requests should become discrete projects with dedicated PM and Worker agents. Admin AI orchestrates multiple parallel projects while remaining available for conversation.
+
+**Key Architectural Decisions:**
+1. **Agent Lifecycle:** Agents hibernate after project completion, deleted only when project deleted
+2. **LLM Integration:** Hybrid approach - Direct calls for simple tasks, MCP for complex reasoning
+3. **Project Storage:** SQLite database for persistence across restarts
+4. **Worker Specializations:** Default worker templates with PM-customizable system prompts
+
+**Agent State Machines:**
+
+**Admin AI States:**
+- `Startup` → Analyze conversation history, determine current context
+- `Conversation` → Default state, casual interaction, monitor for complex intents
+- `Planning` → Decompose complex intent, create project plan, spawn PM agent
+- `Monitoring` → Manage multiple parallel projects, still available for user conversation
+
+**PM Agent States:**
+- `Startup` → Receive project context, analyze initial tasks
+- `Planning` → Break down tasks, create milestones, design worker team
+- `Managing` → Assign tasks, validate deliverables, report to Admin AI
+- `Complete` → Final validation, generate report, hibernate agents
+
+**Worker Agent States:**
+- `Idle` → Waiting for task assignment
+- `Working` → Execute task using MCP tools
+- `Reporting` → Report completion to PM for validation
+
+**Implementation Phases:**
+
+### Phase 1.1: Project Management Infrastructure (~60K tokens, 2 sessions)
+
+**Goal:** Create project entity system with SQLite persistence, support multi-project parallel execution
+
+**Files to Create:**
+1. `hainet-persona/src/projects/mod.rs` (~100 LOC) - Module exports
+2. `hainet-persona/src/projects/project.rs` (~350 LOC) - Project entity with lifecycle
+3. `hainet-persona/src/projects/task.rs` (~300 LOC) - Task management with dependencies
+4. `hainet-persona/src/projects/milestone.rs` (~250 LOC) - Milestone tracking
+5. `hainet-persona/src/projects/storage.rs` (~400 LOC) - SQLite persistence layer
+6. `hainet-persona/src/projects/manager.rs` (~450 LOC) - ProjectManager with hibernation
+
+**Key Features:**
+- Project CRUD operations with SQLite
+- Task assignment and tracking
+- Milestone management
+- Project lifecycle state machine
+- Multi-project parallel execution
+- Agent hibernation system (suspend on complete, delete on project delete)
+
+**Dependencies:**
+```toml
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+```
+
+**Tests:** 20+ tests (project lifecycle, task assignment, SQLite persistence, hibernation)
+
+**Estimated:** ~1,900 LOC, 60K tokens
+
+---
+
+### Phase 1.2: Enhanced Agent State Machines (~40K tokens, 1-2 sessions)
+
+**Goal:** Add new states (Conversation, Monitoring, Planning, Managing) and PM/Worker agent types
+
+**Files to Modify/Create:**
+1. Modify `hainet-persona/src/agents/state.rs` (+150 LOC) - Add new states and transitions
+2. Create `hainet-persona/src/agents/pm.rs` (~400 LOC) - PM agent implementation
+3. Create `hainet-persona/src/agents/worker.rs` (~350 LOC) - Worker agent implementation
+4. Create `hainet-persona/src/agents/templates.rs` (~300 LOC) - Default worker templates
+
+**Key Features:**
+- Admin AI state machine with Planning and Monitoring states
+- PM agent startup and planning logic
+- Worker agent task execution
+- Default worker templates (FileWorker, NetworkWorker, CodeWorker, etc.)
+- PM-customizable system prompts for workers
+- Inter-agent communication via projects
+
+**Tests:** 15+ tests (state transitions, template customization, hibernation)
+
+**Estimated:** ~1,200 LOC, 40K tokens
+
+---
+
+### Phase 1.3: Admin AI Planning & PM Creation (~50K tokens, 2 sessions)
+
+**Goal:** Admin AI detects complex intents, creates projects, spawns PM agents
+
+**Files to Modify:**
+1. `hainet-persona/src/agents/admin.rs` (+500 LOC) - Full Admin AI implementation
+2. `hainet-persona/src/ai_providers/mod.rs` (+200 LOC) - Direct LLM call helper
+
+**Key Features:**
+- Complex intent detection (multi-step, project keywords)
+- LLM-powered project plan generation (title, overview, initial tasks)
+- Dynamic PM agent creation with project-specific prompts
+- State transitions: Conversation → Planning → Monitoring
+- Multiple parallel project management
+
+**Tests:** 12+ tests (intent detection, plan generation, PM creation, multi-project)
+
+**Estimated:** ~700 LOC, 50K tokens
+
+---
+
+**Total Phase 1 Estimates:**
+- **Lines of Code:** ~3,800 LOC
+- **Tokens:** ~150K tokens
+- **Development Sessions:** 5-6 sessions
+- **Tests:** 47+ tests
+
+---
 
 ### Cycle 1.1: Admin AI Core Foundation ✅ COMPLETE (2025-10-21)
 
