@@ -10,6 +10,7 @@ pub mod ai_providers;
 pub mod guardian;
 pub mod tools;
 pub mod agents;
+pub mod projects;
 
 // TODO: Implement these modules in later cycles
 // pub mod memory;
@@ -26,6 +27,12 @@ pub use prompts::{
 
 pub use messaging::{
     AgentId, Message, MessageContent, MessageBus, Priority,
+};
+
+pub use projects::{
+    ProjectManager, Project, ProjectId, ProjectStatus,
+    Task, TaskId, TaskStatus,
+    Milestone, MilestoneId, MilestoneStatus,
 };
 
 /// Initialize the persona system
