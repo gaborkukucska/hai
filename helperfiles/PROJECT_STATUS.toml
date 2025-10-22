@@ -1,0 +1,917 @@
+# HAI-Net Project Status Tracker
+# AI-optimized single source of truth for project planning and progress
+# Last Updated: 2025-10-22T11:20:00+08:00
+
+[meta]
+last_updated = "2025-10-22T11:40:00+08:00"
+project_name = "HAI-Net Seed"
+version = "0.02"
+current_phase = "Phase 1: Project-Based AI Agent Intelligence"
+current_cycle = "1.2"
+context_budget_per_session = 200000
+repository = "https://github.com/gaborkukucska/hai.git"
+
+# Development principles
+[development_principles]
+constitutional_compliance = "Enforced at code level"
+implementation_language = "Rust-based with TypeScript UI"
+architecture = "Modular architecture supporting MCP protocol"
+design_philosophy = "Privacy-first, decentralized design"
+testing_approach = "Comprehensive unit and integration tests for all components"
+
+# Multi-device hub configuration
+[multi_device_hub]
+description = "Distributed computing mesh leveraging multiple devices"
+
+[multi_device_hub.primary_hub]
+device = "Linux PC with RTX3060"
+role = "Hub coordinator, primary AI inference"
+capabilities = ["Coordination", "Primary LLM hosting", "High-performance inference"]
+
+[[multi_device_hub.compute_nodes]]
+devices = "2 Mac laptops (Linux), Lenovo laptop (Linux)"
+role = "Secondary inference, storage"
+capabilities = ["Distributed inference", "Storage nodes", "Backup compute"]
+
+[[multi_device_hub.mobile_nodes]]
+device = "Galaxy S21 (Termux)"
+role = "Lightweight agents, connectivity bridge"
+capabilities = ["Mobile access", "Mesh networking", "Remote connectivity"]
+
+[[multi_device_hub.auxiliary]]
+devices = "2 Galaxy tabs"
+role = "Additional storage, mesh extension"
+capabilities = ["Storage expansion", "Mesh redundancy"]
+
+[multi_device_hub.master_slave_election]
+description = "First device to launch becomes Hub Coordinator (Master)"
+flow = [
+    "Install HAI-Net on all devices",
+    "Launch on first device → Becomes Master",
+    "Master scans local network via mDNS",
+    "Master assesses each discovered device's capabilities",
+    "Master assigns specialized roles based on hardware",
+    "Slaves receive role assignment and start services",
+    "Master coordinates load balancing across hub"
+]
+
+[[multi_device_hub.specialized_roles]]
+role = "LLM Host"
+assignment = "Device with best GPU (RTX3060 PC)"
+
+[[multi_device_hub.specialized_roles]]
+role = "STT/TTS Host"
+assignment = "Device with good CPU/audio capabilities"
+
+[[multi_device_hub.specialized_roles]]
+role = "MCP Server Host"
+assignment = "Device with stable network connectivity"
+
+[[multi_device_hub.specialized_roles]]
+role = "Storage Node"
+assignment = "Device with available disk space"
+
+[[multi_device_hub.specialized_roles]]
+role = "Compute Worker"
+assignment = "Additional processing capacity"
+
+[progress]
+# Overall completion percentages
+phase_0_complete = true
+phase_1_progress = 0.54  # 54% complete (Phase 1.1 done, 1.2-1.3 remaining)
+total_loc_produced = 7055  # Approximate total lines of code
+total_tests_passing = 170
+
+# Phase breakdown
+[phases.phase_0]
+name = "Core Infrastructure"
+status = "complete"
+completion_date = "2025-10-21"
+estimated_tokens = 180000
+actual_tokens = 180000
+loc_produced = 5000
+tests_written = 170
+cycles_completed = ["0.1", "0.2", "0.3", "0.4", "0.5"]
+
+[phases.phase_1]
+name = "Project-Based AI Agent Intelligence"
+status = "in_progress"
+start_date = "2025-10-22"
+estimated_completion = "2025-11-15"
+estimated_tokens = 150000
+actual_tokens = 60000
+loc_produced = 2055
+tests_written = 30
+cycles_completed = ["1.1"]
+cycles_in_progress = ["1.2"]
+
+[phases.phase_2]
+name = "Local Hub Networking"
+status = "planned"
+estimated_runs = 350
+estimated_weeks = "3-4"
+
+[phases.phase_3]
+name = "Blockchain & Governance"
+status = "planned"
+estimated_runs = 420
+estimated_weeks = "4-5"
+
+# Current cycle details
+[current_cycle]
+id = "1.2"
+name = "Enhanced Agent State Machines"
+phase = "phase_1"
+status = "ready_to_start"
+estimated_tokens = 40000
+estimated_loc = 1200
+estimated_tests = 15
+priority = "high"
+
+# Completed cycles
+[[completed_cycles]]
+id = "0.1"
+name = "Project Scaffolding"
+completion_date = "2025-10-19"
+loc = 500
+
+[[completed_cycles]]
+id = "0.2"
+name = "Advanced Prompt Management System"
+completion_date = "2025-10-19"
+loc = 1700
+tests = 12
+components_implemented = [
+    "prompts/types.rs - Type definitions",
+    "prompts/loader.rs - Hierarchical TOML loader with inheritance",
+    "prompts/renderer.rs - Handlebars rendering with constitutional validation",
+    "prompts/cache.rs - LRU+TTL caching system",
+    "prompts/mod.rs - Unified PromptManager API"
+]
+template_structure = [
+    "system/ - Core system prompts",
+    "agents/ - Agent-specific prompts (admin.toml)",
+    "states/ - State-specific prompts (idle.toml, planning.toml)"
+]
+
+[[completed_cycles]]
+id = "0.3"
+name = "Hierarchical Agent Communication"
+completion_date = "2025-10-20"
+loc = 1800
+tests = 60
+modules_created = [
+    "messaging/types.rs - Message type system with priorities",
+    "messaging/channels.rs - MessageBus with Tokio mpsc",
+    "messaging/priority.rs - Priority queue implementation",
+    "messaging/guardian.rs - Guardian interception hooks",
+    "messaging/audit.rs - Tamper-evident audit trail",
+    "messaging/deadlock.rs - Cycle detection"
+]
+key_architecture = [
+    "Clean layered architecture: Types → Channels → Priority → Guardian → Audit → Deadlock",
+    "Full async/await with Tokio runtime",
+    "Type-safe message routing with compile-time hierarchy checks",
+    "Bounded channels prevent memory exhaustion",
+    "Fair scheduling prevents low-priority starvation"
+]
+
+[[completed_cycles]]
+id = "0.4"
+name = "Constitutional Guardian System"
+completion_date = "2025-10-20"
+loc = 900
+tests = 85
+components_implemented = [
+    "guardian/pii_detector.rs - Email, phone, SSN detection",
+    "guardian/bias_detector.rs - Stereotype and prejudice analysis",
+    "guardian/harm_analyzer.rs - Toxicity and harm detection",
+    "guardian/decision_engine.rs - Block/Pause/Allow decision logic",
+    "guardian/ollama_client.rs - Guardian-specific Ollama wrapper"
+]
+
+[[completed_cycles]]
+id = "0.5"
+name = "Integration & Testing"
+completion_date = "2025-10-21"
+loc = 230
+tests = 9
+integration_tests = [
+    "test_prompt_system_initialization",
+    "test_ai_provider_discovery",
+    "test_messaging_system_creation",
+    "test_guardian_pii_detection",
+    "test_guardian_bias_detection",
+    "test_guardian_harm_analysis",
+    "test_guardian_decision_engine",
+    "test_constitutional_compliance_integration",
+    "test_phase_0_component_summary"
+]
+
+[[completed_cycles]]
+id = "1.1"
+name = "Project Management Infrastructure"
+completion_date = "2025-10-22"
+loc = 2055
+tests = 30
+modules_created = ["project.rs", "task.rs", "milestone.rs", "storage.rs", "manager.rs", "mod.rs"]
+goal = "Create project entity system with SQLite persistence, support multi-project parallel execution"
+files_created = [
+    "hainet-persona/src/projects/mod.rs (~100 LOC)",
+    "hainet-persona/src/projects/project.rs (~350 LOC)",
+    "hainet-persona/src/projects/task.rs (~300 LOC)",
+    "hainet-persona/src/projects/milestone.rs (~250 LOC)",
+    "hainet-persona/src/projects/storage.rs (~400 LOC)",
+    "hainet-persona/src/projects/manager.rs (~450 LOC)"
+]
+key_features = [
+    "Project CRUD operations with SQLite",
+    "Task assignment and tracking",
+    "Milestone management",
+    "Project lifecycle state machine",
+    "Multi-project parallel execution",
+    "Agent hibernation system"
+]
+dependencies_added = ["sqlx", "uuid"]
+
+# Detailed phase/cycle implementation plans
+
+# Phase 1.2: Enhanced Agent State Machines (NEXT UP)
+[phase_details.phase_1_2]
+id = "1.2"
+name = "Enhanced Agent State Machines"
+status = "ready_to_start"
+goal = "Add new states (Conversation, Monitoring, Planning, Managing) and PM/Worker agent types"
+estimated_tokens = 40000
+estimated_loc = 1200
+estimated_tests = 15
+estimated_sessions = "1-2"
+priority = "high"
+
+[[phase_details.phase_1_2.files_to_modify]]
+path = "hainet-persona/src/agents/state.rs"
+changes = "+150 LOC"
+description = "Add new states and transitions"
+
+[[phase_details.phase_1_2.files_to_create]]
+path = "hainet-persona/src/agents/pm.rs"
+loc = 400
+description = "PM agent implementation"
+
+[[phase_details.phase_1_2.files_to_create]]
+path = "hainet-persona/src/agents/worker.rs"
+loc = 350
+description = "Worker agent implementation"
+
+[[phase_details.phase_1_2.files_to_create]]
+path = "hainet-persona/src/agents/templates.rs"
+loc = 300
+description = "Default worker templates (FileWorker, NetworkWorker, CodeWorker, etc.)"
+
+[[phase_details.phase_1_2.key_features]]
+feature = "Admin AI state machine with Planning and Monitoring states"
+
+[[phase_details.phase_1_2.key_features]]
+feature = "PM agent startup and planning logic"
+
+[[phase_details.phase_1_2.key_features]]
+feature = "Worker agent task execution"
+
+[[phase_details.phase_1_2.key_features]]
+feature = "Default worker templates (FileWorker, NetworkWorker, CodeWorker, etc.)"
+
+[[phase_details.phase_1_2.key_features]]
+feature = "PM-customizable system prompts for workers"
+
+[[phase_details.phase_1_2.key_features]]
+feature = "Inter-agent communication via projects"
+
+# Phase 1.3: Admin AI Planning & PM Creation
+[phase_details.phase_1_3]
+id = "1.3"
+name = "Admin AI Planning & PM Creation"
+status = "waiting"
+goal = "Admin AI detects complex intents, creates projects, spawns PM agents"
+estimated_tokens = 50000
+estimated_loc = 700
+estimated_tests = 12
+estimated_sessions = 2
+dependencies = ["1.2"]
+priority = "high"
+
+[[phase_details.phase_1_3.files_to_modify]]
+path = "hainet-persona/src/agents/admin.rs"
+changes = "+500 LOC"
+description = "Full Admin AI implementation"
+
+[[phase_details.phase_1_3.files_to_modify]]
+path = "hainet-persona/src/ai_providers/mod.rs"
+changes = "+200 LOC"
+description = "Direct LLM call helper"
+
+[[phase_details.phase_1_3.key_features]]
+feature = "Complex intent detection (multi-step, project keywords)"
+
+[[phase_details.phase_1_3.key_features]]
+feature = "LLM-powered project plan generation (title, overview, initial tasks)"
+
+[[phase_details.phase_1_3.key_features]]
+feature = "Dynamic PM agent creation with project-specific prompts"
+
+[[phase_details.phase_1_3.key_features]]
+feature = "State transitions: Conversation → Planning → Monitoring"
+
+[[phase_details.phase_1_3.key_features]]
+feature = "Multiple parallel project management"
+
+# MCP Servers Implementation (Deferred)
+[phase_details.mcp_servers]
+name = "Core MCP Servers"
+status = "planned"
+estimated_tokens = 70000
+priority = "medium"
+
+[[phase_details.mcp_servers.servers]]
+name = "hainet-files"
+estimated_tokens = 15000
+features = ["File read/write operations", "Directory listing and search", "Permission checking", "Integration with Content-Addressed Storage"]
+
+[[phase_details.mcp_servers.servers]]
+name = "hainet-network"
+estimated_tokens = 15000
+features = ["HTTP requests with privacy controls", "DNS lookups", "WebSocket connections", "External API rate limiting"]
+
+[[phase_details.mcp_servers.servers]]
+name = "hainet-compute"
+estimated_tokens = 15000
+features = ["Task execution sandboxing", "Resource usage monitoring", "Result caching", "Distributed computation primitives"]
+
+[[phase_details.mcp_servers.servers]]
+name = "hainet-chain"
+estimated_tokens = 15000
+features = ["DID operations (create, verify)", "Link creation and validation", "Identity queries", "Constitutional compliance checks"]
+
+[[phase_details.mcp_servers.servers]]
+name = "hainet-system"
+estimated_tokens = 10000
+features = ["System information queries", "Process management", "Resource availability", "Platform detection"]
+
+# Phase 2: Local Hub Networking (Future)
+[phase_details.phase_2]
+name = "Local Hub Networking"
+status = "planned"
+estimated_runs = 350
+estimated_weeks = "3-4"
+features = ["Device discovery (mDNS)", "P2P mesh protocol (libp2p)", "Content-addressed storage", "CRDT-based sync", "Resource coordinator"]
+
+# Phase 3: Blockchain & Governance (Future)
+[phase_details.phase_3]
+name = "Blockchain & Governance"
+status = "planned"
+estimated_runs = 420
+estimated_weeks = "4-5"
+features = ["Identity system (DID + keypairs)", "Blockchain core (Tendermint)", "Human-AI link verification", "Governance & membership system", "Constitutional validation", "Chain synchronization"]
+
+# Next steps (prioritized)
+[[next_steps]]
+priority = 1
+task = "Implement Phase 1.2 - Enhanced Agent State Machines"
+description = "Add new states (Conversation, Monitoring, Planning, Managing), create PM and Worker agent types"
+estimated_tokens = 40000
+estimated_sessions = "1-2"
+details_ref = "phase_details.phase_1_2"
+
+[[next_steps]]
+priority = 2
+task = "Implement Phase 1.3 - Admin AI Planning & PM Creation"
+description = "Admin AI detects complex intents, creates projects, spawns PM agents"
+estimated_tokens = 50000
+estimated_sessions = 2
+dependencies = ["1.2"]
+details_ref = "phase_details.phase_1_3"
+
+[[next_steps]]
+priority = 3
+task = "Fix MCP compilation errors"
+description = "Complete rmcp SDK migration, resolve compilation errors"
+estimated_tokens = 10000
+severity = "medium"
+
+[[next_steps]]
+priority = 4
+task = "Write comprehensive tests for Phase 1.1"
+description = "20+ integration tests for project management system"
+estimated_tokens = 15000
+
+# Current blockers
+[[blockers]]
+issue = "MCP server compilation errors"
+severity = "medium"
+impact = "Worker agents cannot access tools until resolved"
+affected_components = ["hainet-persona/src/tools/mcp/"]
+
+# Recent completions (last 10)
+[[recent_completions]]
+date = "2025-10-22"
+event = "Phase 1.1 Complete - Project Management Infrastructure"
+details = "2055 LOC, SQLite persistence, 6 modules, task/milestone tracking, agent hibernation"
+tokens_used = 60000
+
+[[recent_completions]]
+date = "2025-10-21"
+event = "Phase 0.5 Complete - Integration & Testing"
+details = "170 tests passing, 9 integration tests, constitutional compliance validation"
+tokens_used = 28000
+
+[[recent_completions]]
+date = "2025-10-21"
+event = "Cycle 1.1 - Admin AI Core Foundation"
+details = "Intent parser, task planner, agent state machine, admin AI stub (1065 LOC, 30 tests)"
+tokens_used = 50000
+
+[[recent_completions]]
+date = "2025-10-20"
+event = "Phase 0.4 Complete - Constitutional Guardian System"
+details = "PII detection, bias detection, harm analysis, decision engine"
+tokens_used = 70000
+
+[[recent_completions]]
+date = "2025-10-20"
+event = "Phase 0.3 Complete - Hierarchical Agent Communication"
+details = "Message bus, priority queues, guardian hooks, audit trail, deadlock detection"
+tokens_used = 120000
+
+[[recent_completions]]
+date = "2025-10-20"
+event = "HAI-Net Seed Installer - Platform Detection & Ollama Auto-Install"
+details = "Platform detection, system tier classification, Ollama installation, model download"
+tokens_used = 15000
+
+[[recent_completions]]
+date = "2025-10-19"
+event = "Phase 0.2 Complete - Advanced Prompt Management System"
+details = "TOML templates, hierarchical loader, Handlebars rendering, LRU+TTL caching"
+tokens_used = 60000
+
+[[recent_completions]]
+date = "2025-10-19"
+event = "Phase 0.1 Complete - Project Scaffolding"
+details = "6-crate workspace, basic module structure"
+tokens_used = 20000
+
+# Architecture decisions
+[[architecture_decisions]]
+id = "AD-8"
+date = "2025-10-22"
+title = "Project-Based Agentic System"
+decision = "User requests become discrete projects with dedicated PM and Worker agents. Admin AI orchestrates multiple parallel projects."
+rationale = "Scalability, isolation, clear hierarchy, dynamic agent creation"
+impact = "Major architectural shift requiring new project management infrastructure"
+status = "implementing"
+
+[[architecture_decisions]]
+id = "AD-7"
+date = "2025-10-21"
+title = "Agent Lifecycle - Hibernation vs Deletion"
+decision = "Agents hibernate after project completion, deleted only when project deleted"
+rationale = "Allows project resumption without losing agent context"
+impact = "Requires state persistence and lifecycle management"
+status = "implemented"
+
+[[architecture_decisions]]
+id = "AD-6"
+date = "2025-10-20"
+title = "LLM Integration Strategy"
+decision = "Hybrid approach - Direct LLM calls for simple tasks, MCP for complex reasoning"
+rationale = "Balance between performance and capability"
+impact = "Need both direct Ollama client and MCP integration"
+status = "implemented"
+
+# Key components status
+[components]
+
+[components.prompt_system]
+status = "complete"
+location = "hainet-persona/src/prompts/"
+features = ["TOML templates", "Handlebars rendering", "LRU+TTL caching", "Hot reload"]
+tests_passing = 12
+
+[components.messaging_system]
+status = "complete"
+location = "hainet-persona/src/messaging/"
+features = ["Priority queues", "Guardian hooks", "Audit trail", "Deadlock detection"]
+tests_passing = 60
+
+[components.guardian_system]
+status = "complete"
+location = "hainet-persona/src/guardian/"
+features = ["PII detection", "Bias detection", "Harm analysis", "Decision engine"]
+tests_passing = 25
+
+[components.ai_providers]
+status = "complete"
+location = "hainet-persona/src/ai_providers/"
+features = ["Provider discovery", "Ollama client", "Model ranking", "Auto-selection"]
+tests_passing = 20
+
+[components.project_management]
+status = "complete"
+location = "hainet-persona/src/projects/"
+features = ["SQLite persistence", "Task tracking", "Milestone management", "Agent hibernation"]
+tests_passing = 30
+
+[components.agent_system]
+status = "partial"
+location = "hainet-persona/src/agents/"
+features = ["Intent parser", "Task planner", "State machine", "Admin AI stub"]
+tests_passing = 30
+missing = ["PM agent", "Worker agents", "Full Admin AI implementation"]
+
+[components.mcp_integration]
+status = "blocked"
+location = "hainet-persona/src/tools/mcp/"
+features = ["MCP client stub", "Server config"]
+tests_passing = 0
+blockers = ["Compilation errors", "rmcp SDK migration incomplete"]
+
+[components.installer]
+status = "complete"
+location = "hainet-seed/src/installer/"
+features = ["Platform detection", "Ollama auto-install", "Model download", "Tier classification"]
+tests_passing = 8
+
+[components.identity_system]
+status = "complete"
+location = "hainet-chain/src/identity/"
+features = ["DID generation", "Keypair management", "Link creation"]
+tests_passing = 15
+
+[components.storage_system]
+status = "complete"
+location = "hainet-core/src/storage/"
+features = ["Content-addressed storage", "P2P sync primitives"]
+tests_passing = 10
+
+# Technical debt
+[[technical_debt]]
+issue = "MCP compilation errors need resolution"
+severity = "high"
+affected = ["Worker agents", "Tool access"]
+estimated_effort = "10K tokens"
+
+[[technical_debt]]
+issue = "Missing comprehensive tests for Phase 1.1"
+severity = "medium"
+affected = ["Project management system"]
+estimated_effort = "15K tokens"
+
+[[technical_debt]]
+issue = "No error handling/logging in project system"
+severity = "medium"
+affected = ["hainet-persona/src/projects/"]
+estimated_effort = "10K tokens"
+
+[[technical_debt]]
+issue = "Agent lifecycle management incomplete"
+severity = "low"
+affected = ["Agent system"]
+estimated_effort = "20K tokens"
+
+# Development methodology
+[methodology]
+token_budget_per_cycle = 180000
+context_window = 200000
+buffer_percentage = 0.10
+
+[methodology.estimation_guidelines]
+simple_module_loc = 100
+simple_module_tokens = 5000
+medium_module_loc = 300
+medium_module_tokens = 15000
+complex_module_loc = 600
+complex_module_tokens = 30000
+integration_test_tokens = 10000
+documentation_tokens = 5000
+estimation_accuracy = "±20%"
+
+# Constitutional principles
+[constitutional]
+principles = [
+    "Privacy First",
+    "Human Rights Protection",
+    "Decentralization",
+    "Community Focus",
+    "Constitutional Compliance"
+]
+enforcement_level = "code_level"
+guardian_monitoring = true
+
+# Agent State Machines
+# Detailed state definitions for Admin AI, PM, and Worker agents
+
+[agent_state_machines.admin_ai]
+name = "Admin AI Agent"
+description = "Primary user interface agent, orchestrates multiple parallel projects"
+initial_state = "Startup"
+
+[[agent_state_machines.admin_ai.states]]
+name = "Startup"
+description = "Initial state on framework launch"
+actions = [
+    "Analyze conversation history with user",
+    "Determine current context and user state",
+    "Transition to appropriate state"
+]
+transitions_to = ["Conversation", "Planning", "Monitoring"]
+
+[[agent_state_machines.admin_ai.states]]
+name = "Conversation"
+description = "Default state for casual interaction"
+actions = [
+    "Respond to questions, provide information",
+    "No actionable intent detected",
+    "Monitor for complex/actionable intents"
+]
+transitions_to = ["Planning"]
+
+[[agent_state_machines.admin_ai.states]]
+name = "Planning"
+description = "Complex or multi-step intent detected"
+actions = [
+    "Decompose user request into project plan",
+    "Create: plan_title, plan_overview, plan_task_list",
+    "Request framework to create project",
+    "Create PM agent with project-specific system prompt",
+    "Transition to Monitoring"
+]
+transitions_to = ["Monitoring"]
+
+[[agent_state_machines.admin_ai.states]]
+name = "Monitoring"
+description = "Active when 1+ projects running"
+actions = [
+    "Simultaneously available for user conversation",
+    "Monitor project progress",
+    "Handle project status updates",
+    "Intervene if projects need guidance"
+]
+transitions_to = ["Conversation", "Planning"]
+
+[agent_state_machines.pm_agent]
+name = "Project Manager Agent"
+description = "Manages a single project, coordinates workers"
+initial_state = "Startup"
+
+[[agent_state_machines.pm_agent.states]]
+name = "Startup"
+description = "Receive project context from framework"
+actions = [
+    "Parse: project name, overview, initial tasks",
+    "Analyze requirements and constraints",
+    "Transition to Planning"
+]
+transitions_to = ["Planning"]
+
+[[agent_state_machines.pm_agent.states]]
+name = "Planning"
+description = "Break down project into detailed execution plan"
+actions = [
+    "Break down initial tasks into detailed subtasks",
+    "Create milestones with deadlines",
+    "Design worker agent team (specialized roles)",
+    "Define success criteria",
+    "Request framework to create worker agents",
+    "Transition to Manage"
+]
+transitions_to = ["Manage"]
+
+[[agent_state_machines.pm_agent.states]]
+name = "Manage"
+description = "Active project management"
+actions = [
+    "Assign unassigned tasks to workers",
+    "Monitor worker progress",
+    "Validate worker outputs",
+    "Mark tasks complete after verification",
+    "Handle blockers and dependencies",
+    "Report progress to Admin AI"
+]
+transitions_to = ["Complete", "Failed"]
+
+[[agent_state_machines.pm_agent.states]]
+name = "Complete"
+description = "Project successfully finished"
+actions = [
+    "Final validation of deliverables",
+    "Generate completion report",
+    "Archive project artifacts",
+    "Notify Admin AI",
+    "Terminate PM and worker agents"
+]
+terminal = true
+
+[[agent_state_machines.pm_agent.states]]
+name = "Failed"
+description = "Unrecoverable error state"
+actions = [
+    "Generate failure report",
+    "Notify Admin AI with reasons",
+    "Terminate agents"
+]
+terminal = true
+
+[agent_state_machines.worker_agent]
+name = "Worker Agent"
+description = "Executes individual tasks using MCP tools"
+initial_state = "Idle"
+
+[[agent_state_machines.worker_agent.states]]
+name = "Idle"
+description = "Waiting for task assignment"
+actions = ["Wait for task assignment from PM", "No active work"]
+transitions_to = ["Working"]
+
+[[agent_state_machines.worker_agent.states]]
+name = "Working"
+description = "Executing assigned task"
+actions = [
+    "Execute assigned task",
+    "Use MCP tools as needed",
+    "Track progress internally",
+    "Handle errors and retries"
+]
+transitions_to = ["Reporting"]
+
+[[agent_state_machines.worker_agent.states]]
+name = "Reporting"
+description = "Report work to PM for validation"
+actions = [
+    "Report completed work to PM",
+    "Provide deliverables and artifacts",
+    "Wait for PM validation"
+]
+transitions_to = ["Idle", "Complete"]
+
+[[agent_state_machines.worker_agent.states]]
+name = "Complete"
+description = "All assigned tasks finished"
+actions = ["Agent terminates"]
+terminal = true
+
+# Project Lifecycle Flow
+[project_lifecycle]
+description = "End-to-end flow from user intent to project completion"
+
+[[project_lifecycle.steps]]
+step = 1
+action = "User expresses intent"
+example = "Build me a todo app"
+responsible = "User"
+
+[[project_lifecycle.steps]]
+step = 2
+action = "Admin AI detects complex intent"
+details = "Transition to Planning state"
+responsible = "Admin AI"
+
+[[project_lifecycle.steps]]
+step = 3
+action = "Admin AI creates project plan"
+details = "Title, overview, initial task list"
+example = "Title: 'Todo App Development', Overview: 'Create web-based todo with React', Tasks: ['Design UI', 'Implement backend', 'Test']"
+responsible = "Admin AI"
+
+[[project_lifecycle.steps]]
+step = 4
+action = "Framework creates Project entity"
+responsible = "Framework"
+
+[[project_lifecycle.steps]]
+step = 5
+action = "Admin AI creates PM agent"
+details = "Generate project-specific system prompt"
+responsible = "Admin AI"
+
+[[project_lifecycle.steps]]
+step = 6
+action = "Framework assigns PM to project"
+details = "PM transitions to Startup state"
+responsible = "Framework"
+
+[[project_lifecycle.steps]]
+step = 7
+action = "PM breaks down tasks and creates workers"
+details = "Transition to Manage state"
+responsible = "PM Agent"
+
+[[project_lifecycle.steps]]
+step = 8
+action = "Workers execute tasks and report to PM"
+responsible = "Worker Agents"
+
+[[project_lifecycle.steps]]
+step = 9
+action = "PM validates work and marks complete"
+responsible = "PM Agent"
+
+[[project_lifecycle.steps]]
+step = 10
+action = "Admin notifies user, project archived"
+responsible = "Admin AI"
+
+# Data Structures
+[data_structures]
+description = "Core Rust structs for project management system"
+
+[data_structures.project]
+name = "Project"
+description = "Represents a discrete user-requested project"
+fields = [
+    "id: ProjectId",
+    "title: String",
+    "overview: String",
+    "status: ProjectStatus",
+    "pm_agent_id: Option<AgentId>",
+    "worker_agent_ids: Vec<AgentId>",
+    "milestones: Vec<Milestone>",
+    "tasks: Vec<Task>",
+    "created_at: SystemTime",
+    "started_at: Option<SystemTime>",
+    "completed_at: Option<SystemTime>",
+    "message_history: Vec<Message>"
+]
+
+[data_structures.project_status]
+name = "ProjectStatus"
+type = "enum"
+variants = [
+    "Created - Project created, PM not yet assigned",
+    "Active - PM managing, workers executing",
+    "Paused - User paused",
+    "Completed - Successfully finished",
+    "Failed - Unrecoverable error",
+    "Cancelled - User cancelled"
+]
+
+[data_structures.milestone]
+name = "Milestone"
+description = "Project milestone with associated tasks"
+fields = [
+    "id: MilestoneId",
+    "title: String",
+    "description: String",
+    "deadline: Option<SystemTime>",
+    "task_ids: Vec<TaskId>",
+    "status: MilestoneStatus"
+]
+
+[data_structures.task]
+name = "Task"
+description = "Individual work item assigned to worker"
+fields = [
+    "id: TaskId",
+    "title: String",
+    "description: String",
+    "assigned_worker: Option<AgentId>",
+    "dependencies: Vec<TaskId>",
+    "status: TaskStatus",
+    "deliverables: Vec<String>",
+    "created_at: SystemTime",
+    "completed_at: Option<SystemTime>"
+]
+
+[data_structures.task_status]
+name = "TaskStatus"
+type = "enum"
+variants = [
+    "Unassigned",
+    "Assigned",
+    "InProgress",
+    "Blocked",
+    "UnderReview - PM validating",
+    "Complete",
+    "Failed"
+]
+
+# Architecture Benefits
+[architecture_benefits]
+scalability = "Multiple parallel projects supported"
+isolation = "Projects don't interfere with each other"
+clarity = "Clear hierarchy: Admin → PM → Workers"
+flexibility = "Dynamic agent creation per need"
+efficiency = "Agents terminated when not needed"
+monitoring = "Admin always available for user interaction"
+compliance = "Guardian monitors all agents"
+
+# References to archived documentation
+[archived_docs]
+location = "helperfiles/management/archived/"
+files = [
+    "PROJECT_PLAN.md",
+    "PROJECT_PLAN_PROGRESS_LOG.md",
+    "PROJECT_PLAN_COMPLETED.md",
+    "PROJECT_PLAN_PHASE_0_*.md",
+    "PROJECT_PLAN_PHASE_1_COMPLETE.md",
+    "PROJECT_BASED_AGENTIC_SYSTEM.md"
+]
+note = "Historical markdown files preserved for reference, not actively maintained. All critical information migrated to this TOML file."

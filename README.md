@@ -16,7 +16,7 @@ HAI-Net is built on **four immutable constitutional principles**:
 3. **🌐 Decentralization** - No central authority, local autonomy, fork-resistant
 4. **🤝 Community Focus** - Strengthen real-world connections and collaboration
 
-*Every line of code enforces these principles.* [Read the Full Constitution →](.helperfiles/CONSTITUTION.md)
+*Every line of code enforces these principles.* [Read the Full Constitution →](./CONSTITUTION.md)
 
 ## 🚀 Current Status
 
@@ -243,10 +243,10 @@ async fn main() -> anyhow::Result<()> {
 ## 📚 Documentation
 
 - **[Development Rules](helperfiles/DEVELOPMENT_RULES.md)** - Critical guidelines for all AI contributors
-- **[Project Plan](helperfiles/PROJECT_PLAN.md)** - Detailed up-to-date roadmap for progress tracking
+- **[Project Tracking](PROJECT_STATUS.toml)** - Detailed up-to-date roadmap for progress tracking
 - **[Initial Idea](helperfiles/INITIAL_IDEA.md)** - The initial idea and the framework architecture designed from it
-- **[Constitution](helperfiles/CONSTITUTION.md)** - Immutable principles and enforcement
-- **[Declaration](helperfiles/DECLARATION.md)** - Declaration of Universal Human and Artificial Entity Rights, Responsibilities and Protections
+- **[Constitution](CONSTITUTION.md)** - Immutable principles and enforcement
+- **[Declaration](DECLARATION.md)** - Declaration of Universal Human and Artificial Entity Rights, Responsibilities and Protections
 - **[Functions Index](helperfiles/FUNCTIONS_INDEX.md)** - So far developed functions catalog
 
 ---
@@ -258,7 +258,7 @@ async fn main() -> anyhow::Result<()> {
 ### Development Workflow
 
 1. **Read** `helperfiles/DEVELOPMENT_RULES.md` (REQUIRED for AIs)
-2. **Check** `helperfiles/PROJECT_PLAN.md` for current cycle
+2. **Check** `helperfiles/PROJECT_STATUS.toml` for current cycle
 3. **Follow** phased development approach (no skipping ahead)
 4. **Test** constitutional compliance in all new code
 5. **Document** all architectural decisions
@@ -285,15 +285,9 @@ Every code change must:
 ---
 
 ## 🗓️ Roadmap
-For more info read the [Project Plan](helperfiles/PROJECT_PLAN.md)
+For more info read the [Project Tracking](helperfiles/PROJECT_STATUS.toml)
 
-### Phase 0: Core Infrastructure 🚧 95% COMPLETE (2025-10-21)
-- [x] Cycle 0.1: Project scaffolding ✅
-- [x] Cycle 0.2: Advanced prompt management ✅
-- [x] Cycle 0.3: Hierarchical agent communication ✅
-- [x] Cycle 0.4: Constitutional guardian + AI provider discovery ✅
-- [x] Cycle 0.5 Phase A-E: Integration & testing ✅
-- [ ] Cycle 0.6: MCP tool ecosystem 🚧 90% (migration to rmcp SDK)
+### Phase 0: Core Infrastructure ✅ 100% COMPLETE (2025-10-24)
 
 ### Phase 1: AI Agent Intelligence (~400 runs, 3-4 weeks)
 - Admin AI core with intent parsing
@@ -313,7 +307,7 @@ For more info read the [Project Plan](helperfiles/PROJECT_PLAN.md)
 - Human-AI link verification
 - Constitutional validation on-chain
 
-### Phases 4-7: See [PROJECT_PLAN.md](helperfiles/PROJECT_PLAN.md)
+### Phases 4-7: See [PROJECT_STATUS.toml](helperfiles/PROJECT_STATUS.toml)
 
 ---
 
@@ -440,7 +434,7 @@ Special thanks to all contributors and the broader decentralized AI movement.
 ## 📞 Contact
 
 - **Website:** https://hai-net.org (coming soon)
-- **GitHub:** https://github.com/yourusername/hai
+- **GitHub:** https://github.com/gaborkukucska/hai
 - **Discord:** (coming soon)
 - **Forum:** (coming soon)
 
