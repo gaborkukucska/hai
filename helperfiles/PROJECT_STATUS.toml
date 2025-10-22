@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-22T12:14:00+08:00
 
 [meta]
-last_updated = "2025-10-22T18:38:00+08:00"
+last_updated = "2025-10-22T20:58:00+08:00"
 project_name = "HAI-Net Seed"
 version = "0.02"
 current_phase = "Phase 1: Project-Based AI Agent Intelligence"
-current_cycle = "Complete"
+current_cycle = "MCP Integration - Partial (Blocked)"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -453,12 +453,37 @@ estimated_tokens = 15000
 
 # Current blockers
 [[blockers]]
-issue = "MCP server compilation errors"
-severity = "medium"
-impact = "Worker agents cannot access tools until resolved"
-affected_components = ["hainet-persona/src/tools/mcp/"]
+issue = "MCP transport lifecycle - RunningService gets dropped prematurely"
+severity = "high"
+impact = "Worker agents cannot access MCP tools - TransportClosed error on all tool calls"
+affected_components = ["hainet-persona/src/tools/mcp/client.rs"]
+details = "The rmcp::service::RunningService struct is being stored correctly but the background service task still terminates. Needs deeper understanding of rmcp SDK lifecycle model. 8/10 integration tests fail with TransportClosed error."
+workaround_attempted = [
+    "Storing RunningService in HashMap - still drops",
+    "Using Box<dyn Any> - loses Drop behavior",
+    "Spawning task with run_until_stopped() - method doesn't exist",
+    "Type alias RunningService<RoleClient, MinimalClientHandler> - compiles but still drops"
+]
+next_steps = [
+    "Study rmcp SDK examples for proper RunningService lifecycle",
+    "Debug with tokio tracing to see when task terminates",
+    "Consider Arc<RunningService> or different storage pattern",
+    "Consult rmcp community/documentation"
+]
 
 # Recent completions (last 10)
+[[recent_completions]]
+date = "2025-10-22"
+event = "MCP Integration - Partial Progress (Blocked)"
+details = "hainet-files server complete (compiles, all 4 tools implemented with BLAKE3 CAS). MCP client 95% complete (489 LOC). Integration tests written (500 LOC, 10 tests, 2 passing, 8 failing due to transport lifecycle). BLOCKER: RunningService drops prematurely causing TransportClosed errors."
+tokens_used = 160000
+files_added = [
+    "hainet-persona/src/tools/mcp/client.rs (489 LOC)",
+    "hainet-persona/tests/mcp_files_integration_test.rs (500 LOC)"
+]
+compilation_status = "Success (with warnings)"
+test_status = "2/10 passing (startup/shutdown work, tool calls fail)"
+
 [[recent_completions]]
 date = "2025-10-22"
 event = "Phase 1.2 Complete - Enhanced Agent State Machines"
@@ -594,13 +619,18 @@ files = ["admin.rs", "intent.rs", "mod.rs", "planner.rs", "state.rs", "pm.rs", "
 missing = ["Full Admin AI implementation"]
 
 [components.mcp_integration]
-status = "complete"
+status = "blocked"
 location = "hainet-persona/src/tools/mcp/ + mcp-servers/hainet-files/"
-loc = 517  # client.rs(413) + config.rs(92) + mod.rs(12)
-features = ["MCP client stub", "Server config", "hainet-files server (rmcp SDK)"]
-tests_passing = 0
-files = ["client.rs", "config.rs", "mod.rs", "mcp-servers/hainet-files/src/main.rs"]
-notes = "MCP server compiles and runs successfully with rmcp SDK v0.8.2"
+loc = 989  # client.rs(489) + config.rs(92) + mod.rs(12) + tests(500) - client now complete implementation
+features = ["MCP client (95% complete)", "Server config", "hainet-files server (fully functional)", "Integration tests (10 tests written)"]
+tests_passing = 2  # Only startup/shutdown tests pass
+tests_failing = 8  # All tool call tests fail with TransportClosed
+files = ["client.rs", "config.rs", "mod.rs", "mcp-servers/hainet-files/src/main.rs", "tests/mcp_files_integration_test.rs"]
+notes = """MCP server fully functional - compiles cleanly, all 4 tools implemented with BLAKE3 CAS integration.
+MCP client implementation complete but has runtime blocker - RunningService lifecycle issue causes transport to close prematurely.
+All 8 tool call tests fail with TransportClosed error. Server and client can connect successfully, but connection drops immediately after.
+Needs deeper understanding of rmcp SDK RunningService lifecycle management."""
+blocker_details = "Transport closes after initial connection despite storing RunningService. Attempted multiple storage patterns without success."
 
 [components.installer]
 status = "complete"
@@ -628,10 +658,12 @@ files = ["cas.rs", "mod.rs", "sync.rs"]
 
 # Technical debt
 [[technical_debt]]
-issue = "MCP compilation errors need resolution"
-severity = "high"
-affected = ["Worker agents", "Tool access"]
-estimated_effort = "10K tokens"
+issue = "MCP transport lifecycle - RunningService drops prematurely"
+severity = "critical"
+affected = ["Worker agents", "Tool access", "End-to-end workflow"]
+estimated_effort = "20-30K tokens (needs SDK expertise)"
+blockers = ["Cannot complete Worker agent tool integration until resolved"]
+impact = "Blocks entire Admin → PM → Worker → MCP tools pipeline"
 
 [[technical_debt]]
 issue = "Missing comprehensive tests for Phase 1.1"

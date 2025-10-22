@@ -20,9 +20,35 @@ use rmcp::{ClientHandler, RoleClient, ServiceExt};
 
 use super::config::{MCPServersConfig, ServerConfig};
 
+// Type alias to simplify the RunningService type
+type RunningClient = rmcp::service::RunningService<RoleClient, MinimalClientHandler>;
+
+/// Minimal client handler for MCP connections
+#[derive(Clone)]
+struct MinimalClientHandler;
+
+impl ClientHandler for MinimalClientHandler {
+    fn create_message(
+        &self,
+        _params: CreateMessageRequestParam,
+        _context: rmcp::service::RequestContext<RoleClient>,
+    ) -> impl std::future::Future<Output = Result<CreateMessageResult, rmcp::model::ErrorData>> + Send + '_ {
+        async move {
+            // Default implementation - could be extended for sampling support
+            Err(rmcp::model::ErrorData {
+                code: rmcp::model::ErrorCode::METHOD_NOT_FOUND,
+                message: "Sampling not implemented".into(),
+                data: None,
+            })
+        }
+    }
+}
+
 /// Server connection state
 struct ServerConnection {
     peer: rmcp::Peer<RoleClient>,
+    // Keep the RunningService alive - it manages the service task lifecycle
+    _running: RunningClient,
 }
 
 /// MCP Client Manager
@@ -66,26 +92,6 @@ impl MCPClientManager {
         let transport = TokioChildProcess::new(tokio_cmd)
             .with_context(|| format!("Failed to create transport for '{}'", name))?;
 
-        // Create a minimal client handler (no special behavior needed)
-        struct MinimalClientHandler;
-        
-        impl ClientHandler for MinimalClientHandler {
-            fn create_message(
-                &self,
-                _params: CreateMessageRequestParam,
-                _context: rmcp::service::RequestContext<RoleClient>,
-            ) -> impl std::future::Future<Output = Result<CreateMessageResult, rmcp::model::ErrorData>> + Send + '_ {
-                async move {
-                    // Default implementation - could be extended for sampling support
-                    Err(rmcp::model::ErrorData {
-                        code: rmcp::model::ErrorCode::METHOD_NOT_FOUND,
-                        message: "Sampling not implemented".into(),
-                        data: None,
-                    })
-                }
-            }
-        }
-
         // Start the client service
         let handler = MinimalClientHandler;
         let running = handler.serve(transport)
@@ -96,11 +102,14 @@ impl MCPClientManager {
         
         info!("Successfully connected to MCP server: {}", name);
 
-        // Store connection
+        // Store connection (keep RunningService alive to maintain the service task)
         let mut clients = self.clients.write().await;
         clients.insert(
             name.to_string(),
-            ServerConnection { peer },
+            ServerConnection { 
+                peer,
+                _running: running,
+            },
         );
 
         Ok(())
