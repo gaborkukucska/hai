@@ -474,15 +474,15 @@ next_steps = [
 # Recent completions (last 10)
 [[recent_completions]]
 date = "2025-10-22"
-event = "MCP Integration - Partial Progress (Blocked)"
-details = "hainet-files server complete (compiles, all 4 tools implemented with BLAKE3 CAS). MCP client 95% complete (489 LOC). Integration tests written (500 LOC, 10 tests, 2 passing, 8 failing due to transport lifecycle). BLOCKER: RunningService drops prematurely causing TransportClosed errors."
-tokens_used = 160000
-files_added = [
-    "hainet-persona/src/tools/mcp/client.rs (489 LOC)",
-    "hainet-persona/tests/mcp_files_integration_test.rs (500 LOC)"
+event = "MCP Integration - COMPLETE! ✅"
+details = "Fixed MCP server lifecycle issue. Server's main() was terminating immediately after initialization. Solution: await on `running_service.waiting()` to keep service alive. All 10 integration tests now passing: server startup/shutdown, tool listing, file operations (read/write/list/metadata), error handling, and content-addressed storage deduplication."
+tokens_used = 20000
+files_modified = [
+    "mcp-servers/hainet-files/src/main.rs - Added running_service.waiting().await?"
 ]
-compilation_status = "Success (with warnings)"
-test_status = "2/10 passing (startup/shutdown work, tool calls fail)"
+compilation_status = "Success"
+test_status = "10/10 passing (100% success rate)"
+blocker_resolved = "RunningService lifecycle - server was dropping immediately, fixed by keeping service alive with waiting()"
 
 [[recent_completions]]
 date = "2025-10-22"
@@ -619,18 +619,18 @@ files = ["admin.rs", "intent.rs", "mod.rs", "planner.rs", "state.rs", "pm.rs", "
 missing = ["Full Admin AI implementation"]
 
 [components.mcp_integration]
-status = "blocked"
+status = "complete"
 location = "hainet-persona/src/tools/mcp/ + mcp-servers/hainet-files/"
 loc = 989  # client.rs(489) + config.rs(92) + mod.rs(12) + tests(500) - client now complete implementation
-features = ["MCP client (95% complete)", "Server config", "hainet-files server (fully functional)", "Integration tests (10 tests written)"]
-tests_passing = 2  # Only startup/shutdown tests pass
-tests_failing = 8  # All tool call tests fail with TransportClosed
+features = ["MCP client (100% complete)", "Server config", "hainet-files server (fully functional)", "Integration tests (10 tests, all passing)"]
+tests_passing = 10  # All tests passing!
+tests_failing = 0
 files = ["client.rs", "config.rs", "mod.rs", "mcp-servers/hainet-files/src/main.rs", "tests/mcp_files_integration_test.rs"]
-notes = """MCP server fully functional - compiles cleanly, all 4 tools implemented with BLAKE3 CAS integration.
-MCP client implementation complete but has runtime blocker - RunningService lifecycle issue causes transport to close prematurely.
-All 8 tool call tests fail with TransportClosed error. Server and client can connect successfully, but connection drops immediately after.
-Needs deeper understanding of rmcp SDK RunningService lifecycle management."""
-blocker_details = "Transport closes after initial connection despite storing RunningService. Attempted multiple storage patterns without success."
+notes = """MCP integration complete! Server lifecycle issue resolved.
+The fix: Server's main() needed to call `running_service.waiting().await?` to keep the service alive.
+All 10 integration tests passing: startup, tool listing, file operations (read/write/list/metadata), error handling, and content-addressed storage deduplication.
+hainet-files server provides 4 tools with BLAKE3 CAS integration."""
+blocker_resolved = "Server was terminating immediately after initialization. Fixed by awaiting on RunningService.waiting() to keep service running."
 
 [components.installer]
 status = "complete"

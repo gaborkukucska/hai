@@ -363,7 +363,10 @@ async fn main() -> Result<()> {
 
     // Run the server with stdio transport
     use rmcp::service::ServiceExt;
-    server.serve(rmcp::transport::io::stdio()).await?;
+    let running_service = server.serve(rmcp::transport::io::stdio()).await?;
+    
+    // Keep the service running until it's terminated
+    running_service.waiting().await?;
 
     info!("🛑 HAI-Net Files MCP Server shutting down");
     Ok(())
