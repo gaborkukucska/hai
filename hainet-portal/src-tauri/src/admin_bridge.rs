@@ -1,0 +1,199 @@
+//! # START OF FILE hainet-portal/src-tauri/src/admin_bridge.rs
+//! # Admin AI Bridge
+//! 
+//! Bridge between Tauri frontend and hainet-persona Admin AI agent.
+//! Manages Admin AI lifecycle and provides IPC interface for chat.
+
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use hainet_persona::agents::{AdminAgent, AgentContext};
+use hainet_persona::messaging::MessageBus;
+use hainet_persona::prompts::PromptManager;
+use hainet_persona::tools::mcp::MCPClientManager;
+use hainet_persona::guardian::GuardianSystem;
+use hainet_persona::projects::ProjectManager;
+
+/// Message from user to Admin AI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    /// Message ID
+    pub id: String,
+    /// Message content
+    pub content: String,
+    /// Sender ("user" or "assistant")
+    pub role: String,
+    /// Timestamp
+    pub timestamp: i64,
+    /// Optional file attachments
+    #[serde(default)]
+    pub attachments: Vec<FileAttachment>,
+}
+
+/// File attachment metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileAttachment {
+    /// File name
+    pub name: String,
+    /// File path
+    pub path: String,
+    /// File size in bytes
+    pub size: u64,
+    /// MIME type
+    pub mime_type: String,
+}
+
+/// Response from Admin AI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatResponse {
+    /// Response message
+    pub message: ChatMessage,
+    /// Current agent state
+    pub agent_state: String,
+    /// Active project count
+    pub active_projects: usize,
+}
+
+/// Admin AI Bridge managing agent lifecycle
+pub struct AdminBridge {
+    /// Admin AI agent
+    admin: Arc<RwLock<AdminAgent>>,
+    /// Message history
+    message_history: Arc<RwLock<Vec<ChatMessage>>>,
+}
+
+impl AdminBridge {
+    /// Create new Admin AI bridge
+    pub async fn new() -> Result<Self> {
+        log::info!("Initializing Admin AI Bridge...");
+        
+        // Get project root (2 levels up from src-tauri)
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| ".".to_string());
+        let project_root = std::path::PathBuf::from(&manifest_dir)
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine project root"))?
+            .to_path_buf();
+        
+        let prompts_path = project_root.join("hainet-persona").join("prompts");
+        log::info!("Prompts path: {:?}", prompts_path);
+        
+        // Create shared context
+        let message_bus = Arc::new(RwLock::new(MessageBus::new().await?));
+        let prompt_manager = Arc::new(RwLock::new(PromptManager::new(prompts_path)?));
+        let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
+        let guardian = Arc::new(RwLock::new(GuardianSystem::new(None, None)));
+        
+        let context = Arc::new(AgentContext::new(
+            message_bus,
+            prompt_manager,
+            mcp_client,
+            guardian,
+        ));
+        
+        // Create project manager with SQLite database
+        let db_path = project_root.join("data").join("projects.db");
+        std::fs::create_dir_all(db_path.parent().unwrap())?;
+        let project_manager = Arc::new(RwLock::new(
+            ProjectManager::new(db_path.to_str().unwrap()).await?
+        ));
+        
+        // Create Admin AI agent
+        let mut admin = AdminAgent::new(context, project_manager).await?;
+        
+        // Start Admin AI
+        admin.start().await?;
+        
+        log::info!("Admin AI Bridge initialized successfully");
+        
+        Ok(Self {
+            admin: Arc::new(RwLock::new(admin)),
+            message_history: Arc::new(RwLock::new(Vec::new())),
+        })
+    }
+    
+    /// Send message to Admin AI and get response
+    pub async fn send_message(&self, content: String, attachments: Vec<FileAttachment>) -> Result<ChatResponse> {
+        log::info!("Processing user message: {}", content);
+        
+        // Create user message
+        let user_message = ChatMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            content: content.clone(),
+            role: "user".to_string(),
+            timestamp: chrono::Utc::now().timestamp(),
+            attachments: attachments.clone(),
+        };
+        
+        // Store in history
+        {
+            let mut history = self.message_history.write().await;
+            history.push(user_message.clone());
+        }
+        
+        // Process with Admin AI
+        let mut admin = self.admin.write().await;
+        
+        // Build input with attachment info if present
+        let input = if attachments.is_empty() {
+            content
+        } else {
+            let attachment_info = attachments.iter()
+                .map(|a| format!("- {} ({} bytes)", a.name, a.size))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("{}\n\nAttached files:\n{}", content, attachment_info)
+        };
+        
+        let response_text = admin.process_user_input(input).await?;
+        
+        // Get agent state
+        let state = format!("{:?}", admin.state());
+        let project_count = admin.active_project_count();
+        
+        drop(admin);
+        
+        // Create assistant message
+        let assistant_message = ChatMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            content: response_text,
+            role: "assistant".to_string(),
+            timestamp: chrono::Utc::now().timestamp(),
+            attachments: vec![],
+        };
+        
+        // Store in history
+        {
+            let mut history = self.message_history.write().await;
+            history.push(assistant_message.clone());
+        }
+        
+        Ok(ChatResponse {
+            message: assistant_message,
+            agent_state: state,
+            active_projects: project_count,
+        })
+    }
+    
+    /// Get message history
+    pub async fn get_history(&self) -> Result<Vec<ChatMessage>> {
+        let history = self.message_history.read().await;
+        Ok(history.clone())
+    }
+    
+    /// Clear message history
+    pub async fn clear_history(&self) -> Result<()> {
+        let mut history = self.message_history.write().await;
+        history.clear();
+        Ok(())
+    }
+    
+    /// Get current agent state
+    pub async fn get_state(&self) -> Result<String> {
+        let admin = self.admin.read().await;
+        Ok(format!("{:?}", admin.state()))
+    }
+}

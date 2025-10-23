@@ -10,6 +10,9 @@ members = [
     "hainet-bridge",
     "mcp-servers/hainet-files",
 ]
+exclude = [
+    "hainet-portal/src-tauri",
+]
 
 [workspace.package]
 version = "0.1.0"

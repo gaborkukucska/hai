@@ -9,7 +9,7 @@
 // pub mod components;
 
 use anyhow::Result;
-use tracing::{info, error};
+use tracing::info;
 
 /// Initialize the portal system
 pub async fn init() -> Result<()> {

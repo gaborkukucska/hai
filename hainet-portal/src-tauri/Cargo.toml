@@ -10,6 +10,9 @@ rust-version = "1.77.2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[workspace]
+# Empty workspace table to keep this package out of the parent workspace
+
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -23,3 +26,14 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.9.1" }
 tauri-plugin-log = "2"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+chrono = "0.4"
+
+[patch.crates-io]
+webkit2gtk-sys = { git = "https://github.com/gtk-rs/gtk3-rs", branch = "main" }
+javascriptcore-rs-sys = { git = "https://github.com/gtk-rs/gtk3-rs", branch = "main" }
+
+# HAI-Net dependencies
+hainet-persona = { path = "../../hainet-persona" }

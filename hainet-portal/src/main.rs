@@ -2,7 +2,7 @@
 //! 
 //! Chat interface for natural language interaction with your AI persona.
 
-use tracing::{info, error};
+use tracing::info;
 use anyhow::Result;
 
 #[tokio::main]
