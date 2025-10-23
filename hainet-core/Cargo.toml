@@ -35,6 +35,16 @@ hex = "0.4"
 ed25519-dalek = { workspace = true }
 sha3 = { workspace = true }
 
+# Multimodal (STT/TTS)
+base64 = "0.22"
+hound = "3.5"  # WAV processing
+dirs = "5.0"   # Home directory detection
+# TODO: Add when implementing full Whisper support:
+# candle-core = "0.3"
+# candle-nn = "0.3"
+# candle-transformers = "0.3"
+# symphonia = "0.5"  # Multi-format audio decoding
+
 [dev-dependencies]
 tempfile = "3.0"
 tokio-test = "0.4"

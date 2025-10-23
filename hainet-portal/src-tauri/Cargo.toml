@@ -30,10 +30,9 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = "0.4"
-
-[patch.crates-io]
-webkit2gtk-sys = { git = "https://github.com/gtk-rs/gtk3-rs", branch = "main" }
-javascriptcore-rs-sys = { git = "https://github.com/gtk-rs/gtk3-rs", branch = "main" }
+base64 = "0.21"
+reqwest = { version = "0.11", features = ["json", "multipart"] }
+tracing = "0.1"
 
 # HAI-Net dependencies
 hainet-persona = { path = "../../hainet-persona" }

@@ -1,12 +1,14 @@
 //! # START OF FILE hainet-portal/src-tauri/src/lib.rs
 
 mod admin_bridge;
+mod stt_handler;
 
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::RwLock;
 
 use admin_bridge::{AdminBridge, ChatMessage, ChatResponse, FileAttachment};
+use stt_handler::{AudioData, TranscriptionResult};
 
 /// Global Admin AI Bridge state
 struct AppState {
@@ -53,8 +55,29 @@ async fn get_agent_state(state: State<'_, AppState>) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Transcribe audio to text via Admin AI
+#[tauri::command]
+async fn transcribe_audio(
+    audio: AudioData,
+    state: State<'_, AppState>,
+) -> Result<TranscriptionResult, String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.transcribe_audio(audio)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // Initialize Admin AI Bridge before building Tauri app
+  let runtime = tokio::runtime::Runtime::new()
+      .expect("Failed to create Tokio runtime");
+  
+  let admin_bridge = runtime.block_on(async {
+      AdminBridge::new().await
+          .expect("Failed to initialize Admin AI Bridge")
+  });
+  
   tauri::Builder::default()
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -65,29 +88,19 @@ pub fn run() {
         )?;
       }
       
-      // Initialize Admin AI Bridge
-      let runtime = tokio::runtime::Runtime::new()
-          .expect("Failed to create Tokio runtime");
-      
-      let admin_bridge = runtime.block_on(async {
-          AdminBridge::new().await
-              .expect("Failed to initialize Admin AI Bridge")
-      });
-      
-      // Store in app state
-      app.manage(AppState {
-          admin_bridge: Arc::new(RwLock::new(admin_bridge)),
-      });
-      
       log::info!("HAI-Net Portal initialized successfully");
       
       Ok(())
+    })
+    .manage(AppState {
+        admin_bridge: Arc::new(RwLock::new(admin_bridge)),
     })
     .invoke_handler(tauri::generate_handler![
         send_message,
         get_history,
         clear_history,
         get_agent_state,
+        transcribe_audio,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

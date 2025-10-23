@@ -9,12 +9,14 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use hainet_persona::agents::{AdminAgent, AgentContext};
+use hainet_persona::agents::{AdminAgent, Agent, AgentContext};
 use hainet_persona::messaging::MessageBus;
 use hainet_persona::prompts::PromptManager;
 use hainet_persona::tools::mcp::MCPClientManager;
 use hainet_persona::guardian::GuardianSystem;
 use hainet_persona::projects::ProjectManager;
+
+use crate::stt_handler::{STTHandler, AudioData, TranscriptionResult};
 
 /// Message from user to Admin AI
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +64,8 @@ pub struct AdminBridge {
     admin: Arc<RwLock<AdminAgent>>,
     /// Message history
     message_history: Arc<RwLock<Vec<ChatMessage>>>,
+    /// STT handler
+    stt_handler: Arc<STTHandler>,
 }
 
 impl AdminBridge {
@@ -107,11 +111,15 @@ impl AdminBridge {
         // Start Admin AI
         admin.start().await?;
         
+        // Create STT handler
+        let stt_handler = Arc::new(STTHandler::new());
+        
         log::info!("Admin AI Bridge initialized successfully");
         
         Ok(Self {
             admin: Arc::new(RwLock::new(admin)),
             message_history: Arc::new(RwLock::new(Vec::new())),
+            stt_handler,
         })
     }
     
@@ -195,5 +203,23 @@ impl AdminBridge {
     pub async fn get_state(&self) -> Result<String> {
         let admin = self.admin.read().await;
         Ok(format!("{:?}", admin.state()))
+    }
+    
+    /// Transcribe audio via Admin AI
+    /// 
+    /// Flow: Portal audio → STT Handler → Admin AI (TODO: provider discovery) → Portal
+    pub async fn transcribe_audio(&self, audio: AudioData) -> Result<TranscriptionResult> {
+        log::info!("Transcribing audio: {} channels, {} Hz, {} format", 
+                   audio.channels, audio.sample_rate, audio.format);
+        
+        // TODO: This currently returns a placeholder error
+        // Full implementation requires:
+        // 1. Admin AI to detect STT intent
+        // 2. Admin AI to spawn/reuse STT Worker
+        // 3. Worker to discover STT provider (via ai_providers)
+        // 4. Worker to call MCP hainet-stt tool
+        // 5. Result flows back to Portal
+        
+        self.stt_handler.transcribe(audio).await
     }
 }
