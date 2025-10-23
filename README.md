@@ -28,55 +28,6 @@ HAI-Net is built on **four immutable constitutional principles**:
 **Lines of Code**: ~15,000+ (Phase 0: ~10,570, Phase 1: ~3,241, Phase 2: ~445)  
 **Test Coverage**: 154 tests passing + 1 Portal integration test
 
-### Recent Achievements (2025-10-23)
-
-✅ **Phase 2.1 COMPLETE** - Core Portal Foundation (Tauri + React)  
-✅ **Portal Backend**: AdminBridge with 4 IPC commands (send_message, get_history, clear_history, get_agent_state)  
-✅ **Portal Frontend**: ChatInterface with file attachments, message history, auto-scroll  
-✅ **Ubuntu 24.04 Compatibility**: Resolved webkit2gtk-4.0 → 4.1 compatibility issues  
-✅ **Phase 1 COMPLETE**: Project-based agentic system with Admin AI, PM, and Worker agents  
-✅ **MCP Integration**: hainet-files server fully operational (10/10 tests passing)
-
-### Previous Achievements
-
-✅ **Phase 0 COMPLETE** (2025-10-21) - All infrastructure cycles 0.1-0.6  
-✅ **Cycle 1.3 COMPLETE** (2025-10-22) - Admin AI Planning & PM Creation  
-✅ **Cycle 1.2 COMPLETE** (2025-10-22) - Enhanced Agent State Machines  
-✅ **Cycle 1.1 COMPLETE** (2025-10-22) - Project Management Infrastructure
-
-**Migration Decision:**
-- Replacing custom MCP implementation with official Rust SDK
-- Repository: https://github.com/modelcontextprotocol/rust-sdk
-- Rationale: Use maintained, standardized implementation from MCP project
-
-**Migration Progress (90% Complete):**
-- ✅ Dependencies added (`rmcp = "0.8.2"`)
-- ✅ Server structure implemented using `ServerHandler` trait
-- ✅ 4 file operation handlers (read, write, list, metadata)
-- ✅ CAS storage integration (BLAKE3)
-- ✅ JSON schemas for tool parameters
-- ⚠️ RmcpError construction needs fixing (no helper methods in v0.8.2)
-- ⚠️ serve_stdio initialization pattern unclear
-- ⚠️ Type mismatches (Arc<Map> vs Map, lifetimes)
-
-**Current Capabilities:**
-- ✅ Advanced prompt management system with constitutional compliance
-- ✅ Zero-configuration AI model discovery and selection
-- ✅ Constitutional Guardian (PII/Bias/Harm detection)
-- ✅ Hierarchical agent communication infrastructure
-- ✅ Blockchain identity system (DID + Ed25519)
-- ✅ Content-addressed storage with P2P sync
-- ✅ Automatic Ollama installation
-- 🚧 MCP tool ecosystem (foundation ready, API alignment needed)
-
-**Next Steps:**
-1. Study rmcp SDK examples for correct patterns
-2. Fix error construction and server initialization
-3. Complete MCP client implementation
-4. Resume Phase 1: Admin AI Core Implementation
-
----
-
 ## 🏗️ Architecture Overview
 
 HAI-Net consists of six interconnected Rust crates:
@@ -97,9 +48,9 @@ hainet/
 ```
 User ↔ Admin AI
         ↓
-    PM Agents (Communications, Knowledge, System)
+    PM Agents (Projects, Communications, Knowledge, System)
         ↓
-    Worker Agents (Email, Search, Files, etc.)
+    Worker Agents (Code, Email, Search, Create, etc.)
 ```
 
 **Constitutional Guardians** monitor all agent interactions independently with pause/block authority.
@@ -123,22 +74,6 @@ User ↔ Admin AI
 - LRU+TTL caching (1-hour default, 1000 entry max)
 - Hot-reload with timestamp tracking
 - Comprehensive validation reporting
-
-**Directory Structure:**
-```
-hainet-persona/
-├── prompts/
-│   ├── system/              # Core instructions, safety guidelines
-│   ├── agents/              # Agent-type specific (admin, PM, workers)
-│   └── states/              # State-specific (idle, planning, working)
-├── src/
-│   └── prompts/
-│       ├── types.rs         # Type system (270 lines)
-│       ├── loader.rs        # TOML parsing & hot-reload (310 lines)
-│       ├── renderer.rs      # Handlebars + validation (340 lines)
-│       ├── cache.rs         # LRU+TTL caching (240 lines)
-│       └── mod.rs           # Unified API (90 lines)
-```
 
 ---
 
@@ -302,36 +237,7 @@ cd hainet-portal && npm run dev
 
 ## 🚀 Quick Start
 
-**Note:** HAI-Net is currently in **Phase 0** (foundation building). Full functionality will be available in Phase 1+.
-
-### Current Demo (Cycle 0.2)
-
-```rust
-use hainet_persona::{PromptManager, AgentId, AgentType, AgentState, PromptContext};
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Initialize prompt manager
-    let mut manager = PromptManager::new("hainet-persona/prompts".into())?;
-    
-    // Create agent context
-    let agent_id = AgentId::new(AgentType::Admin, "main-admin".to_string());
-    let mut context = PromptContext::default();
-    context.user_name = "Alice".to_string();
-    context.current_request = Some("Help me organize my emails".to_string());
-    
-    // Get rendered prompt for admin in planning state
-    let prompt = manager.get_prompt(
-        &agent_id,
-        AgentState::Planning,
-        &context
-    ).await?;
-    
-    println!("Rendered prompt:\n{}", prompt);
-    
-    Ok(())
-}
-```
+**Note:** HAI-Net is currently in **Phase 2** of it's development. Full functionality will be available in Phase 5+.
 
 ---
 
@@ -381,28 +287,6 @@ Every code change must:
 
 ## 🗓️ Roadmap
 For more info read the [Project Tracking](helperfiles/PROJECT_STATUS.toml)
-
-### Phase 0: Core Infrastructure ✅ 100% COMPLETE (2025-10-24)
-
-### Phase 1: AI Agent Intelligence (~400 runs, 3-4 weeks)
-- Admin AI core with intent parsing
-- PM agents (Communications, Knowledge, System)
-- Worker agents with MCP integration
-- State machine & memory systems
-
-### Phase 2: Local Hub Networking (~350 runs, 3-4 weeks)
-- Device discovery (mDNS)
-- P2P mesh protocol (libp2p)
-- Content-addressed storage
-- CRDT-based synchronization
-
-### Phase 3: Blockchain & Governance (~420 runs, 4-5 weeks)
-- Identity system (DID + keypairs)
-- Blockchain core (Tendermint)
-- Human-AI link verification
-- Constitutional validation on-chain
-
-### Phases 4-7: See [PROJECT_STATUS.toml](helperfiles/PROJECT_STATUS.toml)
 
 ---
 
@@ -549,14 +433,12 @@ Special thanks to all contributors and the broader decentralized AI movement.
 - **Discord:** (coming soon)
 - **Forum:** (coming soon)
 
-**For Development Questions:** See [DEVELOPMENT_RULES.md](helperfiles/DEVELOPMENT_RULES.md)
-
 ---
 
-**Last Updated:** 2025-10-23  
+**Last Updated:** 2025-10-25  
 **Version:** 0.2.0-alpha (Phase 2, Cycle 2.1 Complete)  
 **Status:** 🚧 Active Development - Not Production Ready
 
-*Building a future where AI serves humanity, not corporations.*
+*Building a future where AI works with humanity, not corporations.*
 
 <!-- # END OF FILE README.md -->
