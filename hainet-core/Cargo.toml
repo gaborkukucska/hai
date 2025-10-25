@@ -39,6 +39,7 @@ sha3 = { workspace = true }
 base64 = "0.22"
 hound = "3.5"  # WAV processing
 dirs = "5.0"   # Home directory detection
+which = "6.0"  # Executable detection for Piper TTS
 
 # Whisper integration via whisper-rs (bindings to whisper.cpp)
 # Note: whisper-rs compilation requires cmake and a C++ compiler
@@ -50,8 +51,8 @@ dirs = "5.0"   # Home directory detection
 #
 # For Phase 2.2 completion, we'll keep the architecture in place
 # but use a placeholder that documents the integration path
-# TODO: Add when implementing WebM/MP3 decoding:
-# symphonia = "0.5"  # Multi-format audio decoding
+# Multi-format audio decoding (WebM/Opus, MP3, etc.)
+symphonia = "0.5"
 
 [dev-dependencies]
 tempfile = "3.0"

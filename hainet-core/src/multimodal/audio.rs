@@ -103,20 +103,9 @@ impl AudioProcessor {
                 // Already WAV, just verify/resample if needed
                 self.process_wav(audio_data)
             }
-            AudioFormat::WebMOpus => {
-                // TODO: Decode WebM/Opus using symphonia
-                // For now, return error indicating need for implementation
-                anyhow::bail!(
-                    "WebM/Opus decoding not yet implemented. \
-                    Please use WAV format for now (frontend fallback)."
-                )
-            }
-            AudioFormat::Mp3 => {
-                // TODO: Decode MP3 using symphonia
-                anyhow::bail!(
-                    "MP3 decoding not yet implemented. \
-                    Please use WAV format for now (frontend fallback)."
-                )
+            AudioFormat::WebMOpus | AudioFormat::Mp3 => {
+                // Decode WebM/Opus or MP3 using symphonia
+                self.decode_with_symphonia(audio_data, format)
             }
             AudioFormat::Unknown => {
                 anyhow::bail!("Unknown or unsupported audio format")
@@ -230,6 +219,104 @@ impl AudioProcessor {
         }
         
         resampled
+    }
+    
+    /// Decode WebM/Opus or MP3 using Symphonia, then convert to WAV
+    fn decode_with_symphonia(&self, audio_data: &[u8], _format: AudioFormat) -> Result<Vec<u8>> {
+        use symphonia::core::audio::SampleBuffer;
+        use symphonia::core::codecs::DecoderOptions;
+        use symphonia::core::formats::FormatOptions;
+        use symphonia::core::io::MediaSourceStream;
+        use symphonia::core::meta::MetadataOptions;
+        use symphonia::core::probe::Hint;
+        
+        // Create media source from byte array (need owned copy for 'static lifetime)
+        let audio_data_owned = audio_data.to_vec();
+        let mss = MediaSourceStream::new(Box::new(Cursor::new(audio_data_owned)), Default::default());
+        
+        // Probe format
+        let hint = Hint::new();
+        let probed = symphonia::default::get_probe()
+            .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+            .context("Failed to probe audio format")?;
+        
+        let mut format = probed.format;
+        
+        // Get default track
+        let track = format
+            .default_track()
+            .context("No default audio track found")?;
+        
+        // Create decoder
+        let mut decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &DecoderOptions::default())
+            .context("Failed to create decoder")?;
+        
+        // Get track parameters
+        let track_id = track.id;
+        let codec_params = decoder.codec_params();
+        let channels = codec_params.channels.map(|c| c.count()).unwrap_or(1) as u16;
+        let sample_rate = codec_params.sample_rate.unwrap_or(self.target_sample_rate);
+        
+        // Decode all packets into samples
+        let mut samples = Vec::new();
+        
+        loop {
+            // Get next packet
+            let packet = match format.next_packet() {
+                Ok(p) => p,
+                Err(_) => break, // End of stream
+            };
+            
+            // Skip packets not from the selected track
+            if packet.track_id() != track_id {
+                continue;
+            }
+            
+            // Decode packet
+            match decoder.decode(&packet) {
+                Ok(decoded) => {
+                    // Convert to i16 samples
+                    let mut sample_buf = SampleBuffer::<i16>::new(
+                        decoded.capacity() as u64,
+                        *decoded.spec(),
+                    );
+                    sample_buf.copy_interleaved_ref(decoded);
+                    samples.extend_from_slice(sample_buf.samples());
+                }
+                Err(_) => continue, // Skip errored packets
+            }
+        }
+        
+        if samples.is_empty() {
+            anyhow::bail!("No audio samples decoded from input");
+        }
+        
+        // Resample and convert channels
+        let processed_samples = self.resample_and_convert_channels(
+            &samples,
+            sample_rate,
+            channels,
+        )?;
+        
+        // Write to WAV buffer
+        let mut output = Cursor::new(Vec::new());
+        let mut writer = hound::WavWriter::new(
+            &mut output,
+            hound::WavSpec {
+                channels: self.target_channels,
+                sample_rate: self.target_sample_rate,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )?;
+        
+        for sample in processed_samples {
+            writer.write_sample(sample)?;
+        }
+        
+        writer.finalize()?;
+        Ok(output.into_inner())
     }
 }
 

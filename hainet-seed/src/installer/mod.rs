@@ -6,6 +6,7 @@
 pub mod platform;
 pub mod ollama;
 pub mod whisper;
+pub mod piper;
 pub mod dependencies;
 
 use anyhow::Result;
@@ -14,6 +15,7 @@ use tracing::info;
 use crate::installer::platform::{Platform, SystemTier};
 use crate::installer::ollama::OllamaInstaller;
 use crate::installer::whisper::WhisperInstaller;
+use crate::installer::piper::PiperInstaller;
 
 /// Main installer orchestrator
 pub struct Installer {
@@ -21,6 +23,7 @@ pub struct Installer {
     tier: SystemTier,
     ollama: OllamaInstaller,
     whisper: WhisperInstaller,
+    piper: PiperInstaller,
 }
 
 impl Installer {
@@ -36,12 +39,14 @@ impl Installer {
         
         let ollama = OllamaInstaller::new(platform.clone());
         let whisper = WhisperInstaller::new(platform.clone());
+        let piper = PiperInstaller::new(platform.clone());
         
         Ok(Self {
             platform,
             tier,
             ollama,
             whisper,
+            piper,
         })
     }
     
@@ -60,6 +65,12 @@ impl Installer {
         
         // Step 4: Download default Whisper model based on tier
         self.download_whisper_model().await?;
+        
+        // Step 5: Check and install Piper TTS
+        self.install_piper().await?;
+        
+        // Step 6: Download default Piper voice model based on tier
+        self.download_piper_model().await?;
         
         info!("✅ Installation complete!");
         Ok(())
@@ -164,6 +175,48 @@ impl Installer {
         
         self.whisper.download_model(model_name).await?;
         
+        Ok(())
+    }
+    
+    /// Install Piper TTS if not present
+    async fn install_piper(&mut self) -> Result<()> {
+        info!("📢 Checking Piper TTS installation...");
+        
+        if self.piper.is_installed() {
+            info!("✅ Piper TTS already installed");
+            
+            // Verify it's working
+            if !self.piper.is_running() {
+                info!("⚠️  Piper verification failed");
+                info!("Reinstalling Piper TTS...");
+                self.piper.install()?;
+            }
+        } else {
+            info!("📥 Piper TTS not found, installing...");
+            self.piper.install()?;
+            info!("✅ Piper TTS installed successfully");
+        }
+        
+        Ok(())
+    }
+    
+    /// Download Piper voice model based on system tier
+    async fn download_piper_model(&mut self) -> Result<()> {
+        let voice_model = self.piper.recommended_model();
+        
+        info!("📦 System Tier: {:?} - selecting Piper voice: {}", self.tier, voice_model);
+        
+        // Check if model already exists
+        let installed_models = self.piper.list_models()?;
+        if installed_models.contains(&voice_model.to_string()) {
+            info!("✅ Voice model {} already available", voice_model);
+            return Ok(());
+        }
+        
+        info!("📥 Downloading voice model: {}", voice_model);
+        self.piper.download_model(voice_model)?;
+        
+        info!("✅ Voice model {} downloaded successfully", voice_model);
         Ok(())
     }
 }

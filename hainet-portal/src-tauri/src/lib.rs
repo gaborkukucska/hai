@@ -2,6 +2,7 @@
 
 mod admin_bridge;
 pub mod stt_handler;
+pub mod tts_handler;
 
 use std::sync::Arc;
 use tauri::State;
@@ -9,10 +10,12 @@ use tokio::sync::RwLock;
 
 use admin_bridge::{AdminBridge, ChatMessage, ChatResponse, FileAttachment};
 use stt_handler::{AudioData, TranscriptionResult};
+use tts_handler::{TTSHandler, SynthesisRequest, SynthesisResponse};
 
 /// Global Admin AI Bridge state
 struct AppState {
     admin_bridge: Arc<RwLock<AdminBridge>>,
+    tts_handler: Arc<RwLock<TTSHandler>>,
 }
 
 /// Send message to Admin AI
@@ -67,6 +70,30 @@ async fn transcribe_audio(
         .map_err(|e| e.to_string())
 }
 
+/// Synthesize speech from text
+#[tauri::command]
+async fn synthesize_speech(
+    request: SynthesisRequest,
+    state: State<'_, AppState>,
+) -> Result<SynthesisResponse, String> {
+    let tts = state.tts_handler.read().await;
+    tts.synthesize(request).await
+}
+
+/// Check if TTS is ready
+#[tauri::command]
+async fn tts_is_ready(state: State<'_, AppState>) -> Result<bool, String> {
+    let tts = state.tts_handler.read().await;
+    Ok(tts.is_ready())
+}
+
+/// List available TTS voices
+#[tauri::command]
+async fn list_tts_voices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let tts = state.tts_handler.read().await;
+    tts.list_voices()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   // Initialize Admin AI Bridge before building Tauri app
@@ -77,6 +104,9 @@ pub fn run() {
       AdminBridge::new().await
           .expect("Failed to initialize Admin AI Bridge")
   });
+  
+  // Initialize TTS handler
+  let tts_handler = TTSHandler::new();
   
   tauri::Builder::default()
     .setup(|app| {
@@ -94,6 +124,7 @@ pub fn run() {
     })
     .manage(AppState {
         admin_bridge: Arc::new(RwLock::new(admin_bridge)),
+        tts_handler: Arc::new(RwLock::new(tts_handler)),
     })
     .invoke_handler(tauri::generate_handler![
         send_message,
@@ -101,6 +132,9 @@ pub fn run() {
         clear_history,
         get_agent_state,
         transcribe_audio,
+        synthesize_speech,
+        tts_is_ready,
+        list_tts_voices,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

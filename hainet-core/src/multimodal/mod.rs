@@ -22,9 +22,11 @@
 
 pub mod audio;
 pub mod stt;
+pub mod tts;
 
 pub use audio::{AudioFormat, AudioProcessor};
 pub use stt::{SpeechToText, TranscriptionResult, WhisperConfig};
+pub use tts::{TextToSpeech, SynthesisConfig, SynthesisResult, AudioOutputFormat};
 
 /// Configuration for multimodal services
 #[derive(Debug, Clone)]
