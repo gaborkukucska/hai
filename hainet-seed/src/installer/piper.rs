@@ -331,7 +331,7 @@ mod tests {
     
     #[test]
     fn test_recommended_model() {
-        let platform = Platform::detect();
+        let platform = Platform::detect().unwrap();
         let installer = PiperInstaller::new(platform);
         
         let model = installer.recommended_model();
