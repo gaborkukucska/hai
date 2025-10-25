@@ -446,6 +446,21 @@ This file tracks the core functions/methods defined within the framework, catego
 - `TranscriptionResult` - Structured transcription output (text, confidence, language, timing)
 - `TranscriptionSegment` - Timestamped transcription segment
 
+### hainet-core/src/multimodal/vision.rs
+- `VisionSystem::new(config)` - Create new vision system
+- `VisionSystem::list_devices()` - List available webcam devices
+- `VisionSystem::start_capture()` - Start webcam capture session
+- `VisionSystem::stop_capture()` - Stop webcam capture session
+- `VisionSystem::capture_frame()` - Capture a single frame
+- `VisionSystem::analyze_frame_mock()` - Analyze frame with mock model
+
+### hainet-portal/src-tauri/src/vision_handler.rs
+- `list_webcam_devices()` - Tauri command to list webcam devices
+- `start_webcam(config)` - Tauri command to start webcam
+- `stop_webcam()` - Tauri command to stop webcam
+- `capture_frame()` - Tauri command to capture a frame
+- `set_privacy_mode(mode)` - Tauri command to set privacy mode
+
 ---
 
 ## Statistics

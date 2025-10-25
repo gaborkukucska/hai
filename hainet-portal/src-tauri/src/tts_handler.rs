@@ -4,7 +4,7 @@
 //! Provides speech synthesis capabilities using hainet-core TTS engine.
 
 use serde::{Deserialize, Serialize};
-use hainet_core::multimodal::{TextToSpeech, SynthesisConfig, AudioOutputFormat};
+use hainet_core::multimodal::{TextToSpeech};
 
 /// TTS handler for Portal
 pub struct TTSHandler {

@@ -5,7 +5,7 @@
 //! Designed for offline-first operation with local voice models.
 
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use serde::{Deserialize, Serialize};
 
@@ -261,7 +261,7 @@ impl TextToSpeech {
     }
     
     /// Estimate audio duration from WAV file
-    fn estimate_duration_ms(wav_data: &[u8], sample_rate: u32) -> Result<u64> {
+    fn estimate_duration_ms(wav_data: &[u8], _sample_rate: u32) -> Result<u64> {
         use hound::WavReader;
         
         let reader = WavReader::new(std::io::Cursor::new(wav_data))
