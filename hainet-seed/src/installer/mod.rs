@@ -5,6 +5,7 @@
 
 pub mod platform;
 pub mod ollama;
+pub mod whisper;
 pub mod dependencies;
 
 use anyhow::Result;
@@ -12,12 +13,14 @@ use tracing::info;
 
 use crate::installer::platform::{Platform, SystemTier};
 use crate::installer::ollama::OllamaInstaller;
+use crate::installer::whisper::WhisperInstaller;
 
 /// Main installer orchestrator
 pub struct Installer {
     platform: Platform,
     tier: SystemTier,
     ollama: OllamaInstaller,
+    whisper: WhisperInstaller,
 }
 
 impl Installer {
@@ -32,11 +35,13 @@ impl Installer {
         info!("System Tier: {}", tier);
         
         let ollama = OllamaInstaller::new(platform.clone());
+        let whisper = WhisperInstaller::new(platform.clone());
         
         Ok(Self {
             platform,
             tier,
             ollama,
+            whisper,
         })
     }
     
@@ -47,8 +52,14 @@ impl Installer {
         // Step 1: Check and install Ollama
         self.install_ollama().await?;
         
-        // Step 2: Download default model based on tier
+        // Step 2: Download default Ollama model based on tier
         self.download_default_model().await?;
+        
+        // Step 3: Check and install whisper.cpp
+        self.install_whisper().await?;
+        
+        // Step 4: Download default Whisper model based on tier
+        self.download_whisper_model().await?;
         
         info!("✅ Installation complete!");
         Ok(())
@@ -118,6 +129,42 @@ impl Installer {
     /// Get system tier
     pub fn tier(&self) -> &SystemTier {
         &self.tier
+    }
+    
+    /// Install whisper.cpp if not present
+    async fn install_whisper(&mut self) -> Result<()> {
+        info!("🎤 Checking whisper.cpp installation...");
+        
+        if self.whisper.is_installed().await? {
+            info!("✅ whisper.cpp already installed");
+            
+            // Verify it works
+            if let Err(e) = self.whisper.verify_installation().await {
+                info!("⚠️  whisper.cpp verification failed: {}", e);
+                info!("Reinstalling whisper.cpp...");
+                self.whisper.install().await?;
+            }
+        } else {
+            info!("📥 whisper.cpp not found, installing...");
+            self.whisper.install().await?;
+            info!("✅ whisper.cpp installed successfully");
+        }
+        
+        Ok(())
+    }
+    
+    /// Download Whisper model based on system tier
+    async fn download_whisper_model(&mut self) -> Result<()> {
+        use crate::installer::platform::SystemTier;
+        
+        let ram_gb = SystemTier::get_total_ram_gb()?;
+        let model_name = self.whisper.recommended_model(ram_gb as usize);
+        
+        info!("📦 System RAM: {}GB - selecting Whisper model: {}", ram_gb, model_name);
+        
+        self.whisper.download_model(model_name).await?;
+        
+        Ok(())
     }
 }
 

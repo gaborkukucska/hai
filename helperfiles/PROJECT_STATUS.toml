@@ -517,7 +517,17 @@ decision = "STT/TTS are core HAI-Net infrastructure components, NOT MCP servers"
 rationale = "Fundamental framework features, designed for multi-device deployment (master-slave)"
 location = "hainet-core/src/multimodal/ (new module)"
 deployment_model = "Can run on single device OR distributed across mesh network"
-whisper_integration = "candle-whisper (pure Rust) as primary, whisper-rs as fallback"
+whisper_integration = "whisper.cpp (external process) with auto-install via hainet-seed"
+auto_installation = "WhisperInstaller module in hainet-seed (similar to OllamaInstaller)"
+installation_flow = [
+    "Detect if whisper.cpp installed (PATH or common locations)",
+    "If not found: clone https://github.com/ggerganov/whisper.cpp",
+    "Build from source (make)",
+    "Symlink binary to ~/.local/bin/whisper",
+    "Download model based on system RAM (tiny/base/small/medium)",
+    "Store models in ~/.hainet/models/"
+]
+platform_support = ["Linux (x86_64, aarch64)", "macOS (Homebrew + manual)", "Android/Termux"]
 
 # Implementation Phases
 [[phase_details.phase_2_2.phases]]

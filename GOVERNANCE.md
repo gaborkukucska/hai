@@ -1,4 +1,4 @@
-# Governance & Membership
+# NAI-Net Governance & Membership
 
 ## Free Forever Model
 

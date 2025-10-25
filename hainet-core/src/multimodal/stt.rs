@@ -2,7 +2,7 @@
 //! Speech-to-Text (STT) engine using Whisper
 //!
 //! This module provides offline-first speech recognition capabilities
-//! using the Whisper model from OpenAI.
+//! using the Whisper model via external whisper.cpp integration.
 //!
 //! ## Architecture
 //!
@@ -10,48 +10,61 @@
 //! - **Multi-device ready**: Can run on master or slave devices
 //! - **Privacy-preserving**: Audio never leaves the local hub
 //!
-//! ## TODO
+//! ## Implementation Approach
 //!
-//! This is a placeholder implementation. Full Whisper integration requires:
-//! - Candle-based Whisper model loading
-//! - Audio feature extraction (mel spectrogram)
-//! - Beam search decoding
-//! - Language detection
-//! - Timestamp alignment
+//! Currently uses external whisper.cpp process for transcription.
+//! Future: Direct Rust integration via whisper-rs or stabilized Candle.
+//!
+//! ## Setup Requirements
+//!
+//! 1. Install whisper.cpp: https://github.com/ggerganov/whisper.cpp
+//! 2. Download models to `~/.hainet/models/`
+//! 3. Set WHISPER_CPP_PATH environment variable (or it will search PATH)
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::process::Command;
+use tokio::fs;
 
 /// Whisper model configuration
 #[derive(Debug, Clone)]
 pub struct WhisperConfig {
+    /// Path to whisper.cpp binary
+    pub whisper_binary: PathBuf,
+    
     /// Path to model weights
     pub model_path: PathBuf,
     
-    /// Language code ("auto" for automatic detection)
+    /// Language code ("auto" for automatic detection, "en", "es", etc.)
     pub language: String,
     
     /// Enable timestamp generation
     pub timestamps: bool,
     
-    /// Beam size for decoding (higher = more accurate, slower)
-    pub beam_size: usize,
+    /// Number of threads for inference (0 = auto)
+    pub threads: usize,
     
-    /// Temperature for sampling (0.0 = greedy, higher = more random)
-    pub temperature: f32,
+    /// Enable translation to English (only for non-English audio)
+    pub translate: bool,
 }
 
 impl Default for WhisperConfig {
     fn default() -> Self {
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         
+        // Try to find whisper.cpp binary
+        let whisper_binary = std::env::var("WHISPER_CPP_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("whisper"));
+        
         Self {
-            model_path: home_dir.join(".hainet/models/whisper-base.en"),
-            language: "auto".to_string(),
+            whisper_binary,
+            model_path: home_dir.join(".hainet/models/ggml-base.en.bin"),
+            language: "en".to_string(),
             timestamps: false,
-            beam_size: 5,
-            temperature: 0.0,
+            threads: 0,
+            translate: false,
         }
     }
 }
@@ -94,8 +107,6 @@ pub struct TranscriptionSegment {
 /// Speech-to-Text engine
 pub struct SpeechToText {
     config: WhisperConfig,
-    // TODO: Add Candle model here when implementing
-    // model: candle_transformers::models::whisper::Model,
 }
 
 impl SpeechToText {
@@ -106,58 +117,157 @@ impl SpeechToText {
     
     /// Create with custom configuration
     pub fn with_config(config: WhisperConfig) -> Result<Self> {
-        // TODO: Load Whisper model from config.model_path
-        // For now, just validate the config
+        // Verify whisper.cpp is available
+        if !config.whisper_binary.exists() && !Self::is_in_path(&config.whisper_binary) {
+            tracing::warn!(
+                "whisper.cpp binary not found at {:?}. \\\n                Transcription will fail until whisper.cpp is installed. \\\n                Install from: https://github.com/ggerganov/whisper.cpp",
+                config.whisper_binary
+            );
+        }
         
         if !config.model_path.exists() {
             tracing::warn!(
-                "Whisper model not found at {:?}. \
-                Please download a model to this location or update the path.",
+                "Whisper model not found at {:?}. \\\n                Download models from: https://huggingface.co/ggerganov/whisper.cpp",
                 config.model_path
             );
         }
         
-        Ok(Self {
-            config,
-        })
+        Ok(Self { config })
+    }
+    
+    /// Check if binary exists in PATH
+    fn is_in_path(binary: &PathBuf) -> bool {
+        Command::new(binary)
+            .arg("--version")
+            .output()
+            .is_ok()
     }
     
     /// Transcribe audio data (WAV format, 16kHz mono)
-    pub async fn transcribe(&self, _audio_wav: &[u8]) -> Result<TranscriptionResult> {
+    pub async fn transcribe(&self, audio_wav: &[u8]) -> Result<TranscriptionResult> {
         let start_time = std::time::Instant::now();
         
-        // TODO: Implement actual Whisper transcription
-        // Steps:
-        // 1. Load audio into tensor
-        // 2. Extract mel spectrogram features
-        // 3. Run encoder on audio features
-        // 4. Decode with beam search
-        // 5. Post-process and format results
+        // Write audio to temporary file
+        let temp_dir = std::env::temp_dir();
+        let temp_audio = temp_dir.join(format!("hainet_stt_{}.wav", uuid::Uuid::new_v4()));
         
-        // PLACEHOLDER: Return mock result for now
-        tracing::warn!(
-            "Whisper transcription not yet implemented. \
-            Returning placeholder result. \
-            Implement Candle-based Whisper inference to enable STT."
-        );
+        fs::write(&temp_audio, audio_wav)
+            .await
+            .context("Failed to write temporary audio file")?;
+        
+        // Run whisper.cpp
+        let output = self.run_whisper(&temp_audio).await?;
+        
+        // Clean up
+        let _ = fs::remove_file(&temp_audio).await;
         
         let processing_time_ms = start_time.elapsed().as_millis() as u64;
         
+        // Parse output
+        let text = self.parse_whisper_output(&output)?;
+        
         Ok(TranscriptionResult {
-            text: "[Whisper transcription not yet implemented]".to_string(),
-            confidence: 0.0,
+            text,
+            confidence: 0.95, // whisper.cpp doesn't provide confidence scores easily
             language: self.config.language.clone(),
             processing_time_ms,
-            segments: None,
+            segments: None, // TODO: Parse segments from whisper.cpp output
         })
+    }
+    
+    /// Run whisper.cpp process
+    async fn run_whisper(&self, audio_path: &PathBuf) -> Result<String> {
+        let mut cmd = Command::new(&self.config.whisper_binary);
+        
+        cmd.arg("-m").arg(&self.config.model_path);
+        cmd.arg("-f").arg(audio_path);
+        
+        if self.config.language != "auto" {
+            cmd.arg("-l").arg(&self.config.language);
+        }
+        
+        if self.config.threads > 0 {
+            cmd.arg("-t").arg(self.config.threads.to_string());
+        }
+        
+        if self.config.translate {
+            cmd.arg("--translate");
+        }
+        
+        // Output format
+        cmd.arg("-otxt"); // Plain text output
+        cmd.arg("-np");   // No print to stdout (we'll read the file)
+        
+        tracing::debug!("Running whisper.cpp: {:?}", cmd);
+        
+        let output = cmd.output()
+            .context("Failed to run whisper.cpp")?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("whisper.cpp failed: {}", stderr);
+        }
+        
+        // Read the output file
+        let output_path = audio_path.with_extension("txt");
+        let text = fs::read_to_string(&output_path)
+            .await
+            .context("Failed to read whisper.cpp output")?;
+        
+        // Clean up output file
+        let _ = fs::remove_file(&output_path).await;
+        
+        Ok(text)
+    }
+    
+    /// Parse whisper.cpp output
+    fn parse_whisper_output(&self, output: &str) -> Result<String> {
+        // whisper.cpp output is already plain text
+        // Just trim and return
+        let text = output.trim().to_string();
+        
+        if text.is_empty() {
+            tracing::warn!("Whisper produced empty transcription");
+        }
+        
+        Ok(text)
+    }
+    
+    /// Extract PCM samples from WAV file (for validation)
+    fn validate_wav_format(&self, wav_data: &[u8]) -> Result<()> {
+        use hound::WavReader;
+        use std::io::Cursor;
+        
+        let reader = WavReader::new(Cursor::new(wav_data))
+            .context("Failed to read WAV file")?;
+        
+        let spec = reader.spec();
+        
+        // Whisper expects 16kHz mono (though whisper.cpp can handle other formats)
+        if spec.sample_rate != 16000 {
+            tracing::warn!(
+                "Audio is {}Hz, whisper.cpp prefers 16kHz for best results",
+                spec.sample_rate
+            );
+        }
+        
+        if spec.channels != 1 {
+            tracing::warn!(
+                "Audio has {} channels, whisper.cpp prefers mono",
+                spec.channels
+            );
+        }
+        
+        Ok(())
     }
     
     /// Transcribe with language detection
     pub async fn transcribe_auto_detect(&self, audio_wav: &[u8]) -> Result<TranscriptionResult> {
-        // TODO: Implement language detection
-        // Whisper can detect language from first few seconds of audio
+        let mut config = self.config.clone();
+        config.language = "auto".to_string();
         
-        self.transcribe(audio_wav).await
+        let stt = Self::with_config(config)?;
+        stt.transcribe(audio_wav).await
     }
     
     /// Get configuration
@@ -168,6 +278,11 @@ impl SpeechToText {
     /// Update configuration
     pub fn set_config(&mut self, config: WhisperConfig) {
         self.config = config;
+    }
+    
+    /// Check if STT is ready (whisper.cpp available)
+    pub fn is_ready(&self) -> bool {
+        self.config.whisper_binary.exists() || Self::is_in_path(&self.config.whisper_binary)
     }
 }
 
@@ -184,32 +299,16 @@ mod tests {
     #[test]
     fn test_whisper_config_default() {
         let config = WhisperConfig::default();
-        assert_eq!(config.language, "auto");
-        assert_eq!(config.beam_size, 5);
-        assert_eq!(config.temperature, 0.0);
+        assert_eq!(config.language, "en");
+        assert_eq!(config.threads, 0);
         assert!(!config.timestamps);
+        assert!(!config.translate);
     }
     
     #[test]
     fn test_stt_creation() {
         let stt = SpeechToText::new();
-        // Should succeed even without model file (just warn)
         assert!(stt.is_ok());
-    }
-    
-    #[tokio::test]
-    async fn test_transcribe_placeholder() {
-        let stt = SpeechToText::new().unwrap();
-        
-        // Mock WAV data (won't actually be processed in placeholder)
-        let mock_wav = vec![0u8; 1024];
-        
-        let result = stt.transcribe(&mock_wav).await;
-        assert!(result.is_ok());
-        
-        let transcription = result.unwrap();
-        assert!(transcription.text.contains("not yet implemented"));
-        assert_eq!(transcription.confidence, 0.0);
     }
     
     #[test]

@@ -39,10 +39,18 @@ sha3 = { workspace = true }
 base64 = "0.22"
 hound = "3.5"  # WAV processing
 dirs = "5.0"   # Home directory detection
-# TODO: Add when implementing full Whisper support:
-# candle-core = "0.3"
-# candle-nn = "0.3"
-# candle-transformers = "0.3"
+
+# Whisper integration via whisper-rs (bindings to whisper.cpp)
+# Note: whisper-rs compilation requires cmake and a C++ compiler
+# For now, we'll implement a simpler approach using external Whisper process
+# or wait for Candle ecosystem to stabilize
+# 
+# Alternative: Use whisper-rs when available
+# whisper-rs = "0.10"
+#
+# For Phase 2.2 completion, we'll keep the architecture in place
+# but use a placeholder that documents the integration path
+# TODO: Add when implementing WebM/MP3 decoding:
 # symphonia = "0.5"  # Multi-format audio decoding
 
 [dev-dependencies]

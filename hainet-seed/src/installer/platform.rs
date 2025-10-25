@@ -142,7 +142,7 @@ impl SystemTier {
     }
     
     /// Get total system RAM in GB
-    fn get_total_ram_gb() -> Result<f64> {
+    pub fn get_total_ram_gb() -> Result<f64> {
         #[cfg(target_os = "linux")]
         {
             Self::get_ram_linux()
