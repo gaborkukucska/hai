@@ -4,6 +4,7 @@ mod admin_bridge;
 pub mod stt_handler;
 pub mod tts_handler;
 mod vision_handler;
+mod video_handler;
 
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -143,6 +144,7 @@ pub fn run() {
         vision_handler::stop_webcam,
         vision_handler::capture_frame,
         vision_handler::set_privacy_mode,
+        video_handler::play_video,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

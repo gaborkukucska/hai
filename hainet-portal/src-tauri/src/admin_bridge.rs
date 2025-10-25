@@ -33,6 +33,12 @@ pub struct ChatMessage {
     /// Optional file attachments
     #[serde(default)]
     pub attachments: Vec<FileAttachment>,
+    /// Optional video source
+    #[serde(default)]
+    pub video_src: Option<String>,
+    /// Optional dynamic UI component
+    #[serde(default)]
+    pub dynamic_component: Option<Value>,
 }
 
 /// File attachment metadata
@@ -194,6 +200,7 @@ impl AdminBridge {
             role: "assistant".to_string(),
             timestamp: chrono::Utc::now().timestamp(),
             attachments: vec![],
+            video_src: None,
             dynamic_component: Some(dynamic_component_json),
         };
         

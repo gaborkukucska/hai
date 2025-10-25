@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { VoiceInput } from './VoiceInput'
 import WebcamView from './WebcamView'
+import VideoPlayer from './VideoPlayer'
 import { FrameAnalysisResult, DynamicUIComponent, DynamicUIAction } from '../types'
 import DynamicUIRenderer from './DynamicUIRenderer'
 
@@ -13,6 +14,7 @@ interface ChatMessage {
   timestamp: number
   attachments?: FileAttachment[]
   dynamic_component?: DynamicUIComponent
+  video_src?: string
 }
 
 interface FileAttachment {
@@ -218,6 +220,11 @@ export default function ChatInterface() {
                 }`}
               >
                 <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                {msg.video_src && (
+                  <div className="mt-2">
+                    <VideoPlayer src={msg.video_src} />
+                  </div>
+                )}
                 {msg.dynamic_component && (
                   <div className="mt-2 pt-2 border-t border-gray-600">
                     <DynamicUIRenderer
