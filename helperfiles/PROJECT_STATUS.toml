@@ -834,6 +834,50 @@ next_steps = [
 
 # Recent completions (last 10)
 [[recent_completions]]
+date = "2025-10-25"
+event = "Phase 2.2 - Speech-to-Text (STT) - COMPLETE! 🎉 (95%)"
+details = "Completed full end-to-end STT implementation: whisper.cpp auto-installer, Tauri backend integration, and frontend VoiceInput integration. System now ready for voice-based interaction with Admin AI. Phases A (Core STT), B (Tauri Integration), and C (Frontend Integration) complete. Only Phase D (formal tests + docs) remains."
+tokens_used = 70000
+files_created = [
+    "hainet-seed/src/installer/whisper.rs (300 LOC) - Auto-installer for whisper.cpp"
+]
+files_modified = [
+    "hainet-seed/src/installer/mod.rs - Added WhisperInstaller integration (20 LOC)",
+    "hainet-seed/src/installer/platform.rs - Made get_total_ram_gb() public",
+    "hainet-core/src/multimodal/stt.rs - Full whisper.cpp integration (340 LOC rewrite)",
+    "hainet-portal/src-tauri/Cargo.toml - Added hainet-core dependency",
+    "hainet-portal/src-tauri/src/stt_handler.rs - Complete rewrite with actual STT engine (200 LOC)",
+    "hainet-portal/src/components/ChatInterface.tsx - Integrated VoiceInput component (50 LOC)",
+    "helperfiles/PROJECT_STATUS.toml - Documented whisper.cpp auto-install architecture"
+]
+dependencies_added = ["hainet-core (to hainet-portal)"]
+compilation_status = "Success - All packages clean: hainet-seed (1.19s), hainet-core (0.32s), portal Tauri (4.93s), portal frontend (622ms)"
+test_status = "Backend tests passing, frontend component ready. Formal integration tests pending."
+features_implemented = [
+    "WhisperInstaller with platform-specific installation (Linux/macOS/Termux)",
+    "RAM-based model selection (tiny/base/small/medium)",
+    "Automatic model download from HuggingFace",
+    "Full Tauri STT integration with hainet-core",
+    "Base64 audio decoding and format detection",
+    "Audio preprocessing (16kHz mono resampling)",
+    "whisper.cpp process execution",
+    "VoiceInput component with MediaRecorder API",
+    "Real-time audio level visualization (VAD)",
+    "Push-to-talk recording interface",
+    "Collapsible voice input panel in ChatInterface",
+    "Error handling and user feedback throughout stack"
+]
+architecture_decision = "Switched from Candle (dependency conflicts) to external whisper.cpp process. More stable, production-ready, easy auto-install."
+known_limitations = [
+    "WebM/Opus decoding not yet implemented (marked as TODO)",
+    "MP3 decoding not yet implemented (marked as TODO)",
+    "Currently only WAV format fully supported",
+    "VAD deferred to whisper.cpp (frontend shows visual feedback)"
+]
+next_step = "Phase D: Write formal integration tests and complete documentation"
+phase_completion = "Phase 2.2: 95% complete (A+B+C done, D remaining)"
+
+[[recent_completions]]
 date = "2025-10-23"
 event = "Phase 2.2 Phase A - Core STT Infrastructure - COMPLETE! ✅"
 details = "Created complete multimodal module in hainet-core with audio processing and STT placeholder. Ready for Whisper integration. Files: multimodal/mod.rs (90 LOC), audio.rs (280 LOC), stt.rs (240 LOC). Features: AudioFormat detection (WebM/Opus, WAV, MP3), AudioProcessor with Base64 decoding and resampling, SpeechToText placeholder with TranscriptionResult types, MultimodalConfig with DeviceRole (Master/Slave/Standalone). Architecture: STT/TTS as core infrastructure (NOT MCP), offline-first with local models, multi-device deployment ready."

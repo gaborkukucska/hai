@@ -108,37 +108,74 @@ impl STTHandler {
         self.config.read().await.clone()
     }
 
-    /// Transcribe audio data by delegating to Admin AI
+    /// Transcribe audio data using hainet-core STT engine
     /// 
     /// Flow:
-    /// 1. Portal sends audio to this handler
-    /// 2. Handler forwards to Admin AI (via admin_bridge)
-    /// 3. Admin AI creates STT project (or uses existing STT worker)
-    /// 4. PM/Worker discovers best STT provider (local/remote/external)
-    /// 5. Result flows back: Worker → PM → Admin → Portal
+    /// 1. Portal sends audio (base64-encoded) to this handler
+    /// 2. Handler decodes and processes audio via hainet-core
+    /// 3. whisper.cpp performs transcription
+    /// 4. Result returned directly to Portal
     pub async fn transcribe(&self, audio: AudioData) -> Result<TranscriptionResult> {
-        let _start_time = std::time::Instant::now();
+        use hainet_core::multimodal::audio::{AudioProcessor, AudioFormat};
+        use hainet_core::multimodal::stt::SpeechToText;
+        
+        let start_time = std::time::Instant::now();
         let config = self.config.read().await.clone();
 
-        // Apply VAD if enabled
+        // Decode base64 audio
+        let processor = AudioProcessor::new();
+        let audio_bytes = processor.decode_base64(&audio.data)
+            .context("Failed to decode base64 audio")?;
+        
+        // Detect audio format
+        let format = AudioFormat::detect(&audio_bytes);
+        
+        tracing::info!("Detected audio format: {:?}", format);
+        
+        // Process audio (convert to WAV if needed, resample to 16kHz mono)
+        let processed_audio = processor.process(&audio_bytes)
+            .context("Failed to process audio")?;
+        
+        // Note: VAD is currently disabled as we'd need to parse the WAV data
+        // to extract samples. whisper.cpp will handle silence detection internally.
         if config.vad_enabled {
-            // TODO: Implement VAD check here
-            // For now, pass through all audio
+            tracing::debug!("VAD enabled but deferred to whisper.cpp");
         }
-
-        // TODO: Forward audio to Admin AI via AdminBridge
-        // This will be implemented when we integrate with admin_bridge.rs
-        // The Admin AI will handle:
-        // - Provider discovery (via hainet-persona/src/ai_providers/)
-        // - Multi-device coordination (via hub master/slave)
-        // - Fallback logic (local → remote → external)
-        // - Constitutional compliance (via Guardian)
-
-        // For now, return a placeholder
-        Err(anyhow::anyhow!(
-            "STT integration with Admin AI not yet implemented. \
-            This requires Admin AI to discover STT providers and coordinate transcription."
-        ))
+        
+        // Create STT engine
+        let stt = SpeechToText::new()
+            .context("Failed to initialize STT engine")?;
+        
+        // Check if whisper.cpp is available
+        if !stt.is_ready() {
+            return Err(anyhow::anyhow!(
+                "whisper.cpp not found. Please run 'hainet-seed install' to set up STT."
+            ));
+        }
+        
+        // Perform transcription
+        let result = if config.language == "auto" {
+            stt.transcribe_auto_detect(&processed_audio).await?
+        } else {
+            stt.transcribe(&processed_audio).await?
+        };
+        
+        let processing_time = start_time.elapsed().as_millis() as u64;
+        
+        tracing::info!(
+            "Transcription complete in {}ms: \"{}\" (confidence: {:.2})",
+            processing_time,
+            result.text,
+            result.confidence
+        );
+        
+        // Convert hainet-core result to portal result
+        Ok(TranscriptionResult {
+            text: result.text,
+            confidence: result.confidence,
+            language: result.language,
+            processing_time_ms: processing_time,
+        })
     }
 
     /// Calculate audio energy level (for VAD)

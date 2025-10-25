@@ -1,6 +1,7 @@
 //! # START OF FILE hainet-portal/src/components/ChatInterface.tsx
 import { useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { VoiceInput } from './VoiceInput'
 
 interface ChatMessage {
   id: string
@@ -28,6 +29,7 @@ export default function ChatInterface() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
+  const [showVoiceInput, setShowVoiceInput] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -135,6 +137,23 @@ export default function ChatInterface() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  // Handle voice transcription
+  const handleVoiceTranscription = (text: string) => {
+    setInput(text)
+    setShowVoiceInput(false)
+  }
+
+  // Handle voice errors
+  const handleVoiceError = (error: string) => {
+    console.error('Voice input error:', error)
+    setMessages(prev => [...prev, {
+      id: crypto.randomUUID(),
+      content: `Voice input error: ${error}`,
+      role: 'assistant',
+      timestamp: Date.now(),
+    }])
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages Area */}
@@ -214,6 +233,18 @@ export default function ChatInterface() {
         </div>
       )}
 
+      {/* Voice Input Area (Collapsible) */}
+      {showVoiceInput && (
+        <div className="border-t border-gray-700 bg-gray-800 p-4">
+          <div className="max-w-4xl mx-auto">
+            <VoiceInput 
+              onTranscription={handleVoiceTranscription}
+              onError={handleVoiceError}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="border-t border-gray-700 bg-gray-800 p-4">
         <div className="max-w-4xl mx-auto flex gap-2">
@@ -230,6 +261,17 @@ export default function ChatInterface() {
             title="Attach files"
           >
             📎
+          </button>
+          <button
+            onClick={() => setShowVoiceInput(!showVoiceInput)}
+            className={`${
+              showVoiceInput 
+                ? 'bg-hai-primary text-white' 
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+            } px-4 py-3 rounded-lg transition-colors`}
+            title="Toggle voice input"
+          >
+            🎤
           </button>
           <input
             type="text"

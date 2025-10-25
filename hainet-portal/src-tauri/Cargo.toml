@@ -36,3 +36,4 @@ tracing = "0.1"
 
 # HAI-Net dependencies
 hainet-persona = { path = "../../hainet-persona" }
+hainet-core = { path = "../../hainet-core" }
