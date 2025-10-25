@@ -487,6 +487,21 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## Settings System (Cycle 2.7 - Complete)
+
+### hainet-portal/src-tauri/src/settings_handler.rs
+- `get_settings()` - Tauri command to get the current settings.
+- `update_settings(settings)` - Tauri command to update the settings.
+- `get_system_status()` - Tauri command to get the system status.
+
+### hainet-portal/src/components/Settings.tsx
+- `Settings()` - Main component for the settings panel.
+
+### hainet-portal/src/components/SystemStatus.tsx
+- `SystemStatus()` - Component to display system status.
+
+---
+
 ## Statistics
 
 **Total Modules:** 56

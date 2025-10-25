@@ -5,6 +5,7 @@ pub mod stt_handler;
 pub mod tts_handler;
 mod vision_handler;
 mod video_handler;
+mod settings_handler;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,6 +17,8 @@ use admin_bridge::{AdminBridge, ChatMessage, ChatResponse, FileAttachment};
 use stt_handler::{AudioData, TranscriptionResult};
 use tts_handler::{TTSHandler, SynthesisRequest, SynthesisResponse};
 use vision_handler::VisionState;
+use settings_handler::SystemInfo;
+use sysinfo::{System, SystemExt};
 
 /// Global Admin AI Bridge state
 struct AppState {
@@ -119,6 +122,11 @@ pub fn run() {
 
   // Initialize Video Streaming state
   let video_streaming_state = VideoStreamingState(Arc::new(Mutex::new(HashMap::new())));
+
+  // Initialize SystemInfo state
+  let system_info_state = SystemInfo {
+      sys: Mutex::new(System::new_all()),
+  };
   
   tauri::Builder::default()
     .setup(|app| {
@@ -140,6 +148,7 @@ pub fn run() {
     })
     .manage(VisionState(Mutex::new(None)))
     .manage(video_streaming_state)
+    .manage(system_info_state)
     .invoke_handler(tauri::generate_handler![
         send_message,
         get_history,
@@ -156,6 +165,9 @@ pub fn run() {
         vision_handler::set_privacy_mode,
         video_handler::stream_video,
         video_handler::stop_video_stream,
+        settings_handler::get_settings,
+        settings_handler::update_settings,
+        settings_handler::get_system_status,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
