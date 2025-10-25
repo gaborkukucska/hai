@@ -75,16 +75,18 @@ mod audio_processing_tests {
     
     #[test]
     fn test_webm_format_detection() {
-        // WebM file signature: 0x1A 0x45 0xDF 0xA3
-        let webm_data = vec![0x1A, 0x45, 0xDF, 0xA3, 0x00, 0x00];
+        // WebM file signature: 0x1A 0x45 0xDF 0xA3 (EBML header)
+        // Needs at least 12 bytes for detection
+        let webm_data = vec![0x1A, 0x45, 0xDF, 0xA3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         let format = AudioFormat::detect(&webm_data);
         assert_eq!(format, AudioFormat::WebMOpus);
     }
     
     #[test]
     fn test_mp3_format_detection() {
-        // MP3 file signature: 0xFF 0xFB or ID3
-        let mp3_data = vec![0xFF, 0xFB, 0x00, 0x00];
+        // MP3 file signature: 0xFF 0xFB (sync word)
+        // Needs at least 12 bytes for detection
+        let mp3_data = vec![0xFF, 0xFB, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         let format = AudioFormat::detect(&mp3_data);
         assert_eq!(format, AudioFormat::Mp3);
     }
@@ -264,7 +266,7 @@ mod integration_tests {
     
     #[test]
     fn test_stt_handler_config() {
-        use app_lib::stt_handler::{STTHandler, STTConfig};
+        use app_lib::stt_handler::STTHandler;
         
         let rt = tokio::runtime::Runtime::new().unwrap();
         
