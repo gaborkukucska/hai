@@ -3,7 +3,8 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { VoiceInput } from './VoiceInput'
 import WebcamView from './WebcamView'
-import { FrameAnalysisResult } from '../types'
+import { FrameAnalysisResult, DynamicUIComponent, DynamicUIAction } from '../types'
+import DynamicUIRenderer from './DynamicUIRenderer'
 
 interface ChatMessage {
   id: string
@@ -11,6 +12,7 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   timestamp: number
   attachments?: FileAttachment[]
+  dynamic_component?: DynamicUIComponent
 }
 
 interface FileAttachment {
@@ -167,6 +169,32 @@ export default function ChatInterface() {
     setMessages(prev => [...prev, analysisMessage]);
   };
 
+  const handleDynamicAction = async (action: DynamicUIAction) => {
+    if (action.type === 'invoke') {
+      try {
+        const result = await invoke(action.payload.command, action.payload.args);
+        console.log(`'${action.payload.command}' invoked with`, action.payload.args, 'Result:', result);
+        // Optionally, display result in chat
+        const resultMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          content: `Action '${action.payload.command}' successful. Result: ${JSON.stringify(result)}`,
+          role: 'assistant',
+          timestamp: Date.now(),
+        };
+        setMessages(prev => [...prev, resultMessage]);
+      } catch (error) {
+        console.error(`Action '${action.payload.command}' failed:`, error);
+        const errorMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          content: `Error executing action '${action.payload.command}': ${error}`,
+          role: 'assistant',
+          timestamp: Date.now(),
+        };
+        setMessages(prev => [...prev, errorMessage]);
+      }
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages Area */}
@@ -190,6 +218,14 @@ export default function ChatInterface() {
                 }`}
               >
                 <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                {msg.dynamic_component && (
+                  <div className="mt-2 pt-2 border-t border-gray-600">
+                    <DynamicUIRenderer
+                      schema={msg.dynamic_component}
+                      onAction={handleDynamicAction}
+                    />
+                  </div>
+                )}
                 {msg.attachments && msg.attachments.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-gray-600 space-y-1">
                     {msg.attachments.map((att, idx) => (
