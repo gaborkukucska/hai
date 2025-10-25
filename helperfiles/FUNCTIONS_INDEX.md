@@ -463,6 +463,20 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## Dynamic UI System (Cycle 2.5 - Complete)
+
+### hainet-portal/src/components/DynamicUIRenderer.tsx
+- `DynamicUIRenderer(schema, onAction)` - Renders UI from a JSON schema and handles user actions.
+
+### hainet-portal/src/components/componentLibrary.ts
+- `componentLibrary` - A mapping of component names to React components (e.g., `Stack`, `Text`, `Button`).
+
+### hainet-portal/src/types.ts
+- `DynamicUIComponent` - Interface for the UI component schema.
+- `DynamicUIAction` - Interface for actions triggered by the UI.
+
+---
+
 ## Statistics
 
 **Total Modules:** 54 (+3 from Phase 2.2 Phase A)  
