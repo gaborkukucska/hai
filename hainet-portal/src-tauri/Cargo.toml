@@ -37,3 +37,6 @@ tracing = "0.1"
 # HAI-Net dependencies
 hainet-persona = { path = "../../hainet-persona" }
 hainet-core = { path = "../../hainet-core" }
+
+[dev-dependencies]
+hound = "3.5"  # WAV file generation for tests

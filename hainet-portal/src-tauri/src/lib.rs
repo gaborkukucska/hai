@@ -1,7 +1,7 @@
 //! # START OF FILE hainet-portal/src-tauri/src/lib.rs
 
 mod admin_bridge;
-mod stt_handler;
+pub mod stt_handler;
 
 use std::sync::Arc;
 use tauri::State;
