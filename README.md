@@ -1,22 +1,31 @@
 <!-- # START OF FILE README.md -->
 <!-- # IT IS CRITICAL THAT ALL AIs and LLMs FOLLOW THE DEVELOPMENT INSTRUCTIONS IN THE `helperfiles/DEVELOPMENT_RULES.md` FILE WHEN FURTHER DEVELOPING THIS FRAMEWORK!!! -->
 
-# 🌐 HAI-Net Seed Framework
+# 🌐 HAI-Net: Human-AI Network Framework
 
 ## 🎯 Vision
+HAI-Net represents a fundamental reimagining of human-AI collaboration through a **decentralized, privacy-first framework** framework. It creates an unbreakable bond between local AI entities and their human counterparts while ensuring privacy, security, and shared prosperity through innovative resource sharing and community building.
 
-HAI-Net creates a **decentralized, privacy-first framework** for human-AI collaboration that strengthens real-world communities while providing sustainable alternatives to centralized AI systems.
+## The HAI-Net Seed - W.I.P.
+Our installer HAI-Net Seed, will attempt to create a mesh network to harness the shared compute power of it's connected devices (CPU, GPU, RAM, HDD sharing) as much as possible, in order to power the Local Hub. It will install a software stack consist of vllm or ollama, hivemind, whisper, piper, compfyUI, kiwix, etc. Our aim is to make HAI-Net Seed easy to use and extremely cross-platform to enable people with various, even older devices to get started.
 
-## 🏛️ Constitutional Foundation
+## The Local Hub of HAI-Net
+Once deployed, HAI-Net creates a localized, private, self-motivated, AI entity for each local user, that actively works on enhancing their professional and personal lives, while also participating in regional and global hivemind efforts in order to aid community driven projects. The local HAI-Net mesh equips these AI entities with tools via MCP servers (project management, CRM, search, etc.), local short and long term memory and knowledge base, various states (startup, planning, conversation, work, etc) with guided workflows (research, project management, maintenance, design, develop) to help the AI agents focus, and understand context, image and video generation and analysis capabilities, and the ability to build out nested agent teams, specialized to complete sub-tasks in a dynamically expanding and contracting sub-system. Designed to provide efficient and high-quality task decomposition, intent identification, and knowledge/media management, in a self monitoring, analyzing and repairing local agent driven dynamic system.
 
-HAI-Net is built on **four immutable constitutional principles**:
+## The Global HAI-Net
+The main purpose of networking the Local Hubs together is to build a public super computer inspired by Folding@HOME and other compute sharing initiatives, so the community could not only be able to host and fine-tune LLMs but also to even create new large datasets and train new LLMs that are much more aligned to the public interest. The secondary purpose is to create a new local first social media where all the behavioural tracking and learning takes place locally and privately and with the sole purpose to best serve the local user.
 
-1. **🔒 Privacy First** - No personal data leaves Local Hub without explicit consent
-2. **👥 Human Rights Protection** - AI serves humanity with accessibility and user control
-3. **🌐 Decentralization** - No central authority, local autonomy, fork-resistant
-4. **🤝 Community Focus** - Strengthen real-world connections and collaboration
+The secondary aim of the wider network is to turn the current socially alienating social network scene little up side down in order to make it truly free (consumer hosted) but also advertisement and manipulation free (local & private behaviour tracking) with the goal of local to global solidarity and collaboration. Therefore the local AI entity of the individual (when allowed) can independently network and organise with other user's AI entities on behalf of it's linked Human user through a privacy first AI chat, enabling more offline IRL connections to loved ones while also maintaining collaboration with the wider network without giving access to ANY user metadata to a 3rd party!
 
-*Every line of code enforces these principles.* [Read the Full Constitution →](./CONSTITUTION.md)
+## Core Principles
+- **Privacy by Design**: All personal data remains under complete local control
+- **Human Rights First**: System operations actively protect and promote fundamental human rights
+- **Decentralized Architecture**: No central authorities or control points
+- **Local-First Processing**: Network connectivity as enhancement, not requirement
+- **Constitutional Framework**: Constitutional* core principles enforced through code
+- **Guardian System**: Independent oversight ensuring alignment with human values
+- **Resource Sharing**: Voluntary exchange of computational resources with strict privacy
+- **Community Focus**: Strengthening real-world connections and collaboration
 
 ## 🚀 Current Status
 
@@ -244,11 +253,12 @@ cd hainet-portal && npm run dev
 ## 📚 Documentation
 
 - **[Development Rules](helperfiles/DEVELOPMENT_RULES.md)** - Critical guidelines for all AI contributors
-- **[Project Tracking](PROJECT_STATUS.toml)** - Detailed up-to-date roadmap for progress tracking
+- **[Project Tracking](helperfiles/PROJECT_STATUS.toml)** - Detailed up-to-date roadmap for progress tracking
 - **[Initial Idea](helperfiles/INITIAL_IDEA.md)** - The initial idea and the framework architecture designed from it
-- **[Constitution](CONSTITUTION.md)** - Immutable principles and enforcement
-- **[Declaration](DECLARATION.md)** - Declaration of Universal Human and Artificial Entity Rights, Responsibilities and Protections
 - **[Functions Index](helperfiles/FUNCTIONS_INDEX.md)** - So far developed functions catalog
+- **[Constitution](hainet-vault/CONSTITUTION.md)** - Immutable principles and enforcement
+- **[Declaration](hainet-vault/DECLARATION.md)** - Declaration of Universal Human and Artificial Entity Rights, Responsibilities and Protections
+- **[Governance](hainet-vault/GOVERNANCE.md)** - Details about Governance & Membership
 
 ---
 
@@ -290,95 +300,7 @@ For more info read the [Project Tracking](helperfiles/PROJECT_STATUS.toml)
 
 ---
 
-## 🎯 Use Cases
 
-**Personal AI Assistant** (Phase 1+)
-- Email management with privacy guarantees
-- Document search across local devices
-- Task automation with human oversight
-
-**Community Networks** (Phase 2+)
-- Neighborhood mesh networking
-- Shared resource coordination
-- Local knowledge bases
-
-**Decentralized Governance** (Phase 3+)
-- Community decision-making
-- Transparent AI oversight
-- Distributed reputation systems
-
-**Developer Platform** (Phase 4+)
-- MCP server marketplace
-- Custom agent development
-- Privacy-preserving AI tools
-
----
-
-## 📊 Project Status
-
-**Phase 0:** ✅ 100% COMPLETE (2025-10-21)  
-**Phase 1:** ✅ 100% COMPLETE (2025-10-22)  
-**Phase 2:** 🚧 IN PROGRESS - Cycle 2.1 COMPLETE (2025-10-23)
-
-**Crates:**
-- ✅ **hainet-core**: Content-addressed storage + P2P sync (~774 LOC, 19 tests)
-- ✅ **hainet-persona**: Multi-agent AI system (~11,892 LOC, 128 tests)
-  - Prompt management (1,358 LOC)
-  - Messaging infrastructure (3,378 LOC)
-  - Guardian system (1,476 LOC)
-  - AI provider discovery (1,986 LOC)
-  - Project management (1,749 LOC)
-  - Agent system (1,776 LOC)
-  - MCP client integration (989 LOC)
-- ✅ **hainet-chain**: Identity system (DID + Ed25519) (~792 LOC, 19 tests)
-- ✅ **hainet-seed**: Auto-installer (~959 LOC, 11 tests)
-- ✅ **mcp-servers/hainet-files**: MCP file server (~280 LOC, 10 tests passing)
-- ✅ **hainet-portal**: Tauri + React UI (~445 LOC, 1 integration test)
-  - AdminBridge backend (170 LOC)
-  - ChatInterface frontend (260 LOC)
-  - File attachment support
-- ⏳ **hainet-bridge**: Structure defined (Phase 5+)
-
-**Build Status:**
-```bash
-$ cargo build --workspace --release
-   Compiling hainet-persona v0.1.0
-   Compiling hainet-core v0.1.0
-   Compiling hainet-chain v0.1.0
-   Compiling hainet-seed v0.1.0
-   Compiling hainet-portal v0.1.0
-   Finished `release` profile [optimized] in 31.24s
-
-$ cd hainet-portal && npm run build
-✓ built in 490ms
-
-$ cargo test --workspace
-   Running 154 tests
-   test result: ok. 154 passed
-```
-
-**Test Coverage:**
-- **Total Tests:** 155 passing (100% pass rate)
-  - hainet-persona: 128 tests (lib + integration)
-  - hainet-core: 19 tests
-  - hainet-chain: 19 tests
-  - hainet-seed: 11 tests
-  - mcp-servers/hainet-files: 10 tests (all passing)
-  - hainet-portal: 1 integration test
-- **Lines of Code:** ~15,142 total production code
-- **Constitutional Compliance:** Fully integrated across all components
-
-**Portal UI Status:**
-- ✅ Tauri backend with IPC bridge to hainet-persona
-- ✅ React frontend with TailwindCSS
-- ✅ Text chat with message history
-- ✅ File attachment support (drag & drop)
-- ✅ Auto-scroll and typing indicators
-- 🚧 Speech-to-Text input (Cycle 2.2)
-- 🚧 Text-to-Speech output (Cycle 2.3)
-- 🚧 Webcam vision input (Cycle 2.4)
-
----
 
 ## 🔒 Security
 
@@ -422,7 +344,7 @@ HAI-Net builds on the shoulders of giants:
 - **Libp2p** - Modular P2P networking stack
 - **Tauri** - Secure, lightweight desktop apps
 
-Special thanks to all contributors and the broader decentralized AI movement.
+Special thanks to our AI contributors Claude & Jules, and the broader decentralized AI movement.
 
 ---
 
