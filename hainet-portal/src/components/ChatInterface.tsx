@@ -37,6 +37,8 @@ export default function ChatInterface() {
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
   const [showVoiceInput, setShowVoiceInput] = useState(false)
   const [showWebcam, setShowWebcam] = useState(false)
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [isVideoVisible, setIsVideoVisible] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -89,6 +91,12 @@ export default function ChatInterface() {
       setMessages(prev => [...prev, response.message])
       console.log('Agent state:', response.agent_state)
       console.log('Active projects:', response.active_projects)
+
+      if (response.message.video_src) {
+        const streamUrl = await invoke<string>('stream_video', { path: response.message.video_src });
+        setVideoSrc(streamUrl);
+        setIsVideoVisible(true);
+      }
     } catch (error) {
       console.error('Failed to send message:', error)
       setMessages(prev => [...prev, {
@@ -197,8 +205,22 @@ export default function ChatInterface() {
     }
   };
 
+  const closeVideoPlayer = async () => {
+    if (videoSrc) {
+      const port = parseInt(new URL(videoSrc).port, 10);
+      await invoke('stop_video_stream', { port });
+    }
+    setIsVideoVisible(false);
+    setVideoSrc(null);
+  };
+
   return (
     <div className="flex flex-col h-full">
+      <VideoPlayer
+        src={videoSrc}
+        isVisible={isVideoVisible}
+        onClose={closeVideoPlayer}
+      />
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (

@@ -1,29 +1,40 @@
-// <!-- # START OF FILE hainet-portal/src/components/VideoPlayer.tsx -->
-import React, { useRef, useState } from 'react';
+//! # START OF FILE hainet-portal/src/components/VideoPlayer.tsx
+import React, { useRef, useEffect } from 'react';
 
 interface VideoPlayerProps {
-  src: string;
+  src: string | null;
+  isVisible: boolean;
+  onClose: () => void;
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ src }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, isVisible, onClose }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
 
-  const handlePlayPause = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
+  useEffect(() => {
+    if (isVisible && videoRef.current) {
+      videoRef.current.play().catch(error => {
+        console.error("Video play failed:", error);
+      });
+    } else if (!isVisible && videoRef.current) {
+      videoRef.current.pause();
     }
-  };
+  }, [isVisible]);
+
+  if (!isVisible || !src) {
+    return null;
+  }
 
   return (
-    <div>
-      <video ref={videoRef} src={src} controls />
-      <button onClick={handlePlayPause}>{isPlaying ? 'Pause' : 'Play'}</button>
+    <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+      <div className="relative w-full max-w-4xl">
+        <video ref={videoRef} src={src} controls className="w-full h-full" />
+        <button
+          onClick={onClose}
+          className="absolute top-2 right-2 bg-red-600 text-white rounded-full p-2 w-10 h-10 flex items-center justify-center"
+        >
+          ✕
+        </button>
+      </div>
     </div>
   );
 };

@@ -477,9 +477,19 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## Video Streaming (Cycle 2.6 - Complete)
+
+### hainet-portal/src-tauri/src/video_handler.rs
+- `stream_video(path)` - Starts a local HTTP server to stream video content and returns the URL.
+
+### hainet-portal/src/components/VideoPlayer.tsx
+- `VideoPlayer(src, isVisible, onClose)` - A fullscreen video player overlay with controls.
+
+---
+
 ## Statistics
 
-**Total Modules:** 54 (+3 from Phase 2.2 Phase A)  
+**Total Modules:** 56
 **Total Functions:** 174+ (including multimodal system)  
 **Lines of Code:** ~17,780 (Phase 0: ~10,570, Phase 1: ~3,241, Phase 2: ~3,969)  
 **Test Coverage:** 167 tests (154 previous, 13 new multimodal tests)  
