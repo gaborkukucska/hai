@@ -523,6 +523,7 @@ This file tracks the core functions/methods defined within the framework, catego
 - `StateMachine::apply_block(transactions)` - Apply a block of transactions to the state.
 - `StateMachine::get(key)` - Get a value from the state
 - `StateMachine::set(key, value)` - Set a value in the state
+- `StateMachine::tally_votes(proposal_id)` - Tally votes for a proposal
 
 ### hainet-chain/src/transactions/mod.rs
 - `Transaction::new(payload, keypair)` - Create and sign a new transaction
@@ -534,6 +535,7 @@ This file tracks the core functions/methods defined within the framework, catego
 - `Governance::cast_vote(transaction)` - Casts a vote by broadcasting a transaction.
 - `create_proposal(keypair, title, description, proposal_type, voting_duration_secs, payload)` - Create and sign a new proposal
 - `create_vote(keypair, proposal_id, decision)` - Create and sign a new vote
+- `tally_votes(db, proposal_id)` - Tally the votes for a given proposal
 
 ---
 

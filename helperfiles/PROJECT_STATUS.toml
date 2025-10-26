@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-10-25T20:45:29+08:00"
+last_updated = "2025-10-25T21:24:36+08:00"
 project_name = "HAI-Net Seed"
 version = "0.04"
 current_phase = "Phase 3: Blockchain & Governance"
-current_cycle = "3.3 - Tendermint Integration"
+current_cycle = "3.4 - Governance Tallying"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -1043,6 +1043,24 @@ next_steps = [
 ]
 
 # Recent completions (last 10)
+[[recent_completions]]
+date = "2025-10-25"
+event = "Phase 3.4 - Governance Tallying - COMPLETE! 🗳️"
+details = "Implemented vote tallying functionality in the governance module. Added a `tally_votes` function to the `governance` module and integrated it into the `StateMachine`. The integration test was updated to use the new functionality."
+tokens_used = 10000
+files_modified = [
+    "hainet-chain/src/governance/mod.rs",
+    "hainet-chain/src/state/mod.rs",
+    "hainet-chain/tests/governance_integration.rs"
+]
+compilation_status = "Success"
+test_status = "Unit and integration tests passing"
+features_implemented = [
+    "Vote tallying for governance proposals",
+    "StateMachine method for tallying votes",
+    "Updated integration test to verify tallying"
+]
+
 [[recent_completions]]
 date = "2025-10-25"
 event = "Phase 3.2 - Governance Integration - COMPLETE! 🗳️"
