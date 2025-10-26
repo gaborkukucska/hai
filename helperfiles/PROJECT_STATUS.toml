@@ -6,8 +6,8 @@
 last_updated = "2025-10-25T11:20:25+08:00"
 project_name = "HAI-Net Seed"
 version = "0.04"
-current_phase = "Phase 2: HAI-Net Portal (Multimodal AI Interface)"
-current_cycle = "2.7 - Settings & System Status"
+current_phase = "Phase 3: Blockchain & Governance"
+current_cycle = "3.1 - Governance Core"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -125,6 +125,22 @@ estimated_runs = 420
 estimated_weeks = "4-5"
 
 # Completed cycles
+[[completed_cycles]]
+id = "3.1"
+name = "Governance Core"
+completion_date = "2025-10-25"
+loc = 500 # Approximate LOC
+tests = 3
+goal = "Implement core on-chain governance features"
+files_modified = [
+    "hainet-chain/src/governance/mod.rs"
+]
+key_features = [
+    "Proposal creation and submission",
+    "Voting on proposals",
+    "Tallying of votes"
+]
+
 [[completed_cycles]]
 id = "0.1"
 name = "Project Scaffolding"
@@ -877,6 +893,27 @@ features = ["Device discovery (mDNS)", "P2P mesh protocol (libp2p)", "Content-ad
 note = "Deferred in favor of Phase 2 (Portal UI) for immediate testing capability"
 
 # Phase 3: Blockchain & Governance (Future)
+[phase_details.phase_3_2]
+id = "3.2"
+name = "Governance Integration"
+status = "ready_to_start"
+goal = "Integrate the governance module with the consensus and state machine"
+estimated_tokens = 40000
+estimated_loc = 1200
+estimated_tests = 15
+estimated_sessions = "1-2"
+priority = "high"
+
+[[phase_details.phase_3_2.files_to_modify]]
+path = "hainet-chain/src/state/mod.rs"
+changes = "+150 LOC"
+description = "Add logic to apply governance transactions to the state"
+
+[[phase_details.phase_3_2.files_to_modify]]
+path = "hainet-chain/src/consensus/mod.rs"
+changes = "+200 LOC"
+description = "Add logic to validate and process governance transactions"
+
 [phase_details.phase_3]
 name = "Blockchain & Governance"
 status = "planned"

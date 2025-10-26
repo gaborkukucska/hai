@@ -21,7 +21,7 @@ impl StateMachine {
     }
 
     /// Apply a transaction to the state
-    pub async fn apply_transaction(&self, transaction: &[u8]) -> Result<()> {
+    pub async fn apply_transaction(&self, _transaction: &[u8]) -> Result<()> {
         info!("Applying transaction to state");
         // TODO: Implement transaction application logic
         // 1. Decode the transaction
