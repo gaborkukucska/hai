@@ -89,7 +89,7 @@ impl WorkerAgent {
         self.current_task = Some(task_id.clone());
         
         // Update task status to Assigned
-        let mut project_manager = self.project_manager.write().await;
+        let project_manager = self.project_manager.write().await;
         project_manager.assign_task(&task_id, self.id.clone()).await?;
         
         Ok(())
@@ -126,7 +126,7 @@ impl WorkerAgent {
         )?;
         
         // Submit task for review
-        let mut project_manager = self.project_manager.write().await;
+        let project_manager = self.project_manager.write().await;
         project_manager.complete_task(task_id, deliverables).await?;
         
         Ok(())
@@ -134,7 +134,7 @@ impl WorkerAgent {
     
     /// Wait for PM validation
     pub async fn await_validation(&mut self) -> Result<bool> {
-        let task_id = self.current_task.as_ref()
+        let _task_id = self.current_task.as_ref()
             .ok_or_else(|| anyhow::anyhow!("No task assigned"))?;
         
         // Poll for task status
@@ -196,12 +196,11 @@ mod tests {
         // Create a project and a task
         let task_id = {
             let pm_mgr = worker.project_manager.write().await;
-            let project = pm_mgr.create_project(
+            let project_id = pm_mgr.create_project(
                 "Test Project".to_string(),
                 "Test project for worker".to_string(),
                 vec!["Task 1".to_string()],
             ).await.unwrap();
-            let project_id = project.id.clone();
             let tasks = pm_mgr.get_project_tasks(&project_id).await.unwrap();
             tasks[0].id.clone()
         };

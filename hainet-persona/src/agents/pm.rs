@@ -105,7 +105,7 @@ impl PMAgent {
         // Create initial milestones if none exist
         if project.milestone_ids.is_empty() {
             drop(project_manager); // Release read lock
-            let mut project_manager = self.project_manager.write().await;
+            let project_manager = self.project_manager.write().await;
             
             project_manager.create_milestone(
                 &self.project_id,
@@ -206,7 +206,7 @@ impl PMAgent {
     
     /// Complete project and transition to Idle
     async fn complete_project(&mut self) -> Result<()> {
-        let mut project_manager = self.project_manager.write().await;
+        let project_manager = self.project_manager.write().await;
         project_manager.complete_project(&self.project_id).await?;
         
         self.state_machine.transition(
@@ -253,7 +253,7 @@ mod tests {
         ));
 
         // Create project first
-        let project = {
+        let project_id = {
             let pm_mgr = project_manager.write().await;
             pm_mgr.create_project(
                 "Test Project".to_string(),
@@ -261,7 +261,6 @@ mod tests {
                 vec!["Task 1".to_string()],
             ).await.unwrap()
         };
-        let project_id = project.id.clone();
 
         let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager);
         
