@@ -1,6 +1,6 @@
 import React from 'react';
 import { DynamicUIComponent, DynamicUIAction } from '../types';
-import { componentLibrary } from './componentLibrary';
+import { componentLibrary } from './componentLibrary.tsx';
 
 interface DynamicUIRendererProps {
   schema: DynamicUIComponent;

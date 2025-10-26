@@ -3,6 +3,7 @@
 
 use std::sync::Mutex;
 use tauri::{command, State};
+use image::ImageOutputFormat;
 use hainet_core::multimodal::{VisionSystem, VisionConfig, PrivacyMode, FrameAnalysisResult};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
