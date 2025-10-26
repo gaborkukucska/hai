@@ -431,6 +431,7 @@ This file tracks the core functions/methods defined within the framework, catego
 - `AudioProcessor::decode_base64(base64_data)` - Decode Base64 audio data for IPC
 - `AudioProcessor::process(audio_data)` - Process audio: detect format, convert, resample
 - `AudioProcessor::process_wav(wav_data)` - Process WAV audio (verify format, resample if needed)
+- `AudioProcessor::decode_with_symphonia(audio_data, format)` - Decode WebM/Opus or MP3 files to WAV
 - `AudioProcessor::resample_and_convert_channels(samples, source_rate, source_channels)` - Convert to mono and resample
 - `AudioProcessor::resample_linear(samples, source_rate)` - Linear interpolation resampling
 

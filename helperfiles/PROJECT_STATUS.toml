@@ -957,9 +957,6 @@ features_implemented = [
 ]
 architecture_decision = "Switched from Candle (dependency conflicts) to external whisper.cpp process. More stable, production-ready, easy auto-install."
 known_limitations = [
-    "WebM/Opus decoding not yet implemented (marked as TODO)",
-    "MP3 decoding not yet implemented (marked as TODO)",
-    "Currently only WAV format fully supported",
     "VAD deferred to whisper.cpp (frontend shows visual feedback)"
 ]
 next_step = "Phase D: Write formal integration tests and complete documentation"
