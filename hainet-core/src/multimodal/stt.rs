@@ -233,34 +233,6 @@ impl SpeechToText {
         Ok(text)
     }
     
-    /// Extract PCM samples from WAV file (for validation)
-    fn validate_wav_format(&self, wav_data: &[u8]) -> Result<()> {
-        use hound::WavReader;
-        use std::io::Cursor;
-        
-        let reader = WavReader::new(Cursor::new(wav_data))
-            .context("Failed to read WAV file")?;
-        
-        let spec = reader.spec();
-        
-        // Whisper expects 16kHz mono (though whisper.cpp can handle other formats)
-        if spec.sample_rate != 16000 {
-            tracing::warn!(
-                "Audio is {}Hz, whisper.cpp prefers 16kHz for best results",
-                spec.sample_rate
-            );
-        }
-        
-        if spec.channels != 1 {
-            tracing::warn!(
-                "Audio has {} channels, whisper.cpp prefers mono",
-                spec.channels
-            );
-        }
-        
-        Ok(())
-    }
-    
     /// Transcribe with language detection
     pub async fn transcribe_auto_detect(&self, audio_wav: &[u8]) -> Result<TranscriptionResult> {
         let mut config = self.config.clone();

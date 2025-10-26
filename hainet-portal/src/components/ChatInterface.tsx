@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { VoiceInput } from './VoiceInput'
+import WebcamView from './WebcamView'
+import { FrameAnalysisResult } from '../types'
 
 interface ChatMessage {
   id: string
@@ -30,6 +32,7 @@ export default function ChatInterface() {
   const [isLoading, setIsLoading] = useState(false)
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
   const [showVoiceInput, setShowVoiceInput] = useState(false)
+  const [showWebcam, setShowWebcam] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -154,6 +157,16 @@ export default function ChatInterface() {
     }])
   }
 
+  const handleFrameAnalysis = (analysis: FrameAnalysisResult) => {
+    const analysisMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      content: `[Vision Analysis] Objects: ${analysis.objects_detected.join(', ')}, OCR: "${analysis.ocr_text}", Gesture: ${analysis.gesture}`,
+      role: 'assistant',
+      timestamp: Date.now(),
+    };
+    setMessages(prev => [...prev, analysisMessage]);
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages Area */}
@@ -245,6 +258,15 @@ export default function ChatInterface() {
         </div>
       )}
 
+      {/* Webcam View Area (Collapsible) */}
+      {showWebcam && (
+        <div className="border-t border-gray-700 bg-gray-800 p-4">
+          <div className="max-w-4xl mx-auto">
+            <WebcamView onFrameAnalysis={handleFrameAnalysis} />
+          </div>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="border-t border-gray-700 bg-gray-800 p-4">
         <div className="max-w-4xl mx-auto flex gap-2">
@@ -265,13 +287,24 @@ export default function ChatInterface() {
           <button
             onClick={() => setShowVoiceInput(!showVoiceInput)}
             className={`${
-              showVoiceInput 
-                ? 'bg-hai-primary text-white' 
+              showVoiceInput
+                ? 'bg-hai-primary text-white'
                 : 'bg-gray-700 hover:bg-gray-600 text-white'
             } px-4 py-3 rounded-lg transition-colors`}
             title="Toggle voice input"
           >
             🎤
+          </button>
+          <button
+            onClick={() => setShowWebcam(!showWebcam)}
+            className={`${
+              showWebcam
+                ? 'bg-hai-primary text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+            } px-4 py-3 rounded-lg transition-colors`}
+            title="Toggle webcam"
+          >
+            📷
           </button>
           <input
             type="text"

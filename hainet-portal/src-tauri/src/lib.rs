@@ -3,14 +3,16 @@
 mod admin_bridge;
 pub mod stt_handler;
 pub mod tts_handler;
+mod vision_handler;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::State;
 use tokio::sync::RwLock;
 
 use admin_bridge::{AdminBridge, ChatMessage, ChatResponse, FileAttachment};
 use stt_handler::{AudioData, TranscriptionResult};
 use tts_handler::{TTSHandler, SynthesisRequest, SynthesisResponse};
+use vision_handler::VisionState;
 
 /// Global Admin AI Bridge state
 struct AppState {
@@ -126,6 +128,7 @@ pub fn run() {
         admin_bridge: Arc::new(RwLock::new(admin_bridge)),
         tts_handler: Arc::new(RwLock::new(tts_handler)),
     })
+    .manage(VisionState(Mutex::new(None)))
     .invoke_handler(tauri::generate_handler![
         send_message,
         get_history,
@@ -135,6 +138,11 @@ pub fn run() {
         synthesize_speech,
         tts_is_ready,
         list_tts_voices,
+        vision_handler::list_webcam_devices,
+        vision_handler::start_webcam,
+        vision_handler::stop_webcam,
+        vision_handler::capture_frame,
+        vision_handler::set_privacy_mode,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

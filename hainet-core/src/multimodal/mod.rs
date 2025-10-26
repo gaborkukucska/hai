@@ -23,23 +23,31 @@
 pub mod audio;
 pub mod stt;
 pub mod tts;
+pub mod vision;
 
 pub use audio::{AudioFormat, AudioProcessor};
 pub use stt::{SpeechToText, TranscriptionResult, WhisperConfig};
 pub use tts::{TextToSpeech, SynthesisConfig, SynthesisResult, AudioOutputFormat};
+pub use vision::{FrameAnalysisResult, PrivacyMode, VisionConfig, VisionSystem};
 
 /// Configuration for multimodal services
 #[derive(Debug, Clone)]
 pub struct MultimodalConfig {
     /// Enable Speech-to-Text service
     pub stt_enabled: bool,
-    
+
     /// Path to Whisper model files
     pub whisper_model_path: std::path::PathBuf,
-    
+
     /// Default language for transcription ("auto" for automatic detection)
     pub default_language: String,
-    
+
+    /// Enable Vision service
+    pub vision_enabled: bool,
+
+    /// Configuration for the vision system
+    pub vision_config: VisionConfig,
+
     /// Device role in mesh network
     pub device_role: DeviceRole,
 }
@@ -60,11 +68,13 @@ pub enum DeviceRole {
 impl Default for MultimodalConfig {
     fn default() -> Self {
         let home_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        
+
         Self {
             stt_enabled: true,
             whisper_model_path: home_dir.join(".hainet/models/whisper-base.en"),
             default_language: "auto".to_string(),
+            vision_enabled: true,
+            vision_config: VisionConfig::default(),
             device_role: DeviceRole::Standalone,
         }
     }

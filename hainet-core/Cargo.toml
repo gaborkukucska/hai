@@ -41,6 +41,10 @@ hound = "3.5"  # WAV processing
 dirs = "5.0"   # Home directory detection
 which = "6.0"  # Executable detection for Piper TTS
 
+# Vision (Webcam)
+image = "0.25"
+nokhwa = { version = "0.10.0", features = ["output-threaded"] }
+
 # Whisper integration via whisper-rs (bindings to whisper.cpp)
 # Note: whisper-rs compilation requires cmake and a C++ compiler
 # For now, we'll implement a simpler approach using external Whisper process
