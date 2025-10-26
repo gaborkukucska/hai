@@ -502,6 +502,33 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## Blockchain & Governance System (Phase 3 - In Progress)
+
+### hainet-chain/src/consensus/mod.rs
+- `ConsensusService::new(rpc_url)` - Create a new ConsensusService
+- `ConsensusService::check_status()` - Check the status of the Tendermint node
+
+### hainet-chain/src/consensus/validator.rs
+- `BlockValidator::new()` - Create a new BlockValidator
+- `BlockValidator::validate_block(block)` - Validate a block
+
+### hainet-chain/src/state/mod.rs
+- `StateMachine::new(db_path)` - Create a new StateMachine
+- `StateMachine::apply_transaction(transaction)` - Apply a transaction to the state
+- `StateMachine::get(key)` - Get a value from the state
+- `StateMachine::set(key, value)` - Set a value in the state
+
+### hainet-chain/src/transactions/mod.rs
+- `Transaction::new(payload, keypair)` - Create and sign a new transaction
+- `Transaction::verify()` - Verify the transaction's signature and integrity
+
+### hainet-chain/src/governance/mod.rs
+- `Governance::new(db_path)` - Create a new Governance service
+- `Governance::submit_proposal(proposal)` - Submit a new proposal
+- `Governance::cast_vote(vote)` - Cast a vote on a proposal
+
+---
+
 ## Statistics
 
 **Total Modules:** 56

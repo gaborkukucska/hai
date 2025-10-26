@@ -119,7 +119,8 @@ cycles_completed = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"]
 
 [phases.phase_3]
 name = "Blockchain & Governance"
-status = "planned"
+status = "in_progress"
+start_date = "2025-10-25"
 estimated_runs = 420
 estimated_weeks = "4-5"
 
