@@ -11,6 +11,12 @@ use crate::identity::{DID, Keypair};
 use crate::transactions::Transaction;
 use sha3::{Digest, Sha3_256};
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum GovernancePayload {
+    SubmitProposal(Proposal),
+    CastVote(Vote),
+}
+
 /// Unique identifier for a proposal
 pub type ProposalId = [u8; 32];
 
@@ -62,41 +68,47 @@ pub struct Governance {
 
 impl Governance {
     /// Create a new Governance service
-    pub fn new(db_path: &str) -> Result<Self> {
-        let db = sled::open(db_path)?;
+    pub fn new(db: Db) -> Result<Self> {
         Ok(Self { db })
     }
 
     /// Submit a new proposal
     pub fn submit_proposal(&self, transaction: Transaction) -> Result<()> {
-        let proposal: Proposal = bincode::deserialize(&transaction.payload)?;
-        self.db.insert(&proposal.id, transaction.payload.as_slice())?;
-        Ok(())
+        transaction.verify()?;
+        let payload: GovernancePayload = bincode::deserialize(&transaction.payload)?;
+        if let GovernancePayload::SubmitProposal(proposal) = payload {
+            let serialized_proposal = bincode::serialize(&proposal)?;
+            self.db.insert(&proposal.id, serialized_proposal)?;
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Invalid payload type for submit_proposal"))
+        }
     }
 
     /// Cast a vote on a proposal
     pub fn cast_vote(&self, transaction: Transaction) -> Result<()> {
-        // 1. Verify the transaction itself
         transaction.verify()?;
+        let payload: GovernancePayload = bincode::deserialize(&transaction.payload)?;
 
-        // 2. Deserialize the vote from the payload
-        let vote: Vote = bincode::deserialize(&transaction.payload)?;
+        if let GovernancePayload::CastVote(vote) = payload {
+            // Construct a unique key for the vote to prevent double-voting
+            let mut vote_key = b"vote_".to_vec();
+            vote_key.extend_from_slice(&vote.proposal_id);
+            vote_key.extend_from_slice(vote.voter.as_str().as_bytes());
 
-        // 3. Construct a unique key for the vote to prevent double-voting
-        let mut vote_key = b"vote_".to_vec();
-        vote_key.extend_from_slice(&vote.proposal_id);
-        vote_key.extend_from_slice(vote.voter.as_str().as_bytes());
+            // Check if this voter has already voted
+            if self.db.contains_key(&vote_key)? {
+                anyhow::bail!("Voter has already cast a vote on this proposal");
+            }
 
-        // 4. Check if this voter has already voted
-        if self.db.contains_key(&vote_key)? {
-            anyhow::bail!("Voter has already cast a vote on this proposal");
+            // Store the vote transaction
+            let serialized_transaction = bincode::serialize(&transaction)?;
+            self.db.insert(vote_key, serialized_transaction)?;
+
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Invalid payload type for cast_vote"))
         }
-
-        // 5. Store the vote transaction
-        let serialized_transaction = bincode::serialize(&transaction)?;
-        self.db.insert(vote_key, serialized_transaction)?;
-
-        Ok(())
     }
 
     /// Tally votes for a given proposal
@@ -108,13 +120,15 @@ impl Governance {
         for item in self.db.scan_prefix(&prefix) {
             let (_, value) = item?;
             let transaction: Transaction = bincode::deserialize(&value)?;
-            let vote: Vote = bincode::deserialize(&transaction.payload)?;
+            let payload: GovernancePayload = bincode::deserialize(&transaction.payload)?;
 
-            if vote.proposal_id == proposal_id {
-                if vote.decision {
-                    yes_votes += 1;
-                } else {
-                    no_votes += 1;
+            if let GovernancePayload::CastVote(vote) = payload {
+                if vote.proposal_id == proposal_id {
+                    if vote.decision {
+                        yes_votes += 1;
+                    } else {
+                        no_votes += 1;
+                    }
                 }
             }
         }
@@ -155,7 +169,8 @@ pub fn create_vote(
         decision,
     };
 
-    let payload = bincode::serialize(&vote)?;
+    let payload_enum = GovernancePayload::CastVote(vote);
+    let payload = bincode::serialize(&payload_enum)?;
     Transaction::new(payload, keypair)
 }
 
@@ -192,7 +207,8 @@ pub fn create_proposal(
     let mut proposal_with_id = proposal.clone();
     proposal_with_id.id = id_array;
 
-    let final_payload = bincode::serialize(&proposal_with_id)?;
+    let payload_enum = GovernancePayload::SubmitProposal(proposal_with_id);
+    let final_payload = bincode::serialize(&payload_enum)?;
 
     Transaction::new(final_payload, keypair)
 }
@@ -207,7 +223,8 @@ mod tests {
     fn test_create_and_submit_proposal() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().to_str().unwrap();
-        let governance = Governance::new(db_path).unwrap();
+        let db = sled::open(db_path).unwrap();
+        let governance = Governance::new(db).unwrap();
         let keypair = Keypair::generate();
 
         let transaction = create_proposal(
@@ -228,7 +245,8 @@ mod tests {
     fn test_create_and_cast_vote() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().to_str().unwrap();
-        let governance = Governance::new(db_path).unwrap();
+        let db = sled::open(db_path).unwrap();
+        let governance = Governance::new(db).unwrap();
         let keypair = Keypair::generate();
         let proposal_id = [1u8; 32];
 
@@ -242,7 +260,8 @@ mod tests {
     fn test_tally_votes() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().to_str().unwrap();
-        let governance = Governance::new(db_path).unwrap();
+        let db = sled::open(db_path).unwrap();
+        let governance = Governance::new(db).unwrap();
         let proposal_id = [1u8; 32];
 
         // Cast some votes
