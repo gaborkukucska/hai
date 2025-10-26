@@ -33,7 +33,7 @@ chrono = "0.4"
 base64 = "0.21"
 reqwest = { version = "0.11", features = ["json", "multipart"] }
 tracing = "0.1"
-tiny-http = "0.12"
+tiny_http = "0.12"
 
 # HAI-Net dependencies
 hainet-persona = { path = "../../hainet-persona" }
