@@ -171,7 +171,7 @@ mod tests {
     
     async fn create_test_worker() -> WorkerAgent {
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));
-        let prompt_manager = Arc::new(PromptManager::new("hainet-persona/prompts".into()).unwrap());
+        let prompt_manager = Arc::new(PromptManager::new("prompts".into()).unwrap());
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
@@ -193,8 +193,18 @@ mod tests {
         // Transition to Idle first
         worker.state_machine.transition(AgentState::Idle, "Init".to_string()).unwrap();
         
-        // Create a test task
-        let task_id = TaskId::new();
+        // Create a project and a task
+        let task_id = {
+            let pm_mgr = worker.project_manager.write().await;
+            let project = pm_mgr.create_project(
+                "Test Project".to_string(),
+                "Test project for worker".to_string(),
+                vec!["Task 1".to_string()],
+            ).await.unwrap();
+            let project_id = project.id.clone();
+            let tasks = pm_mgr.get_project_tasks(&project_id).await.unwrap();
+            tasks[0].id.clone()
+        };
         
         // Assignment should succeed
         let result = worker.assign_task(task_id).await;

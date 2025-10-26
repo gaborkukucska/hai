@@ -229,7 +229,7 @@ mod tests {
     
     async fn create_test_pm() -> PMAgent {
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));
-        let prompt_manager = Arc::new(RwLock::new(PromptManager::new("hainet-persona/prompts".into()).unwrap()));
+        let prompt_manager = Arc::new(RwLock::new(PromptManager::new("prompts".into()).unwrap()));
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
@@ -246,17 +246,24 @@ mod tests {
     
     #[tokio::test]
     async fn test_pm_startup_transition() {
-        let mut pm = create_test_pm().await;
-        
+        let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));
+        let prompt_manager = Arc::new(RwLock::new(PromptManager::new("prompts".into()).unwrap()));
+        let project_manager = Arc::new(RwLock::new(
+            ProjectManager::new("sqlite::memory:").await.unwrap()
+        ));
+
         // Create project first
-        {
-            let pm_mgr = pm.project_manager.write().await;
+        let project = {
+            let pm_mgr = project_manager.write().await;
             pm_mgr.create_project(
                 "Test Project".to_string(),
                 "Test project for PM agent".to_string(),
                 vec!["Task 1".to_string()],
-            ).await.unwrap();
-        }
+            ).await.unwrap()
+        };
+        let project_id = project.id.clone();
+
+        let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager);
         
         pm.start().await.unwrap();
         assert_eq!(pm.state(), &AgentState::Managing);
