@@ -504,19 +504,15 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ## Local Hub Networking (Phase 4 - In Progress)
 
-### hainet-core/src/networking/mod.rs
-- `CombinedBehaviour` - A composite `NetworkBehaviour` that combines discovery and peer management.
-- `CombinedEvent` - An enum that wraps events from all underlying network behaviours.
-
 ### hainet-core/src/networking/coordinator.rs
-- `Coordinator::new()` - Creates a new `Coordinator` with a `Swarm` using `CombinedBehaviour`.
-- `Coordinator::run()` - Runs the coordinator's main event loop, handling `CombinedEvent`s.
+- `Coordinator::new()` - Creates a new `Coordinator`.
+- `Coordinator::run()` - Runs the coordinator event loop.
 
 ### hainet-core/src/networking/discovery.rs
-- `DiscoveryBehaviour` - The `NetworkBehaviour` for mDNS peer discovery.
+- `DiscoveryBehaviour` - The `NetworkBehaviour` for mDNS discovery.
 
 ### hainet-core/src/networking/peer.rs
-- `PeerBehaviour` - The `NetworkBehaviour` for libp2p's Ping protocol.
+- `PeerBehaviour` - The `NetworkBehaviour` for Ping.
 - `PeerEvent` - Events emitted by the `PeerBehaviour`.
 
 ---

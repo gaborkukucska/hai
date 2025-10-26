@@ -3,7 +3,7 @@
 
 use std::sync::Mutex;
 use tauri::{command, State};
-use image::ImageOutputFormat;
+use image::ImageFormat;
 use hainet_core::multimodal::{VisionSystem, VisionConfig, PrivacyMode, FrameAnalysisResult};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
@@ -49,7 +49,7 @@ pub async fn capture_frame(state: State<'_, VisionState>) -> Result<FrameCapture
 
         // Convert frame to Base64
         let mut buf = Vec::new();
-        frame.write_to(&mut std::io::Cursor::new(&mut buf), ImageOutputFormat::Png)
+        frame.write_to(&mut std::io::Cursor::new(&mut buf), ImageFormat::Png)
             .map_err(|e| e.to_string())?;
         let image_base64 = STANDARD.encode(&buf);
 

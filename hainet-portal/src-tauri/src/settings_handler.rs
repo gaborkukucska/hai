@@ -59,13 +59,15 @@ pub fn update_settings(settings: Settings) -> Result<(), String> {
 #[tauri::command]
 pub fn get_system_status(system_info: State<SystemInfo>) -> SystemStatus {
     let mut sys = system_info.sys.lock().unwrap();
-    sys.refresh_all();
+    sys.refresh_cpu();
+    sys.refresh_memory();
+    sys.refresh_disks_list();
 
-    let cpu_usage = sys.global_cpu_info().cpu_usage();
+    let cpu_usage = sys.global_cpu_usage();
     let total_memory = sys.total_memory();
     let memory_usage = sys.used_memory();
 
-    let (disk_usage, total_disk) = sys.disks().iter().fold((0, 0), |(used, total), disk| {
+    let (disk_usage, total_disk) = sys.disks_mut().iter().fold((0, 0), |(used, total), disk| {
         (used + (disk.total_space() - disk.available_space()), total + disk.total_space())
     });
 
