@@ -3,9 +3,9 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-10-25T21:24:36+08:00"
+last_updated = "2025-10-26T17:16:36+08:00"
 project_name = "HAI-Net Seed"
-version = "0.04"
+version = "0.05"
 current_phase = "Phase 4: Local Hub Networking"
 current_cycle = "4.1 - Peer Discovery"
 context_budget_per_session = 200000
@@ -1074,6 +1074,26 @@ next_steps = [
 ]
 
 # Recent completions (last 10)
+[[recent_completions]]
+date = "2025-10-26"
+event = "Piper TTS Installer Fix - COMPLETE! 🔧"
+details = "Fixed critical bug in Piper TTS installation. The download URL used incorrect architecture naming (amd64 instead of x86_64, arm64 instead of aarch64). Updated arch_suffix mapping to match actual GitHub release filenames. Installation now succeeds with proper binary download and extraction."
+tokens_used = 20000
+files_modified = [
+    "hainet-seed/src/installer/piper.rs"
+]
+compilation_status = "Success"
+test_status = "Installation verified - Piper 1.2.0 installed successfully"
+bug_fixed = "Architecture naming mismatch causing 'Not Found' (9-byte) download response"
+features_verified = [
+    "Correct download URL with x86_64/aarch64/armv7l naming",
+    "Successful binary download (25.2MB)",
+    "Successful tar.gz extraction",
+    "Binary symlink creation in ~/.local/bin",
+    "Piper version check (1.2.0)",
+    "Voice model download workflow"
+]
+
 [[recent_completions]]
 date = "2025-10-25"
 event = "Phase 3.4 - Governance Tallying - COMPLETE! 🗳️"

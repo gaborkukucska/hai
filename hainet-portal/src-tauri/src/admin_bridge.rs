@@ -80,16 +80,23 @@ impl AdminBridge {
     pub async fn new() -> Result<Self> {
         log::info!("Initializing Admin AI Bridge...");
         
-        // Get project root (2 levels up from src-tauri)
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-            .unwrap_or_else(|_| ".".to_string());
-        let project_root = std::path::PathBuf::from(&manifest_dir)
-            .parent()
-            .and_then(|p| p.parent())
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine project root"))?
-            .to_path_buf();
+        // Determine prompts path - try multiple strategies
+        let prompts_path = if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+            // Running via cargo run - use project structure
+            let project_root = std::path::PathBuf::from(&manifest_dir)
+                .parent()
+                .and_then(|p| p.parent())
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .to_path_buf();
+            project_root.join("hainet-persona").join("prompts")
+        } else {
+            // Running as binary - use current directory
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join("hainet-persona")
+                .join("prompts")
+        };
         
-        let prompts_path = project_root.join("hainet-persona").join("prompts");
         log::info!("Prompts path: {:?}", prompts_path);
         
         // Create shared context
@@ -106,10 +113,25 @@ impl AdminBridge {
         ));
         
         // Create project manager with SQLite database
-        let db_path = project_root.join("data").join("projects.db");
-        std::fs::create_dir_all(db_path.parent().unwrap())?;
+        // Use a more reliable path in the user's home directory
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let hainet_dir = home_dir.join(".hainet");
+        let data_dir = hainet_dir.join("data");
+        
+        // Create directories with proper permissions
+        std::fs::create_dir_all(&data_dir)?;
+        
+        let db_path = data_dir.join("projects.db");
+        log::info!("Database path: {:?}", db_path);
+        
+        // SQLite connection string format: sqlite://path/to/db?mode=rwc
+        // mode=rwc means: read-write-create (create if doesn't exist)
+        let db_connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
+        log::info!("Database connection string: {}", db_connection_string);
+        
         let project_manager = Arc::new(RwLock::new(
-            ProjectManager::new(db_path.to_str().unwrap()).await?
+            ProjectManager::new(&db_connection_string).await?
         ));
         
         // Create Admin AI agent

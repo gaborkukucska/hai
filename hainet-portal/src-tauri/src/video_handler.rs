@@ -16,7 +16,7 @@ fn find_open_port() -> Result<u16, String> {
 }
 
 fn handle_request(request: Request, video_path: &Path) {
-    let mut file = match File::open(video_path) {
+    let file = match File::open(video_path) {
         Ok(file) => file,
         Err(_) => {
             let response = Response::from_string("File not found").with_status_code(404);

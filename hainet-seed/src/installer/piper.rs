@@ -5,7 +5,7 @@
 //! based on system capabilities and user preferences.
 
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::installer::platform::{Platform, Architecture, SystemTier};
@@ -75,9 +75,10 @@ impl PiperInstaller {
         };
         
         let arch_suffix = match arch {
-            Architecture::X86_64 => "amd64",
-            Architecture::Aarch64 => "arm64",
-            _ => anyhow::bail!("Unsupported architecture for Piper: {:?}", arch),
+            Architecture::X86_64 => "x86_64",
+            Architecture::Aarch64 => "aarch64",
+            Architecture::Other(name) if name.starts_with("arm") => "armv7l",
+            Architecture::Other(name) => anyhow::bail!("Unsupported architecture for Piper: {}", name),
         };
         
         // Download URL (using latest release from GitHub)
