@@ -18,7 +18,7 @@ use stt_handler::{AudioData, TranscriptionResult};
 use tts_handler::{TTSHandler, SynthesisRequest, SynthesisResponse};
 use vision_handler::VisionState;
 use settings_handler::SystemInfo;
-use sysinfo::{System, SystemExt};
+use sysinfo::System;
 
 /// Global Admin AI Bridge state
 struct AppState {

@@ -141,6 +141,8 @@ impl AdminBridge {
             role: "user".to_string(),
             timestamp: chrono::Utc::now().timestamp(),
             attachments: attachments.clone(),
+            video_src: None,
+            dynamic_component: None,
         };
         
         // Store in history

@@ -2,7 +2,7 @@
 //! Crate for handling settings and system status.
 
 use serde::{Serialize, Deserialize};
-use sysinfo::{System, SystemExt, CpuExt, DiskExt};
+use sysinfo::System;
 use tauri::State;
 use std::sync::Mutex;
 
