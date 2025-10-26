@@ -5,10 +5,10 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sled::Db;
 use std::time::SystemTime;
 use crate::identity::{DID, Keypair};
 use crate::transactions::Transaction;
+use crate::consensus::rpc_client::RpcClientContract;
 use sha3::{Digest, Sha3_256};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -62,88 +62,28 @@ pub struct Vote {
 }
 
 /// The governance management service
-pub struct Governance {
-    db: Db,
+pub struct Governance<C: RpcClientContract> {
+    rpc_client: C,
 }
 
-impl Governance {
+impl<C: RpcClientContract> Governance<C> {
     /// Create a new Governance service
-    pub fn new(db: Db) -> Result<Self> {
-        Ok(Self { db })
+    pub fn new(rpc_client: C) -> Result<Self> {
+        Ok(Self { rpc_client })
     }
 
     /// Submit a new proposal
-    pub fn submit_proposal(&self, transaction: Transaction) -> Result<()> {
+    pub async fn submit_proposal(&self, transaction: Transaction) -> Result<()> {
         transaction.verify()?;
-        let payload: GovernancePayload = bincode::deserialize(&transaction.payload)?;
-        if let GovernancePayload::SubmitProposal(proposal) = payload {
-            let serialized_proposal = bincode::serialize(&proposal)?;
-            self.db.insert(&proposal.id, serialized_proposal)?;
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Invalid payload type for submit_proposal"))
-        }
+        self.rpc_client.broadcast_tx(&transaction).await?;
+        Ok(())
     }
 
     /// Cast a vote on a proposal
-    pub fn cast_vote(&self, transaction: Transaction) -> Result<()> {
+    pub async fn cast_vote(&self, transaction: Transaction) -> Result<()> {
         transaction.verify()?;
-        let payload: GovernancePayload = bincode::deserialize(&transaction.payload)?;
-
-        if let GovernancePayload::CastVote(vote) = payload {
-            // Construct a unique key for the vote to prevent double-voting
-            let mut vote_key = b"vote_".to_vec();
-            vote_key.extend_from_slice(&vote.proposal_id);
-            vote_key.extend_from_slice(vote.voter.as_str().as_bytes());
-
-            // Check if this voter has already voted
-            if self.db.contains_key(&vote_key)? {
-                anyhow::bail!("Voter has already cast a vote on this proposal");
-            }
-
-            // Store the vote transaction
-            let serialized_transaction = bincode::serialize(&transaction)?;
-            self.db.insert(vote_key, serialized_transaction)?;
-
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Invalid payload type for cast_vote"))
-        }
-    }
-
-    /// Tally votes for a given proposal
-    pub fn tally_votes(&self, proposal_id: ProposalId) -> Result<TallyResult> {
-        let mut yes_votes = 0;
-        let mut no_votes = 0;
-
-        let prefix = b"vote_".to_vec();
-        for item in self.db.scan_prefix(&prefix) {
-            let (_, value) = item?;
-            let transaction: Transaction = bincode::deserialize(&value)?;
-            let payload: GovernancePayload = bincode::deserialize(&transaction.payload)?;
-
-            if let GovernancePayload::CastVote(vote) = payload {
-                if vote.proposal_id == proposal_id {
-                    if vote.decision {
-                        yes_votes += 1;
-                    } else {
-                        no_votes += 1;
-                    }
-                }
-            }
-        }
-
-        let status = if yes_votes > no_votes {
-            ProposalStatus::Passed
-        } else {
-            ProposalStatus::Failed
-        };
-
-        Ok(TallyResult {
-            yes_votes,
-            no_votes,
-            status,
-        })
+        self.rpc_client.broadcast_tx(&transaction).await?;
+        Ok(())
     }
 }
 
@@ -217,68 +157,57 @@ pub fn create_proposal(
 mod tests {
     use super::*;
     use crate::identity::Keypair;
-    use tempfile::tempdir;
+    use std::sync::{Arc, Mutex};
+    use async_trait::async_trait;
 
-    #[test]
-    fn test_create_and_submit_proposal() {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().to_str().unwrap();
-        let db = sled::open(db_path).unwrap();
-        let governance = Governance::new(db).unwrap();
+    struct MockRpcClient {
+        broadcast_tx_called: Arc<Mutex<bool>>,
+    }
+
+    impl MockRpcClient {
+        fn new(broadcast_tx_called: Arc<Mutex<bool>>) -> Self {
+            Self { broadcast_tx_called }
+        }
+    }
+
+    #[async_trait]
+    impl RpcClientContract for MockRpcClient {
+        async fn broadcast_tx(&self, _tx: &Transaction) -> Result<()> {
+            let mut called = self.broadcast_tx_called.lock().unwrap();
+            *called = true;
+            Ok(())
+        }
+        async fn status(&self) -> Result<tendermint_rpc::endpoint::status::Response> {
+            unimplemented!();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_submit_proposal_broadcasts_transaction() {
+        let broadcast_tx_called = Arc::new(Mutex::new(false));
+        let mock_rpc_client = MockRpcClient::new(broadcast_tx_called.clone());
+        let governance = Governance::new(mock_rpc_client).unwrap();
         let keypair = Keypair::generate();
-
         let transaction = create_proposal(
             &keypair,
-            "Test Proposal".to_string(),
-            "This is a test proposal.".to_string(),
+            "Test".to_string(),
+            "Test".to_string(),
             ProposalType::CommunityFundSpend,
             3600,
-            vec![1, 2, 3],
-        )
-        .unwrap();
-
-        let result = governance.submit_proposal(transaction);
-        assert!(result.is_ok());
+            vec![],
+        ).unwrap();
+        governance.submit_proposal(transaction).await.unwrap();
+        assert!(*broadcast_tx_called.lock().unwrap());
     }
 
-    #[test]
-    fn test_create_and_cast_vote() {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().to_str().unwrap();
-        let db = sled::open(db_path).unwrap();
-        let governance = Governance::new(db).unwrap();
+    #[tokio::test]
+    async fn test_cast_vote_broadcasts_transaction() {
+        let broadcast_tx_called = Arc::new(Mutex::new(false));
+        let mock_rpc_client = MockRpcClient::new(broadcast_tx_called.clone());
+        let governance = Governance::new(mock_rpc_client).unwrap();
         let keypair = Keypair::generate();
-        let proposal_id = [1u8; 32];
-
-        let transaction = create_vote(&keypair, proposal_id, true).unwrap();
-
-        let result = governance.cast_vote(transaction);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_tally_votes() {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().to_str().unwrap();
-        let db = sled::open(db_path).unwrap();
-        let governance = Governance::new(db).unwrap();
-        let proposal_id = [1u8; 32];
-
-        // Cast some votes
-        let keypair1 = Keypair::generate();
-        let keypair2 = Keypair::generate();
-        let keypair3 = Keypair::generate();
-        let vote1 = create_vote(&keypair1, proposal_id, true).unwrap();
-        let vote2 = create_vote(&keypair2, proposal_id, false).unwrap();
-        let vote3 = create_vote(&keypair3, proposal_id, true).unwrap();
-        governance.cast_vote(vote1).unwrap();
-        governance.cast_vote(vote2).unwrap();
-        governance.cast_vote(vote3).unwrap();
-
-        let result = governance.tally_votes(proposal_id).unwrap();
-
-        assert_eq!(result.yes_votes, 2);
-        assert_eq!(result.no_votes, 1);
-        assert_eq!(result.status, ProposalStatus::Passed);
+        let transaction = create_vote(&keypair, [0u8; 32], true).unwrap();
+        governance.cast_vote(transaction).await.unwrap();
+        assert!(*broadcast_tx_called.lock().unwrap());
     }
 }

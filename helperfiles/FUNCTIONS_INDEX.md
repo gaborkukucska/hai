@@ -505,8 +505,13 @@ This file tracks the core functions/methods defined within the framework, catego
 ## Blockchain & Governance System (Phase 3 - In Progress)
 
 ### hainet-chain/src/consensus/mod.rs
-- `ConsensusService::new(rpc_url)` - Create a new ConsensusService
-- `ConsensusService::check_status()` - Check the status of the Tendermint node
+- `rpc_client` - Module for the Tendermint RPC client.
+- `validator` - Module for block and transaction validation.
+
+### hainet-chain/src/consensus/rpc_client.rs
+- `RpcClient::new(rpc_url)` - Creates a new `RpcClient` connected to the specified `rpc_url`.
+- `RpcClient::broadcast_tx(tx)` - Broadcasts a transaction to the Tendermint network.
+- `RpcClient::status()` - Checks the status of the connected Tendermint node.
 
 ### hainet-chain/src/consensus/validator.rs
 - `BlockValidator::new(db)` - Create a new BlockValidator
@@ -515,20 +520,18 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ### hainet-chain/src/state/mod.rs
 - `StateMachine::new(db_path)` - Create a new StateMachine
-- `StateMachine::apply_transaction(transaction)` - Apply a transaction to the state
+- `StateMachine::apply_block(transactions)` - Apply a block of transactions to the state.
 - `StateMachine::get(key)` - Get a value from the state
 - `StateMachine::set(key, value)` - Set a value in the state
-- `StateMachine::tally_votes(proposal_id)` - Tally votes for a given proposal
 
 ### hainet-chain/src/transactions/mod.rs
 - `Transaction::new(payload, keypair)` - Create and sign a new transaction
 - `Transaction::verify()` - Verify the transaction's signature and integrity
 
 ### hainet-chain/src/governance/mod.rs
-- `Governance::new(db)` - Create a new Governance service
-- `Governance::submit_proposal(transaction)` - Submit a new proposal
-- `Governance::cast_vote(transaction)` - Cast a vote on a proposal
-- `Governance::tally_votes(proposal_id)` - Tally votes for a given proposal
+- `Governance::new(rpc_client)` - Create a new Governance service.
+- `Governance::submit_proposal(transaction)` - Submits a new proposal by broadcasting a transaction.
+- `Governance::cast_vote(transaction)` - Casts a vote by broadcasting a transaction.
 - `create_proposal(keypair, title, description, proposal_type, voting_duration_secs, payload)` - Create and sign a new proposal
 - `create_vote(keypair, proposal_id, decision)` - Create and sign a new vote
 
