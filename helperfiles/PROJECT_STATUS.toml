@@ -6,8 +6,8 @@
 last_updated = "2025-10-25T21:24:36+08:00"
 project_name = "HAI-Net Seed"
 version = "0.04"
-current_phase = "Phase 3: Blockchain & Governance"
-current_cycle = "3.4 - Governance Tallying"
+current_phase = "Phase 4: Local Hub Networking"
+current_cycle = "4.1 - Peer Discovery"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -125,7 +125,38 @@ start_date = "2025-10-25"
 estimated_runs = 420
 estimated_weeks = "4-5"
 
+[phases.phase_4]
+name = "Local Hub Networking"
+status = "in_progress"
+start_date = "2025-10-25"
+estimated_runs = 350
+estimated_weeks = "3-4"
+features = ["Device discovery (mDNS)", "P2P mesh protocol (libp2p)", "Content-addressed storage", "CRDT-based sync", "Resource coordinator"]
+
 # Completed cycles
+[[completed_cycles]]
+id = "4.1"
+name = "Peer Discovery Foundation"
+completion_date = "2025-10-25"
+loc = 250 # Approximate LOC
+tests = 0
+goal = "Implement the foundation for peer-to-peer networking, including device discovery using mDNS and a basic ping protocol to verify connectivity."
+files_created = [
+    "hainet-core/src/networking/mod.rs",
+    "hainet-core/src/networking/discovery.rs",
+    "hainet-core/src/networking/peer.rs",
+    "hainet-core/src/networking/coordinator.rs"
+]
+files_modified = [
+    "hainet-core/Cargo.toml",
+    "hainet-core/src/lib.rs"
+]
+key_features = [
+    "mDNS-based peer discovery.",
+    "libp2p swarm with Ping behaviour.",
+    "Coordinator to manage discovery and peer interactions."
+]
+
 [[completed_cycles]]
 id = "3.3"
 name = "Tendermint Integration"

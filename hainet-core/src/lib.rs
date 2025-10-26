@@ -5,6 +5,7 @@
 
 pub mod storage;
 pub mod multimodal;
+pub mod networking;
 
 use tracing::info;
 use anyhow::Result;

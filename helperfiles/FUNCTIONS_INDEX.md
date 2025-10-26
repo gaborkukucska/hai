@@ -502,6 +502,21 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## Local Hub Networking (Phase 4 - In Progress)
+
+### hainet-core/src/networking/coordinator.rs
+- `Coordinator::new()` - Creates a new `Coordinator`.
+- `Coordinator::run()` - Runs the coordinator event loop.
+
+### hainet-core/src/networking/discovery.rs
+- `DiscoveryBehaviour` - The `NetworkBehaviour` for mDNS discovery.
+
+### hainet-core/src/networking/peer.rs
+- `PeerBehaviour` - The `NetworkBehaviour` for Ping.
+- `PeerEvent` - Events emitted by the `PeerBehaviour`.
+
+---
+
 ## Blockchain & Governance System (Phase 3 - In Progress)
 
 ### hainet-chain/src/consensus/mod.rs
