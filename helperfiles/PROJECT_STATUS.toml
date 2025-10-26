@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-10-25T10:21:15+08:00"
+last_updated = "2025-10-25T11:20:25+08:00"
 project_name = "HAI-Net Seed"
 version = "0.04"
 current_phase = "Phase 2: HAI-Net Portal (Multimodal AI Interface)"
-current_cycle = "2.6 - Video Streaming Output"
+current_cycle = "2.7 - Settings & System Status"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -79,7 +79,7 @@ assignment = "Additional processing capacity"
 # Overall completion percentages
 phase_0_complete = true
 phase_1_progress = 1.00  # 100% complete (All cycles done: 1.1, 1.2, 1.3)
-phase_2_progress = 0.71  # 5/7 cycles complete (2.1, 2.2, 2.3, 2.4, 2.5)
+phase_2_progress = 1.00  # 7/7 cycles complete
 total_loc_produced = 17170 # Will update after LOC count
 total_tests_passing = 154
 total_crates = 8
@@ -108,13 +108,14 @@ cycles_completed = ["1.1", "1.2", "1.3"]
 
 [phases.phase_2]
 name = "HAI-Net Portal (Multimodal AI Interface)"
-status = "in_progress"
+status = "complete"
 start_date = "2025-10-22"
+completion_date = "2025-10-25"
 estimated_tokens = 160000
 estimated_loc = 5800
 estimated_tests = 64
 cycles_planned = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"]
-cycles_completed = ["2.1", "2.2", "2.3", "2.4", "2.5"]
+cycles_completed = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"]
 
 [phases.phase_3]
 name = "Blockchain & Governance"
@@ -368,6 +369,54 @@ key_features = [
     "React component factory from JSON",
     "Event handling back to Admin AI",
     "Safe sandbox execution (no arbitrary code)"
+]
+
+[[completed_cycles]]
+id = "2.6"
+name = "Video Streaming Output"
+completion_date = "2025-10-25"
+loc = 700 # Approximate LOC
+tests = 0 # No new tests added
+goal = "Admin AI can stream video if needed (tutorials, visualizations)"
+files_created = [
+    "hainet-portal/src-tauri/src/video_handler.rs",
+    "hainet-portal/src/components/VideoPlayer.tsx"
+]
+files_modified = [
+    "hainet-portal/src-tauri/src/lib.rs",
+    "hainet-portal/src/components/ChatInterface.tsx"
+]
+key_features = [
+    "Full-screen video player overlay",
+    "Local file and screen recording playback",
+    "Generated visualization support",
+    "Video player controls (play/pause/seek)",
+    "Seamless chat integration"
+]
+
+[[completed_cycles]]
+id = "2.7"
+name = "Settings & System Status"
+completion_date = "2025-10-25"
+loc = 500 # Approximate LOC
+tests = 0 # No new tests added
+goal = "Configuration UI and system monitoring"
+files_created = [
+    "hainet-portal/src/components/Settings.tsx",
+    "hainet-portal/src/components/SystemStatus.tsx",
+    "hainet-portal/src-tauri/src/settings_handler.rs"
+]
+files_modified = [
+    "hainet-portal/src-tauri/src/lib.rs",
+    "hainet-portal/src/components/ChatInterface.tsx"
+]
+key_features = [
+    "Audio/video device selection",
+    "Model preferences (STT, TTS, Vision)",
+    "Privacy settings panel",
+    "System resource monitoring",
+    "Active projects display",
+    "Theme customization (dark/light)"
 ]
 
 # Detailed phase/cycle implementation plans
@@ -792,7 +841,7 @@ feature = "Seamless chat integration"
 [phase_details.phase_2_7]
 id = "2.7"
 name = "Settings & System Status"
-status = "planned"
+status = "complete"
 goal = "Configuration UI and system monitoring"
 estimated_tokens = 15000
 estimated_loc = 500

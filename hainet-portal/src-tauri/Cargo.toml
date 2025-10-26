@@ -39,6 +39,7 @@ tiny-http = "0.12"
 hainet-persona = { path = "../../hainet-persona" }
 hainet-core = { path = "../../hainet-core" }
 image = "0.25"
+sysinfo = "0.30.12"
 
 [dev-dependencies]
 hound = "3.5"  # WAV file generation for tests

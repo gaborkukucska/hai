@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { VoiceInput } from './VoiceInput'
 import WebcamView from './WebcamView'
 import VideoPlayer from './VideoPlayer'
+import Settings from './Settings'
 import { FrameAnalysisResult, DynamicUIComponent, DynamicUIAction } from '../types'
 import DynamicUIRenderer from './DynamicUIRenderer'
 
@@ -37,6 +38,7 @@ export default function ChatInterface() {
   const [attachments, setAttachments] = useState<FileAttachment[]>([])
   const [showVoiceInput, setShowVoiceInput] = useState(false)
   const [showWebcam, setShowWebcam] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [isVideoVisible, setIsVideoVisible] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -215,17 +217,23 @@ export default function ChatInterface() {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <VideoPlayer
-        src={videoSrc}
-        isVisible={isVideoVisible}
-        onClose={closeVideoPlayer}
-      />
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 ? (
-          <div className="text-center text-gray-500 py-8">
-            <p className="text-lg">Welcome to HAI-Net!</p>
+    <div className="flex h-full">
+      {showSettings && (
+        <div className="w-1/3 bg-gray-800 border-r border-gray-700">
+          <Settings />
+        </div>
+      )}
+      <div className="flex flex-col h-full flex-1">
+        <VideoPlayer
+          src={videoSrc}
+          isVisible={isVideoVisible}
+          onClose={closeVideoPlayer}
+        />
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.length === 0 ? (
+            <div className="text-center text-gray-500 py-8">
+              <p className="text-lg">Welcome to HAI-Net!</p>
             <p className="text-sm mt-2">Start a conversation with your AI assistant</p>
           </div>
         ) : (
@@ -370,6 +378,17 @@ export default function ChatInterface() {
             title="Toggle webcam"
           >
             📷
+          </button>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={`${
+              showSettings
+                ? 'bg-hai-primary text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+            } px-4 py-3 rounded-lg transition-colors`}
+            title="Toggle settings"
+          >
+            ⚙️
           </button>
           <input
             type="text"
