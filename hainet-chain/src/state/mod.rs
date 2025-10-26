@@ -6,7 +6,7 @@
 use anyhow::Result;
 use sled::Db;
 use tracing::info;
-use crate::governance::{GovernancePayload};
+use crate::governance::{GovernancePayload, ProposalId, TallyResult};
 use crate::transactions::Transaction;
 
 /// Represents the state of the blockchain.
@@ -72,4 +72,8 @@ impl StateMachine {
         Ok(())
     }
 
+    /// Tally votes for a proposal
+    pub fn tally_votes(&self, proposal_id: ProposalId) -> Result<TallyResult> {
+        crate::governance::tally_votes(&self.db, proposal_id)
+    }
 }

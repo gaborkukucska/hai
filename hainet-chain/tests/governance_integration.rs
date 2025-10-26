@@ -1,7 +1,7 @@
 //! <!-- # START OF FILE hainet-chain/tests/governance_integration.rs -->
 //! Integration Tests for the Governance Workflow
 
-use hainet_chain::governance::{create_proposal, create_vote, ProposalType, GovernancePayload, Vote};
+use hainet_chain::governance::{create_proposal, create_vote, ProposalType, GovernancePayload};
 use hainet_chain::identity::Keypair;
 use hainet_chain::state::StateMachine;
 use tempfile::tempdir;
@@ -45,27 +45,11 @@ async fn test_governance_workflow() {
     let block_txs = vec![proposal_tx, vote1_tx, vote2_tx, vote3_tx];
     state_machine.apply_block(block_txs).await.unwrap();
 
-    // Explicitly drop the state machine to release the database lock
-    drop(state_machine);
-
-    // 5. Tally votes manually by scanning the database
-    let db = sled::open(db_path).unwrap();
-    let mut yes_votes = 0;
-    let mut no_votes = 0;
-    let prefix = b"vote_";
-    for item in db.scan_prefix(prefix) {
-        let (_, value) = item.unwrap();
-        let vote: Vote = bincode::deserialize(&value).unwrap();
-        if vote.proposal_id == proposal_id {
-            if vote.decision {
-                yes_votes += 1;
-            } else {
-                no_votes += 1;
-            }
-        }
-    }
+    // 5. Tally votes using the state machine
+    let tally_result = state_machine.tally_votes(proposal_id).unwrap();
 
     // 6. Verify the outcome
-    assert_eq!(yes_votes, 2);
-    assert_eq!(no_votes, 1);
+    assert_eq!(tally_result.yes_votes, 2);
+    assert_eq!(tally_result.no_votes, 1);
+    assert_eq!(tally_result.status, hainet_chain::governance::ProposalStatus::Passed);
 }

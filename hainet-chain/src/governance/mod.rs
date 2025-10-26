@@ -10,6 +10,7 @@ use crate::identity::{DID, Keypair};
 use crate::transactions::Transaction;
 use crate::consensus::rpc_client::RpcClientContract;
 use sha3::{Digest, Sha3_256};
+use sled::Db;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum GovernancePayload {
@@ -151,6 +152,37 @@ pub fn create_proposal(
     let final_payload = bincode::serialize(&payload_enum)?;
 
     Transaction::new(final_payload, keypair)
+}
+
+/// Tally the votes for a given proposal
+pub fn tally_votes(db: &Db, proposal_id: ProposalId) -> Result<TallyResult> {
+    let mut yes_votes = 0;
+    let mut no_votes = 0;
+
+    let mut prefix = b"vote_".to_vec();
+    prefix.extend_from_slice(&proposal_id);
+
+    for item in db.scan_prefix(prefix) {
+        let (_, value) = item?;
+        let vote: Vote = bincode::deserialize(&value)?;
+        if vote.decision {
+            yes_votes += 1;
+        } else {
+            no_votes += 1;
+        }
+    }
+
+    let status = if yes_votes > no_votes {
+        ProposalStatus::Passed
+    } else {
+        ProposalStatus::Failed
+    };
+
+    Ok(TallyResult {
+        yes_votes,
+        no_votes,
+        status,
+    })
 }
 
 #[cfg(test)]
