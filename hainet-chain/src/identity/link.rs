@@ -151,7 +151,6 @@ impl LinkRecord {
 pub struct PersonaLink {
     /// Human identity
     user_did: DID,
-    user_keypair: Keypair,
 
     /// AI persona identity
     persona_did: DID,
@@ -206,7 +205,6 @@ impl PersonaLink {
 
         Ok(Self {
             user_did,
-            user_keypair,
             persona_did,
             persona_keypair,
             link_record,

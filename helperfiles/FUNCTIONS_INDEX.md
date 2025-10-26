@@ -524,8 +524,11 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ### hainet-chain/src/governance/mod.rs
 - `Governance::new(db_path)` - Create a new Governance service
-- `Governance::submit_proposal(proposal)` - Submit a new proposal
-- `Governance::cast_vote(vote)` - Cast a vote on a proposal
+- `Governance::submit_proposal(transaction)` - Submit a new proposal
+- `Governance::cast_vote(transaction)` - Cast a vote on a proposal
+- `Governance::tally_votes(proposal_id)` - Tally votes for a given proposal
+- `create_proposal(keypair, title, description, proposal_type, voting_duration_secs, payload)` - Create and sign a new proposal
+- `create_vote(keypair, proposal_id, decision)` - Create and sign a new vote
 
 ---
 
