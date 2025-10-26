@@ -31,58 +31,78 @@ The secondary aim of the wider network is to turn the current socially alienatin
 
 **Phase 0: Core Infrastructure** - ✅ COMPLETE (2025-10-21)  
 **Phase 1: AI Agent Intelligence** - ✅ COMPLETE (2025-10-22)  
-**Phase 2: HAI-Net Portal** - 🚧 IN PROGRESS (Cycle 2.1 Complete!)  
-**Latest Milestone**: Phase 2.1 Complete - Core Portal Foundation (2025-10-23)  
-**Build Status**: ✅ Clean compilation (Portal + Backend)  
-**Lines of Code**: ~15,000+ (Phase 0: ~10,570, Phase 1: ~3,241, Phase 2: ~445)  
-**Test Coverage**: 154 tests passing + 1 Portal integration test
+**Phase 2: HAI-Net Portal (Multimodal AI Interface)** - ✅ COMPLETE (2025-10-25)
+**Phase 3: Blockchain & Governance** - ✅ COMPLETE (2025-10-25)
+**Phase 4: Local Hub Networking** - 🚧 IN PROGRESS (Cycle 4.1 Complete!)
+
+**Latest Milestone**: Cycle 4.1 - Peer Discovery Foundation (2025-10-25)
+**Build Status**: ✅ Clean compilation (All crates)
+**Lines of Code**: ~18,000+
+**Test Coverage**: ~170 tests passing
+
+## 📦 Installation & Quick Start
+
+The easiest way to get started with HAI-Net is to use the `hainet-seed` smart installer. It will check your system, install necessary dependencies like `ollama`, and download the appropriate AI models for your hardware.
+
+### 1. Prerequisites
+
+- **Rust 1.70+**: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **System Build Tools**:
+  - **Debian/Ubuntu**: `sudo apt update && sudo apt install -y build-essential`
+  - **macOS**: Install Xcode Command Line Tools.
+
+### 2. Run the Smart Installer
+
+Clone the repository and run the `hainet-seed` installer:
+
+```bash
+# Clone the repository
+git clone https://github.com/gaborkukucska/hai.git
+cd hai
+
+# Run the smart installer
+cargo run --package hainet-seed
+```
+
+The installer will guide you through the following steps:
+1.  **Platform Detection**: Identifies your OS and architecture.
+2.  **Dependency Check**: Verifies that `git`, `curl`, and other essential tools are present.
+3.  **Ollama Installation**: If `ollama` is not found, it will be downloaded and installed automatically.
+4.  **Model Download**: Downloads a recommended LLM based on your system's RAM.
+5.  **Configuration**: Sets up the initial configuration for your HAI-Net node.
+
+### 3. Start the HAI-Net Portal (UI)
+
+Once the seed installer completes, you can start the main user interface.
+
+```bash
+# Navigate to the portal directory
+cd hainet-portal
+
+# Install frontend dependencies
+npm install
+
+# Start the portal in development mode
+npm run tauri dev
+```
+
+This will launch the HAI-Net Portal, where you can interact with your local AI assistant.
+
+---
 
 ## 🏗️ Architecture Overview
 
-HAI-Net consists of six interconnected Rust crates:
+HAI-Net consists of several interconnected Rust crates:
 
 ```
 hainet/
-├── hainet-core/          # Main daemon & orchestration
-├── hainet-persona/       # 🤖 Multi-agent AI system (PRIMARY FOCUS)
+├── hainet-core/          # Multimodal features, networking, and orchestration
+├── hainet-persona/       # 🤖 Multi-agent AI system
 ├── hainet-chain/         # Blockchain & governance
-├── hainet-seed/          # Installation & bootstrap
-├── hainet-portal/        # Web UI (Tauri + SvelteKit)
+├── hainet-seed/          # 🚀 Smart installer & bootstrap
+├── hainet-portal/        # Tauri + React UI
 └── hainet-bridge/        # External API gateway
 ```
-
-### Multi-Agent Architecture (hainet-persona)
-
-**Hierarchical Communication:**
-```
-User ↔ Admin AI
-        ↓
-    PM Agents (Projects, Communications, Knowledge, System)
-        ↓
-    Worker Agents (Code, Email, Search, Create, etc.)
-```
-
-**Constitutional Guardians** monitor all agent interactions independently with pause/block authority.
-
-**Agent State Machine:**
-- Startup → Idle → Planning → Working → (Idle | Error)
-- Each agent type has specialized prompts per state
-- Constitutional compliance enforced at every state transition
-
-### Prompt Management System (Completed ✅)
-
-**Three-Tier Template Resolution:**
-1. **Agent-Type-State Specific** (e.g., `admin-planning.toml`)
-2. **Agent-Type Generic** (e.g., `admin.toml` + state injection)
-3. **State Fallback** (e.g., `planning.toml`)
-
-**Features:**
-- TOML-based templates with Handlebars rendering
-- Dynamic injection points for runtime context
-- Constitutional compliance keywords validation
-- LRU+TTL caching (1-hour default, 1000 entry max)
-- Hot-reload with timestamp tracking
-- Comprehensive validation reporting
 
 ---
 
@@ -92,155 +112,43 @@ User ↔ Admin AI
 - Rust 🦀 (async/await with Tokio)
 - TOML (configuration & templates)
 - Handlebars (template rendering)
-- Anyhow/Thiserror (error handling)
-- Tracing (structured logging)
-
-**Blockchain:**
-- Tendermint Consensus
-- Ed25519 Signatures
-- SHA3 Hashing
 
 **Networking:**
 - Libp2p (P2P mesh)
-- mDNS (device discovery)
-- WebRTC (real-time comms)
+- mDNS (local device discovery)
 
 **UI:**
-- Tauri (desktop app)
-- SvelteKit (web framework)
+- Tauri (desktop app framework)
+- React (frontend library)
 - TypeScript
 
 **AI Integration:**
-- MCP Protocol (Model Context Protocol)
-- Support for local & external LLMs
-- Constitutional constraint system
+- Ollama (local LLM hosting)
+- MCP (Model Context Protocol for AI tools)
 
 ---
 
-## 📦 Installation
-
-### Prerequisites
-
-#### All Platforms
-- **Rust 1.70+**: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- **Node.js 18+**: For Portal UI (https://nodejs.org/)
-- **Ollama**: For AI model hosting (auto-installed by hainet-seed, or manual: https://ollama.ai/)
-
-#### Linux (Ubuntu 24.04 / Debian-based)
-
-```bash
-# Install system dependencies
-sudo apt update
-sudo apt install -y \
-    libsoup2.4-dev \
-    libwebkit2gtk-4.1-dev \
-    build-essential \
-    libssl-dev \
-    pkg-config \
-    libgtk-3-dev
-```
-
-**Ubuntu 24.04 Compatibility Fix:**  
-Ubuntu 24.04 only provides webkit2gtk-4.1, but some Tauri dependencies expect webkit2gtk-4.0. Create compatibility symlinks:
-
-```bash
-# Create symlinks for webkit2gtk-4.0 → 4.1 compatibility
-sudo ln -s \
-    /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.1.pc \
-    /usr/lib/x86_64-linux-gnu/pkgconfig/javascriptcoregtk-4.0.pc
-
-sudo ln -s \
-    /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc \
-    /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc
-```
-
-#### macOS
-
-```bash
-# Install Homebrew if not already installed
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install dependencies
-brew install pkg-config cairo pango gdk-pixbuf
-```
-
-### Build from Source
-
-```bash
-# Clone repository
-git clone https://github.com/gaborkukucska/hai.git
-cd hai
-
-# Build core components
-cargo build --release
-
-# Build Portal (Tauri + React UI)
-cd hainet-portal
-npm install
-npm run build
-cd ..
-
-# Run tests
-cargo test --workspace
-```
-
-### Portal Installation
-
-The **HAI-Net Portal** is the primary user interface providing multimodal interaction with the Admin AI.
-
-```bash
-# Install Portal frontend dependencies
-cd hainet-portal
-npm install
-
-# Build frontend assets
-npm run build
-
-# Build Tauri backend (first time may take 5-10 minutes)
-cargo build --release
-
-# Run Portal in development mode
-npm run tauri dev
-
-# Or build standalone application
-npm run tauri build
-```
-
-The Portal executable will be located at:
-- **Linux**: `hainet-portal/src-tauri/target/release/hainet-portal`
-- **macOS**: `hainet-portal/src-tauri/target/release/bundle/macos/HAI-Net Portal.app`
-- **Windows**: `hainet-portal/src-tauri/target/release/hainet-portal.exe`
-
 ### Development Build
 
+For more advanced users who wish to build from source manually or contribute to the project:
+
 ```bash
-# Fast debug build (workspace root)
-cargo build
+# Build all core components
+cargo build --release
 
-# Watch mode (requires cargo-watch)
-cargo install cargo-watch
-cargo watch -x "build --package hainet-persona"
-
-# Check without building
-cargo check --workspace
-
-# Portal development server (hot reload)
-cd hainet-portal && npm run dev
+# Run tests for the entire workspace
+cargo test --workspace
 ```
 
 ### Troubleshooting
 
-**Portal compilation fails with webkit2gtk errors:**
-- Ensure you've installed `libwebkit2gtk-4.1-dev` and created the symlinks (Ubuntu 24.04)
-- Run `pkg-config --list-all | grep webkit` to verify webkit2gtk-4.0.pc exists
-
-**MCP servers compilation errors:**
-- MCP integration is currently under migration to official Rust SDK
-- Use `cargo build --workspace --exclude hainet-files` to skip MCP servers temporarily
+**Portal compilation fails with webkit2gtk errors (Linux):**
+- Ensure you have installed `libwebkit2gtk-4.1-dev`.
+- For Ubuntu 24.04, you may need to create compatibility symlinks. See the `hainet-seed` installer for an automated solution.
 
 **Ollama not found:**
-- Run `hainet-seed` installer to auto-install Ollama
-- Or install manually: https://ollama.ai/download
+- The `hainet-seed` installer handles this automatically.
+- If you prefer a manual installation, visit https://ollama.ai/download.
 
 ---
 
