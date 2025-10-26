@@ -4,9 +4,12 @@ mod admin_bridge;
 pub mod stt_handler;
 pub mod tts_handler;
 mod vision_handler;
+mod video_handler;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use tiny_http::Server;
 use tokio::sync::RwLock;
 
 use admin_bridge::{AdminBridge, ChatMessage, ChatResponse, FileAttachment};
@@ -19,6 +22,10 @@ struct AppState {
     admin_bridge: Arc<RwLock<AdminBridge>>,
     tts_handler: Arc<RwLock<TTSHandler>>,
 }
+
+/// State for managing video streaming servers
+struct VideoStreamingState(pub Arc<Mutex<HashMap<u16, Arc<Server>>>>);
+
 
 /// Send message to Admin AI
 #[tauri::command]
@@ -109,6 +116,9 @@ pub fn run() {
   
   // Initialize TTS handler
   let tts_handler = TTSHandler::new();
+
+  // Initialize Video Streaming state
+  let video_streaming_state = VideoStreamingState(Arc::new(Mutex::new(HashMap::new())));
   
   tauri::Builder::default()
     .setup(|app| {
@@ -129,6 +139,7 @@ pub fn run() {
         tts_handler: Arc::new(RwLock::new(tts_handler)),
     })
     .manage(VisionState(Mutex::new(None)))
+    .manage(video_streaming_state)
     .invoke_handler(tauri::generate_handler![
         send_message,
         get_history,
@@ -143,6 +154,8 @@ pub fn run() {
         vision_handler::stop_webcam,
         vision_handler::capture_frame,
         vision_handler::set_privacy_mode,
+        video_handler::stream_video,
+        video_handler::stop_video_stream,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
