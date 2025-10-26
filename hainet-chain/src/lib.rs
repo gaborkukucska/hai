@@ -5,11 +5,12 @@
 
 pub mod identity;
 
-// TODO: Implement these modules in later cycles
-// pub mod consensus;
-// pub mod state;
-// pub mod transactions;
-// pub mod governance;
+pub mod consensus;
+pub mod state;
+pub mod transactions;
+pub mod governance;
+
+// TODO: Implement constitution module in later cycles
 // pub mod constitution;
 
 use anyhow::Result;
