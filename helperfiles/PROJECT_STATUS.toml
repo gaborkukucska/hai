@@ -3,7 +3,7 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-10-25T20:20:51+08:00"
+last_updated = "2025-10-25T20:45:29+08:00"
 project_name = "HAI-Net Seed"
 version = "0.04"
 current_phase = "Phase 3: Blockchain & Governance"
@@ -119,7 +119,8 @@ cycles_completed = ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6", "2.7"]
 
 [phases.phase_3]
 name = "Blockchain & Governance"
-status = "in_progress"
+status = "complete"
+completion_date = "2025-10-25"
 start_date = "2025-10-25"
 estimated_runs = 420
 estimated_weeks = "4-5"
@@ -910,19 +911,6 @@ estimated_weeks = "3-4"
 features = ["Device discovery (mDNS)", "P2P mesh protocol (libp2p)", "Content-addressed storage", "CRDT-based sync", "Resource coordinator"]
 note = "Deferred in favor of Phase 2 (Portal UI) for immediate testing capability"
 
-# Phase 3: Blockchain & Governance (Future)
-[phase_details.phase_3_2]
-id = "3.2"
-name = "Governance Integration"
-status = "complete"
-completion_date = "2025-10-25"
-goal = "Integrate the governance module with the consensus and state machine"
-estimated_tokens = 40000
-estimated_loc = 1200
-estimated_tests = 15
-estimated_sessions = "1-2"
-priority = "high"
-
 [phase_details.phase_3]
 name = "Blockchain & Governance"
 status = "planned"
@@ -983,6 +971,26 @@ next_steps = [
 ]
 
 # Recent completions (last 10)
+[[recent_completions]]
+date = "2025-10-25"
+event = "Phase 3.2 - Governance Integration - COMPLETE! 🗳️"
+details = "Completed the integration of the governance module with the state machine and consensus validator. Implemented and verified the full on-chain governance workflow, including proposal submission, voting, and tallying, validated by a new integration test."
+tokens_used = 20000
+files_created = [
+    "hainet-chain/tests/governance_integration.rs"
+]
+files_modified = [
+    "hainet-chain/src/state/mod.rs",
+    "hainet-chain/src/consensus/validator.rs"
+]
+compilation_status = "Success"
+test_status = "Unit and integration tests passing"
+features_implemented = [
+    "State machine applies governance transactions",
+    "Consensus engine validates governance transactions",
+    "End-to-end integration test for governance workflow"
+]
+
 [[recent_completions]]
 date = "2025-10-25"
 event = "Phase 2.6 - Video Streaming Output - COMPLETE! 🎥"
