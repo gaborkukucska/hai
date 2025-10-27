@@ -420,7 +420,7 @@ impl Installer {
                     info!("✓ Connection successful");
                     
                     // Assess capabilities
-                    match client.assess_capabilities().await {
+                    match client.assess_capabilities() {
                         Ok(caps) => {
                             capabilities.push(caps);
                         }

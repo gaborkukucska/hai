@@ -223,14 +223,32 @@ This file tracks the core functions/methods defined within the framework, catego
 - `ensure_nmap_installed(platform)` - Auto-install nmap if not present
 - `is_nmap_installed()` - Check if nmap is available
 
-### hainet-seed/src/installer/ssh_client.rs (Phase 4.5a.2 - Complete)
+### hainet-seed/src/installer/ssh_client.rs (Phase 4.5b - ssh2 Integration Complete)
 - `DeviceCapabilities` - Device assessment result (IP, hostname, CPU, RAM, GPU, disk, OS, arch, score)
 - `DeviceCapabilities::calculate_score()` - Calculate capability score for master election (RAM 40%, GPU 30%, CPU 20%, Disk 10%)
 - `SSHCredentials` - SSH authentication credentials (username, password)
 - `SSHClient::new(ip, credentials)` - Create SSH client for remote device
-- `SSHClient::test_connection()` - Test TCP connection to SSH port (22) with 5s timeout
-- `SSHClient::assess_capabilities()` - Assess device via SSH (mock data, ready for ssh2 integration)
-- `SSHClient::execute_command(command)` - Execute remote command (placeholder for ssh2)
+- `SSHClient::connect()` - Establish SSH connection with TCP handshake (5s timeout)
+- `SSHClient::authenticate_password()` - Authenticate with password
+- `SSHClient::authenticate_pubkey(private_key_path, passphrase)` - Authenticate with SSH key
+- `SSHClient::disconnect()` - Disconnect SSH session cleanly
+- `SSHClient::is_connected()` - Check if client is connected and authenticated
+- `SSHClient::test_connection()` - Test TCP connection to SSH port (22) with 5s timeout (legacy)
+- `SSHClient::execute_command(command)` - Execute remote command via SSH channel
+- `SSHClient::execute_command_with_timeout(command, timeout)` - Execute command with timeout
+- `SSHClient::assess_capabilities()` - **Real SSH-based device assessment** (CPU, RAM, GPU, disk, OS, arch)
+- `SSHClient::get_cpu_cores()` - Get CPU cores via nproc/proc/sysctl
+- `SSHClient::get_ram_gb()` - Get RAM in GB via free/sysctl
+- `SSHClient::get_gpu_info()` - Get GPU info via lspci (optional)
+- `SSHClient::get_disk_space_gb()` - Get available disk space in GB via df
+- `SSHClient::get_os()` - Get OS name via uname
+- `SSHClient::get_architecture()` - Get CPU architecture via uname
+- `SSHClient::get_hostname()` - Get hostname
+- `SSHClient::upload_file(local_path, remote_path)` - Upload file via SFTP
+- `SSHClient::download_file(remote_path, local_path)` - Download file via SFTP
+- `SSHClient::create_remote_directory(path)` - Create directory on remote device
+- `SSHClient::set_permissions(path, mode)` - Set file permissions via chmod
+- `SSHClient::remote_file_exists(path)` - Check if file exists on remote device
 
 ### hainet-seed/src/installer/mod.rs (Updated Phase 4.5a.2)
 - `Installer::prompt_mesh_setup()` - Prompt user for multi-device mesh setup
