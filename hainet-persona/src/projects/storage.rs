@@ -437,6 +437,7 @@ fn row_to_task(row: &SqliteRow) -> Result<Task> {
         "InProgress" | "In Progress" => TaskStatus::InProgress,
         "Blocked" => TaskStatus::Blocked,
         "UnderReview" | "Under Review" => TaskStatus::UnderReview,
+        "NeedsRevision" | "Needs Revision" => TaskStatus::NeedsRevision,
         "Complete" => TaskStatus::Complete,
         "Failed" => TaskStatus::Failed,
         _ => anyhow::bail!("Unknown task status: {}", status_str),
@@ -453,6 +454,9 @@ fn row_to_task(row: &SqliteRow) -> Result<Task> {
         status,
         deliverables: serde_json::from_str(&row.try_get::<String, _>("deliverables")?)?,
         validation_notes: row.try_get("validation_notes")?,
+        pm_feedback: None, // Not stored in DB yet (future migration)
+        revision_count: 0, // Not stored in DB yet (future migration)
+        max_revisions: 2,  // Default value
         blocking_reason: row.try_get("blocking_reason")?,
         failure_reason: row.try_get("failure_reason")?,
         created_at: i64_to_system_time(row.try_get("created_at")?),

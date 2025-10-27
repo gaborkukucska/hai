@@ -235,16 +235,114 @@ impl PMAgent {
     
     /// Validate task results submitted by worker
     async fn validate_task(&self, task_id: &TaskId) -> Result<()> {
-        // TODO: Implement actual validation logic using LLM
-        // For now, auto-approve tasks
+        let task = {
+            let pm = self.project_manager.read().await;
+            pm.get_task(task_id).await?
+        };
         
-        let project_manager = self.project_manager.read().await;
-        project_manager.approve_task(
-            task_id,
-            "Validated by PM".to_string()
-        ).await?;
+        // Generate validation prompt
+        let prompt = self.generate_validation_prompt(&task)?;
+        
+        // Call LLM for validation decision
+        let options = GenerationOptions {
+            temperature: Some(0.3),
+            max_tokens: Some(300),
+            ..Default::default()
+        };
+        
+        let response = self.ollama_client.generate(
+            "llama3.2:latest",
+            &prompt,
+            options
+        ).await.context("Failed to validate task with LLM")?;
+        
+        // Parse validation decision
+        let validation = self.parse_validation_response(&response.text)?;
+        
+        let pm = self.project_manager.read().await;
+        
+        if validation.approved {
+            // Approve task
+            pm.approve_task(task_id, validation.feedback).await?;
+            
+            tracing::info!(
+                "PM {} approved task {} - {}",
+                self.id.name,
+                task_id,
+                task.title
+            );
+        } else if validation.revision_needed && task.can_retry_revision() {
+            // Request revision
+            pm.request_revision(task_id, validation.feedback.clone()).await?;
+            
+            tracing::warn!(
+                "PM {} requested revision for task {} (attempt {}/{}) - {}",
+                self.id.name,
+                task_id,
+                task.revision_count + 1,
+                task.max_revisions,
+                validation.feedback
+            );
+        } else {
+            // Reject or max revisions exceeded
+            let reason = if task.can_retry_revision() {
+                validation.feedback
+            } else {
+                format!("Max revisions exceeded. Last feedback: {}", validation.feedback)
+            };
+            
+            pm.fail_task(task_id, reason.clone()).await?;
+            
+            tracing::error!(
+                "PM {} failed task {} - {}",
+                self.id.name,
+                task_id,
+                reason
+            );
+        }
         
         Ok(())
+    }
+    
+    /// Generate LLM prompt for validation
+    fn generate_validation_prompt(&self, task: &crate::projects::Task) -> Result<String> {
+        let deliverables = task.deliverables.join("\n");
+        
+        Ok(format!(
+            "You are a Project Manager reviewing worker task completion.\n\n\
+             Task: {}\n\
+             Description: {}\n\n\
+             Worker Deliverables:\n{}\n\n\
+             Review the deliverables and determine:\n\
+             1. Are all task requirements met?\n\
+             2. Is the quality acceptable?\n\
+             3. Are there any issues?\n\n\
+             Return ONLY valid JSON:\n\
+             {{\n\
+               \"approved\": true/false,\n\
+               \"feedback\": \"detailed feedback\",\n\
+               \"revision_needed\": true/false\n\
+             }}\n\n\
+             Your response (JSON only):",
+            task.title,
+            task.description,
+            deliverables
+        ))
+    }
+    
+    /// Parse LLM validation response
+    fn parse_validation_response(&self, response: &str) -> Result<ValidationResponse> {
+        // Extract JSON from markdown wrapper
+        let json_str = if response.contains("```json") {
+            response.split("```json").nth(1)
+                .and_then(|s| s.split("```").next())
+                .unwrap_or(response)
+        } else {
+            response
+        }.trim();
+        
+        serde_json::from_str(json_str)
+            .context(format!("Failed to parse validation response: {}", json_str))
     }
     
     /// Check if project is complete
@@ -453,6 +551,14 @@ struct TaskDetail {
 struct TaskDependency {
     task_index: usize,
     depends_on: Vec<usize>,
+}
+
+/// Validation response from LLM
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ValidationResponse {
+    approved: bool,
+    feedback: String,
+    revision_needed: bool,
 }
 
 /// Task dependency graph (DAG)

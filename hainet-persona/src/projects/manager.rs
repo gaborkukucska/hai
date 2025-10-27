@@ -270,6 +270,43 @@ impl ProjectManager {
         }
     }
 
+    /// Request task revision with PM feedback
+    pub async fn request_revision(&self, task_id: &TaskId, feedback: String) -> Result<()> {
+        if let Some(mut task) = self.storage.get_task(task_id).await? {
+            task.request_revision(feedback)?;
+            self.storage.update_task(&task).await?;
+            Ok(())
+        } else {
+            anyhow::bail!("Task not found: {}", task_id)
+        }
+    }
+
+    /// Get current task status (for worker polling)
+    pub async fn get_task_status(&self, task_id: &TaskId) -> Result<TaskStatus> {
+        if let Some(task) = self.storage.get_task(task_id).await? {
+            Ok(task.status)
+        } else {
+            anyhow::bail!("Task not found: {}", task_id)
+        }
+    }
+
+    /// Get a task by ID
+    pub async fn get_task(&self, task_id: &TaskId) -> Result<Task> {
+        self.storage.get_task(task_id).await?
+            .ok_or_else(|| anyhow::anyhow!("Task not found: {}", task_id))
+    }
+
+    /// Fail task with reason
+    pub async fn fail_task(&self, task_id: &TaskId, reason: String) -> Result<()> {
+        if let Some(mut task) = self.storage.get_task(task_id).await? {
+            task.fail(reason)?;
+            self.storage.update_task(&task).await?;
+            Ok(())
+        } else {
+            anyhow::bail!("Task not found: {}", task_id)
+        }
+    }
+
     // ========== Milestone Management ==========
 
     /// Create a new milestone for a project

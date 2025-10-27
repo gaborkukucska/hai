@@ -194,31 +194,144 @@ impl WorkerAgent {
         Ok(())
     }
     
-    /// Wait for PM validation
+    /// Wait for PM validation with real task polling
     pub async fn await_validation(&mut self) -> Result<bool> {
-        let _task_id = self.current_task.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No task assigned"))?;
+        let task_id = self.current_task.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No task assigned"))?
+            .clone();
         
-        // Poll for task status
+        tracing::info!(
+            "Worker {} awaiting PM validation for task {}",
+            self.id.name,
+            task_id
+        );
+        
+        // Poll every 100ms for status changes
+        let poll_interval = tokio::time::Duration::from_millis(100);
+        let max_wait = tokio::time::Duration::from_secs(60); // 1 minute timeout
+        let start = tokio::time::Instant::now();
+        
         loop {
-            // Get task from storage via project manager
-            let project_manager = self.project_manager.read().await;
+            if start.elapsed() > max_wait {
+                return Err(anyhow::anyhow!(
+                    "Validation timeout after {}s", 
+                    max_wait.as_secs()
+                ));
+            }
             
-            // We need to get the project first to know which tasks to check
-            // For now, we'll use a simplified approach - just wait a bit and check
-            // TODO: Implement proper task status polling
-            drop(project_manager);
+            // Get current task status
+            let task_status = {
+                let pm = self.project_manager.read().await;
+                pm.get_task_status(&task_id).await?
+            };
             
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            
-            // For testing purposes, auto-approve after one iteration
-            self.state_machine.transition(
-                AgentState::Idle,
-                "Task approved by PM".to_string()
-            )?;
-            self.current_task = None;
-            return Ok(true);
+            match task_status {
+                crate::projects::TaskStatus::Complete => {
+                    tracing::info!(
+                        "Worker {} task {} approved by PM",
+                        self.id.name,
+                        task_id
+                    );
+                    
+                    // Transition to Idle
+                    self.state_machine.transition(
+                        AgentState::Idle,
+                        "Task approved by PM".to_string()
+                    )?;
+                    self.current_task = None;
+                    return Ok(true);
+                }
+                
+                crate::projects::TaskStatus::NeedsRevision => {
+                    tracing::warn!(
+                        "Worker {} task {} needs revision",
+                        self.id.name,
+                        task_id
+                    );
+                    
+                    return self.handle_revision_request(&task_id).await;
+                }
+                
+                crate::projects::TaskStatus::Failed => {
+                    let task = {
+                        let pm = self.project_manager.read().await;
+                        pm.get_task(&task_id).await?
+                    };
+                    
+                    return Err(anyhow::anyhow!(
+                        "Task failed: {}", 
+                        task.failure_reason.as_deref().unwrap_or("Unknown reason")
+                    ));
+                }
+                
+                crate::projects::TaskStatus::UnderReview => {
+                    // Still waiting for PM validation
+                    tokio::time::sleep(poll_interval).await;
+                    continue;
+                }
+                
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Unexpected task status: {:?}", 
+                        task_status
+                    ));
+                }
+            }
         }
+    }
+    
+    /// Handle revision request from PM
+    fn handle_revision_request<'a>(&'a mut self, task_id: &'a TaskId) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool>> + 'a>> {
+        Box::pin(async move {
+            let task = {
+                let pm = self.project_manager.read().await;
+                pm.get_task(task_id).await?
+            };
+            
+            tracing::info!(
+                "Worker {} handling revision request (attempt {}/{})",
+                self.id.name,
+                task.revision_count,
+                task.max_revisions
+            );
+            
+            if !task.can_retry_revision() {
+                return Err(anyhow::anyhow!(
+                    "Max revisions ({}) exceeded", 
+                    task.max_revisions
+                ));
+            }
+            
+            // Get PM feedback
+            let feedback = task.pm_feedback.clone()
+                .unwrap_or_else(|| "No specific feedback provided".to_string());
+            
+            tracing::info!(
+                "Worker {} revision feedback: {}",
+                self.id.name,
+                feedback
+            );
+            
+            // Reset task for revision
+            {
+                let pm = self.project_manager.write().await;
+                let mut task = pm.get_task(task_id).await?;
+                task.reset_for_revision()?;
+                pm.request_revision(task_id, feedback.clone()).await?;
+            }
+            
+            // Transition back to Planning to retry with feedback in context
+            self.state_machine.transition(
+                AgentState::Planning,
+                format!("Revision requested: {}", feedback)
+            )?;
+            
+            // Re-execute task with PM feedback
+            self.execute_task().await?;
+            
+            // Wait for validation again (use Box::pin to avoid infinite size)
+            self.await_validation().await
+        })
     }
     
     /// Handle error and transition to Error state

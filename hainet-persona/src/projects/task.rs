@@ -68,6 +68,8 @@ pub enum TaskStatus {
     Blocked,
     /// Task completed, awaiting PM validation
     UnderReview,
+    /// PM requested revisions
+    NeedsRevision,
     /// Task validated and complete
     Complete,
     /// Task failed with errors
@@ -85,7 +87,8 @@ impl TaskStatus {
         matches!(self, 
             TaskStatus::Assigned | 
             TaskStatus::InProgress | 
-            TaskStatus::UnderReview
+            TaskStatus::UnderReview |
+            TaskStatus::NeedsRevision
         )
     }
 }
@@ -98,6 +101,7 @@ impl std::fmt::Display for TaskStatus {
             TaskStatus::InProgress => write!(f, "In Progress"),
             TaskStatus::Blocked => write!(f, "Blocked"),
             TaskStatus::UnderReview => write!(f, "Under Review"),
+            TaskStatus::NeedsRevision => write!(f, "Needs Revision"),
             TaskStatus::Complete => write!(f, "Complete"),
             TaskStatus::Failed => write!(f, "Failed"),
         }
@@ -133,6 +137,15 @@ pub struct Task {
     
     /// PM's validation notes
     pub validation_notes: Option<String>,
+    
+    /// PM's feedback for revisions
+    pub pm_feedback: Option<String>,
+    
+    /// Number of revision attempts
+    pub revision_count: u32,
+    
+    /// Maximum allowed revisions before task fails
+    pub max_revisions: u32,
     
     /// Blocking reason (if status is Blocked)
     pub blocking_reason: Option<String>,
@@ -170,6 +183,9 @@ impl Task {
             status: TaskStatus::Unassigned,
             deliverables: Vec::new(),
             validation_notes: None,
+            pm_feedback: None,
+            revision_count: 0,
+            max_revisions: 2,
             blocking_reason: None,
             failure_reason: None,
             created_at: SystemTime::now(),
@@ -298,5 +314,40 @@ impl Task {
             (Some(start), Some(end)) => end.duration_since(start).ok(),
             _ => None,
         }
+    }
+
+    /// Request revision from PM
+    pub fn request_revision(&mut self, feedback: String) -> Result<()> {
+        if self.status != TaskStatus::UnderReview {
+            anyhow::bail!("Can only request revision for tasks under review");
+        }
+
+        self.revision_count += 1;
+        self.pm_feedback = Some(feedback);
+        self.status = TaskStatus::NeedsRevision;
+        
+        Ok(())
+    }
+
+    /// Check if task can be retried for revision
+    pub fn can_retry_revision(&self) -> bool {
+        self.revision_count < self.max_revisions
+    }
+
+    /// Clear PM feedback (when worker starts revision)
+    pub fn clear_feedback(&mut self) {
+        self.pm_feedback = None;
+    }
+
+    /// Reset task for revision attempt
+    pub fn reset_for_revision(&mut self) -> Result<()> {
+        if self.status != TaskStatus::NeedsRevision {
+            anyhow::bail!("Can only reset tasks that need revision");
+        }
+
+        self.status = TaskStatus::InProgress;
+        self.deliverables.clear();
+        
+        Ok(())
     }
 }
