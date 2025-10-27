@@ -121,6 +121,7 @@ impl AgentStateMachine {
             // From Planning
             (Planning, Working) => true, // Worker starts task
             (Planning, Managing) => true, // PM starts managing
+            (Planning, Monitoring) => true, // Admin AI transitions to monitoring after project creation
             (Planning, Idle) => true, // Can cancel planning
             (Planning, Conversation) => true, // Admin returns to conversation
             (Planning, Error) => true,

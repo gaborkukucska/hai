@@ -10,10 +10,23 @@
 //! - Article IV (Community Focus): Voluntary resource sharing across hub
 
 pub mod cas;
+pub mod coordinator;
+pub mod crdt;
+pub mod distributed;
 pub mod sync;
+pub mod sync_protocol;
 
 pub use cas::{ContentAddressedStore, ContentHash};
+pub use coordinator::{CoordinatorConfig, NodeRole, StorageCoordinator};
+pub use crdt::{
+    GSet, LWWElementSet, LWWRegister, NodeId, Timestamp, TwoPhaseSet, VectorClock,
+};
+pub use distributed::{
+    AllocationStrategy, DistributedConfig, DistributedStorage, NodeCapacity, ReplicationMetadata,
+    StorageStats,
+};
 pub use sync::{P2PFileSync, SyncRequest, SyncResponse};
+pub use sync_protocol::{MerkleTree, SyncProtocol, SyncSession, SyncStats};
 
 use anyhow::Result;
 use std::path::PathBuf;

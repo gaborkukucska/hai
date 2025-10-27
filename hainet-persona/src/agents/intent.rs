@@ -134,7 +134,11 @@ impl IntentParser {
         }
         
         // Task indicators
-        let task_words = ["send", "find", "search", "create", "delete", "update", "organize", "schedule", "remind"];
+        let task_words = [
+            "send", "find", "search", "create", "delete", "update", "organize", "schedule", "remind",
+            "build", "develop", "make", "implement", "design", "write", "generate", "setup", 
+            "configure", "install", "deploy", "construct", "architect"
+        ];
         if task_words.iter().any(|w| text.contains(w)) {
             return IntentType::Task;
         }

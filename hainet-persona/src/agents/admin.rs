@@ -87,11 +87,35 @@ impl AdminAgent {
         
         tracing::info!("Parsed intent: {:?} (confidence: {})", intent.intent_type, intent.confidence);
         
+        // If still in Startup state, transition to Conversation first
+        if *self.state_machine.current_state() == AgentState::Startup {
+            tracing::warn!("Admin AI still in Startup state, transitioning to Conversation");
+            self.state_machine.transition(
+                AgentState::Conversation,
+                "Auto-transition from Startup on first message".to_string()
+            )?;
+        }
+        
         // Detect if this is a complex/multi-step intent
         if self.is_complex_intent(&intent, &user_input)? {
-            // Transition to Planning state
-            if *self.state_machine.current_state() == AgentState::Conversation 
-                || *self.state_machine.current_state() == AgentState::Idle {
+            // Transition to Planning state from any valid state
+            let current_state = self.state_machine.current_state().clone();
+            
+            // Allow Planning transition from Conversation, Idle, or Monitoring states
+            if current_state == AgentState::Conversation 
+                || current_state == AgentState::Idle 
+                || current_state == AgentState::Monitoring {
+                self.state_machine.transition(
+                    AgentState::Planning,
+                    format!("Complex intent detected: {:?}", intent.intent_type)
+                )?;
+            } else {
+                // Force transition to Conversation first, then to Planning
+                tracing::warn!("Admin in unexpected state {:?}, transitioning to Conversation first", current_state);
+                self.state_machine.transition(
+                    AgentState::Conversation,
+                    "Resetting to Conversation state".to_string()
+                )?;
                 self.state_machine.transition(
                     AgentState::Planning,
                     format!("Complex intent detected: {:?}", intent.intent_type)
@@ -202,16 +226,26 @@ impl AdminAgent {
              Detected Intent: {:?}\n\
              Confidence: {:.2}\n\
              Entities: {:?}\n\n\
-             Please create a detailed project plan with:\n\
-             1. A clear, concise project title (max 60 chars)\n\
-             2. A project overview (2-3 sentences)\n\
-             3. A list of 3-7 initial tasks to accomplish the goal\n\n\
-             Format your response as JSON:\n\
+             Please create a detailed project plan.\n\n\
+             CRITICAL: You MUST respond with ONLY valid JSON. No markdown, no explanations.\n\n\
+             Required fields:\n\
+             1. \"title\": Clear project title (max 60 chars)\n\
+             2. \"overview\": Project overview (2-3 sentences)\n\
+             3. \"tasks\": Array of 3-7 task descriptions as STRINGS ONLY\n\n\
+             IMPORTANT: The \"tasks\" field MUST be a simple string array, NOT objects.\n\n\
+             Example format:\n\
              {{\n  \
-               \"title\": \"Project Title\",\n  \
-               \"overview\": \"Project overview description\",\n  \
-               \"tasks\": [\"Task 1\", \"Task 2\", \"Task 3\"]\n\
-             }}",
+               \"title\": \"Todo App Development\",\n  \
+               \"overview\": \"Create a modern todo application using React and TypeScript.\",\n  \
+               \"tasks\": [\n    \
+                 \"Set up React project with TypeScript\",\n    \
+                 \"Design UI components for todo list\",\n    \
+                 \"Implement CRUD operations\",\n    \
+                 \"Add local storage persistence\",\n    \
+                 \"Write unit tests\"\n  \
+               ]\n\
+             }}\n\n\
+             Your response (JSON only, no other text):",
             user_input,
             intent.intent_type,
             intent.confidence,
@@ -240,6 +274,9 @@ impl AdminAgent {
     
     /// Parse LLM response into ProjectPlan
     fn parse_project_plan(&self, llm_response: &str) -> Result<ProjectPlan> {
+        // Log the raw response for debugging
+        tracing::debug!("LLM response for project plan: {}", llm_response);
+        
         // Try to extract JSON from response (LLM might wrap it in markdown)
         let json_str = if let Some(start) = llm_response.find('{') {
             if let Some(end) = llm_response.rfind('}') {
@@ -251,22 +288,77 @@ impl AdminAgent {
             llm_response
         };
         
-        let parsed: serde_json::Value = serde_json::from_str(json_str)
-            .context("Failed to parse LLM response as JSON")?;
+        tracing::debug!("Extracted JSON string: {}", json_str);
+        
+        // Try parsing with better error handling
+        let parsed: serde_json::Value = match serde_json::from_str(json_str) {
+            Ok(val) => val,
+            Err(e) => {
+                // Log detailed parse error
+                tracing::error!("JSON parse error: {:?}", e);
+                tracing::error!("Failed at position: {}", e.line());
+                tracing::error!("JSON string bytes: {:?}", json_str.as_bytes());
+                
+                // Try to repair common issues
+                let mut repaired = json_str
+                    .replace("\n", " ")           // Remove newlines
+                    .replace("\r", "")            // Remove carriage returns
+                    .trim()                        // Remove leading/trailing whitespace
+                    .to_string();
+                
+                // Check if JSON is missing closing brace (common LLM error)
+                let open_braces = repaired.chars().filter(|c| *c == '{').count();
+                let close_braces = repaired.chars().filter(|c| *c == '}').count();
+                
+                if open_braces > close_braces {
+                    tracing::warn!("JSON has {} open braces but only {} close braces, adding missing close braces", 
+                                   open_braces, close_braces);
+                    for _ in 0..(open_braces - close_braces) {
+                        repaired.push('}');
+                    }
+                }
+                
+                tracing::debug!("Attempting to parse repaired JSON: {}", repaired);
+                
+                serde_json::from_str(&repaired)
+                    .context(format!("Failed to parse LLM response as JSON after repair. Original error: {:?}. Response was: {}", e, json_str))?
+            }
+        };
         
         let title = parsed["title"].as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'title' in plan"))?
+            .ok_or_else(|| anyhow::anyhow!("Missing 'title' in plan. Parsed JSON: {:?}", parsed))?
             .to_string();
         
         let overview = parsed["overview"].as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'overview' in plan"))?
+            .ok_or_else(|| anyhow::anyhow!("Missing 'overview' in plan. Parsed JSON: {:?}", parsed))?
             .to_string();
         
-        let tasks = parsed["tasks"].as_array()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'tasks' array in plan"))?
+        // Parse tasks - handle both string array and object array formats
+        let tasks: Vec<String> = parsed["tasks"].as_array()
+            .ok_or_else(|| anyhow::anyhow!("Missing 'tasks' array in plan. Parsed JSON: {:?}", parsed))?
             .iter()
-            .filter_map(|t| t.as_str().map(String::from))
+            .filter_map(|t| {
+                // Try as string first
+                if let Some(s) = t.as_str() {
+                    Some(s.to_string())
+                } 
+                // Try as object with "description" field
+                else if let Some(obj) = t.as_object() {
+                    obj.get("description")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                } 
+                else {
+                    None
+                }
+            })
             .collect();
+        
+        if tasks.is_empty() {
+            return Err(anyhow::anyhow!("No valid tasks found in plan. Parsed JSON: {:?}", parsed));
+        }
+        
+        tracing::info!("Successfully parsed project plan: title='{}', {} tasks", title, tasks.len());
         
         Ok(ProjectPlan {
             title,
@@ -444,8 +536,7 @@ impl Agent for AdminAgent {
     async fn start(&mut self) -> Result<()> {
         self.running = true;
         
-        // Analyze conversation history to determine initial state
-        // For now, default to Conversation state
+        // Transition directly from Startup to Conversation (valid for Admin AI)
         self.state_machine.transition(
             AgentState::Conversation,
             "Admin AI started, ready for user interaction".to_string()

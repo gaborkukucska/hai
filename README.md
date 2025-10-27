@@ -252,7 +252,7 @@ HAI-Net builds on the shoulders of giants:
 - **Libp2p** - Modular P2P networking stack
 - **Tauri** - Secure, lightweight desktop apps
 
-Special thanks to our AI contributors Claude & Jules, and the broader decentralized AI movement.
+Special thanks to our AI contributors Claude (Anthropic) & Jules (Google), and the broader decentralized AI movement.
 
 ---
 

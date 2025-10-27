@@ -73,12 +73,18 @@ impl PMAgent {
     
     /// Start PM agent lifecycle
     /// 
-    /// Startup → Planning → Managing
+    /// Startup → Idle → Planning → Managing
     pub async fn start(&mut self) -> Result<()> {
-        // Transition from Startup to Planning
+        // Transition from Startup to Idle (PM agents must go through Idle first)
+        self.state_machine.transition(
+            AgentState::Idle,
+            "PM initialized, ready to plan".to_string()
+        )?;
+        
+        // Then transition to Planning
         self.state_machine.transition(
             AgentState::Planning,
-            "PM initialized, analyzing project".to_string()
+            "PM starting project analysis".to_string()
         )?;
         
         // Analyze project and create detailed plan

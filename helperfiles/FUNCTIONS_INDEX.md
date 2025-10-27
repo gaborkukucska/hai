@@ -517,6 +517,107 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## Storage System (Phase 4.4 - Complete)
+
+**Status**: ✅ Distributed Storage with CRDT and Merkle Sync
+
+### hainet-core/src/storage/cas.rs
+- `ContentHash::from_bytes(data)` - Create content hash from bytes using BLAKE3
+- `ContentHash::as_bytes()` - Get hash bytes
+- `ContentAddressedStore::new(base_path)` - Create new CAS with BLAKE3 hashing
+- `ContentAddressedStore::put(content, mime_type)` - Store content and return hash
+- `ContentAddressedStore::get(hash)` - Retrieve content by hash
+- `ContentAddressedStore::has(hash)` - Check if content exists
+- `ContentAddressedStore::delete(hash)` - Delete content by hash
+- `ContentAddressedStore::list_all()` - List all stored content hashes
+- `ContentAddressedStore::metadata(hash)` - Get content metadata
+
+### hainet-core/src/storage/crdt.rs
+- `Timestamp::now(logical)` - Create hybrid logical timestamp
+- `Timestamp::next()` - Increment logical clock
+- `Timestamp::merge(other)` - Merge timestamps (max + 1)
+- `VectorClock::new()` - Create empty vector clock
+- `VectorClock::increment(node)` - Increment clock for node
+- `VectorClock::merge(other)` - Merge vector clocks (take max)
+- `VectorClock::happens_before(other)` - Check causality (a < b)
+- `VectorClock::is_concurrent(other)` - Check if concurrent
+- `LWWRegister::new(value, node_id)` - Create Last-Writer-Wins register
+- `LWWRegister::set(value)` - Update value (increment timestamp)
+- `LWWRegister::merge(other)` - Merge registers (take higher timestamp)
+- `GSet::new()` - Create Grow-only set
+- `GSet::insert(element)` - Add element to set
+- `GSet::merge(other)` - Union merge
+- `TwoPhaseSet::new()` - Create add-remove set
+- `TwoPhaseSet::insert(element)` - Add element (fails if previously removed)
+- `TwoPhaseSet::remove(element)` - Remove element (permanent)
+- `TwoPhaseSet::merge(other)` - Merge add and remove sets
+- `LWWElementSet::new()` - Create LWW element set
+- `LWWElementSet::insert(element, timestamp)` - Add element with timestamp
+- `LWWElementSet::remove(element, timestamp)` - Remove element with timestamp
+- `LWWElementSet::contains(element)` - Check if element active (add_ts > remove_ts)
+- `LWWElementSet::merge(other)` - Merge with max timestamps
+
+### hainet-core/src/storage/distributed.rs
+- `DistributedStorage::new(local_node, store, config)` - Create distributed storage manager
+- `DistributedStorage::register_node(capacity)` - Register node capacity
+- `DistributedStorage::mark_node_offline(node_id)` - Mark node as offline
+- `DistributedStorage::online_nodes()` - Get all online nodes
+- `DistributedStorage::select_storage_nodes(size, count)` - Select nodes for placement
+- `DistributedStorage::store(content, replica_count)` - Store content with replication
+- `DistributedStorage::record_replica(hash, node_id)` - Record replica creation
+- `DistributedStorage::locate_content(hash)` - Get content locations
+- `DistributedStorage::check_replication_health()` - Check health for all content
+- `DistributedStorage::under_replicated_content()` - Get under-replicated content
+- `DistributedStorage::delete(hash)` - Delete content and update metadata
+- `DistributedStorage::garbage_collect()` - Remove orphaned content
+- `DistributedStorage::stats()` - Get storage statistics
+- `NodeCapacity::usage()` - Calculate usage percentage
+- `NodeCapacity::can_store(size)` - Check if node has capacity
+- `ReplicationMetadata::new(hash, size, desired_replicas)` - Create replication metadata
+- `ReplicationMetadata::add_replica(node_id, timestamp)` - Add replica location
+- `ReplicationMetadata::is_sufficiently_replicated()` - Check replication goal
+- `ReplicationMetadata::health()` - Get replication health (0.0-1.0)
+
+### hainet-core/src/storage/sync_protocol.rs
+- `MerkleTree::build(content, branching_factor)` - Build Merkle tree from content
+- `MerkleTree::diff(other)` - Find differences between trees
+- `MerkleTree::stats()` - Get tree statistics
+- `MerkleNode::leaf(content)` - Create leaf node
+- `MerkleNode::internal(children)` - Create internal node
+- `SyncProtocol::new(local_node, store)` - Create sync protocol manager
+- `SyncProtocol::build_merkle_tree(branching_factor)` - Build and cache Merkle tree
+- `SyncProtocol::invalidate_cache()` - Invalidate tree cache
+- `SyncProtocol::create_sync_request(remote_node, branching_factor)` - Create sync request
+- `SyncProtocol::handle_sync_request(request, branching_factor)` - Handle incoming request
+- `SyncProtocol::start_session(remote_node)` - Start sync session
+- `SyncProtocol::end_session(session_id)` - End sync session
+- `SyncProtocol::sync_with_peer(remote_node, branching_factor)` - Perform full sync
+- `SyncProtocol::get_vector_clock()` - Get current vector clock
+- `SyncProtocol::update_vector_clock(other)` - Update with remote clock
+
+### hainet-core/src/storage/coordinator.rs
+- `StorageCoordinator::new(local_node, store, storage_config, coordinator_config)` - Create coordinator
+- `StorageCoordinator::role()` - Get current node role
+- `StorageCoordinator::set_role(role)` - Set node role (Master/Slave/Standalone)
+- `StorageCoordinator::start()` - Start coordinator background tasks
+- `StorageCoordinator::stop()` - Stop coordinator
+- `StorageCoordinator::elect_master(candidates)` - Elect master from candidates
+- `StorageCoordinator::join_mesh(master_node)` - Join storage mesh as slave
+- `StorageCoordinator::promote_to_master()` - Promote to master role
+- `StorageCoordinator::get_stats()` - Get storage statistics
+- `StorageCoordinator::get_health_status()` - Get health check results
+- `StorageCoordinator::trigger_rebalancing()` - Manually trigger rebalancing
+
+### hainet-core/src/storage/sync.rs
+- `P2PFileSync::new(store)` - Create P2P sync manager
+- `P2PFileSync::register_peer(peer_id, available_hashes)` - Register peer
+- `P2PFileSync::request_file(hash, peer_id)` - Request file from peer
+- `P2PFileSync::handle_request(request)` - Handle sync request
+- `P2PFileSync::find_peers_with_content(hash)` - Find peers with content
+- `P2PFileSync::sync_from_peers(hash)` - Sync from any available peer
+
+---
+
 ## Blockchain & Governance System (Phase 3 - In Progress)
 
 ### hainet-chain/src/consensus/mod.rs

@@ -66,7 +66,10 @@ impl ProjectManager {
     ) -> Result<ProjectId> {
         let mut project = Project::new(title, overview);
 
-        // Create initial tasks
+        // Store project FIRST (so foreign key constraint is satisfied)
+        self.storage.create_project(&project).await?;
+
+        // Create initial tasks AFTER project exists
         for (idx, task_title) in initial_tasks.iter().enumerate() {
             let task = Task::new(
                 project.id.clone(),
@@ -74,15 +77,15 @@ impl ProjectManager {
                 format!("Task {} description", idx + 1),
             );
             
-            // Store task
+            // Store task (FK constraint now satisfied)
             self.storage.create_task(&task).await?;
             
             // Add to project
             project.add_task(task.id.clone());
         }
 
-        // Store project
-        self.storage.create_project(&project).await?;
+        // Update project with task IDs
+        self.storage.update_project(&project).await?;
 
         // Add to active projects
         let project_id = project.id.clone();
