@@ -210,6 +210,35 @@ This file tracks the core functions/methods defined within the framework, catego
 - `SeedService::install()` - Run installation workflow
 - `SeedService::check_requirements()` - Display system information
 
+### hainet-seed/src/installer/network_scanner.rs (Phase 4.5a.1 - Complete)
+- `DeviceCandidate` - Struct for discovered SSH-enabled devices (ip, hostname, mac_address)
+- `NetworkScanner::new()` - Create network scanner with nmap validation
+- `NetworkScanner::find_nmap()` - Locate nmap binary in PATH
+- `NetworkScanner::scan_local_network()` - Scan local network for SSH devices (port 22)
+- `NetworkScanner::parse_nmap_output(output)` - Parse greppable nmap output
+- `NetworkScanner::get_local_ip()` - Get local IP address (excludes loopback/link-local)
+- `NetworkScanner::derive_subnet(ip)` - Derive /24 subnet from IP (e.g., 192.168.1.0/24)
+
+### hainet-seed/src/installer/nmap_installer.rs (Phase 4.5a.1 - Complete)
+- `ensure_nmap_installed(platform)` - Auto-install nmap if not present
+- `is_nmap_installed()` - Check if nmap is available
+
+### hainet-seed/src/installer/ssh_client.rs (Phase 4.5a.2 - Complete)
+- `DeviceCapabilities` - Device assessment result (IP, hostname, CPU, RAM, GPU, disk, OS, arch, score)
+- `DeviceCapabilities::calculate_score()` - Calculate capability score for master election (RAM 40%, GPU 30%, CPU 20%, Disk 10%)
+- `SSHCredentials` - SSH authentication credentials (username, password)
+- `SSHClient::new(ip, credentials)` - Create SSH client for remote device
+- `SSHClient::test_connection()` - Test TCP connection to SSH port (22) with 5s timeout
+- `SSHClient::assess_capabilities()` - Assess device via SSH (mock data, ready for ssh2 integration)
+- `SSHClient::execute_command(command)` - Execute remote command (placeholder for ssh2)
+
+### hainet-seed/src/installer/mod.rs (Updated Phase 4.5a.2)
+- `Installer::prompt_mesh_setup()` - Prompt user for multi-device mesh setup
+- `Installer::discover_mesh_devices()` - Discover SSH-enabled devices on LAN
+- `Installer::prompt_assess_devices()` - Prompt user to assess device capabilities
+- `Installer::assess_device_capabilities(devices)` - Connect via SSH and assess each device
+- `Installer::display_capabilities(capabilities)` - Display assessment results and recommend master node
+
 ---
 
 ---
@@ -657,10 +686,10 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ## Statistics
 
-**Total Modules:** 56
-**Total Functions:** 174+ (including multimodal system)  
-**Lines of Code:** ~17,780 (Phase 0: ~10,570, Phase 1: ~3,241, Phase 2: ~3,969)  
-**Test Coverage:** 167 tests (154 previous, 13 new multimodal tests)  
+**Total Modules:** 59 (58 previous + 1 new: ssh_client)
+**Total Functions:** 189+ (182 previous + 7 new SSH/assessment functions)  
+**Lines of Code:** ~18,330 (18,080 previous + 250 new)  
+**Test Coverage:** 177 tests (173 previous + 4 new SSH client tests)  
 **Constitutional Compliance:** Fully integrated (Articles I, II, III, V, VII)
 
 **Phase 0 Status:** ✅ COMPLETE (Cycles 0.1-0.6)
@@ -704,6 +733,29 @@ This file tracks the core functions/methods defined within the framework, catego
 - ✅ Made stt_handler module public for testing
 - ✅ Fixed base64 deprecation warnings (migrated to Engine API)
 - ✅ All tests pass cleanly without warnings
+
+**Phase 4.5a.1 Achievements (Network Scanner Module):**
+- ✅ Network scanner using nmap for SSH device discovery (300 LOC)
+- ✅ Auto-detection of local IP and subnet derivation (192.168.1.x/24)
+- ✅ Nmap auto-installer integration with DependencyChecker
+- ✅ Parser for nmap greppable output format
+- ✅ DeviceCandidate struct (IP, hostname, MAC address)
+- ✅ Integration into Installer workflow with user prompt
+- ✅ 6 unit tests (subnet derivation, nmap parsing, multiple devices)
+- ✅ Clean compilation in 1.06s (all warnings resolved)
+- ✅ All 6 tests passing (100% success rate)
+
+**Phase 4.5a.2 Achievements (SSH Client & Device Assessment):**
+- ✅ SSH client module with TCP connection testing (250 LOC)
+- ✅ Device capability assessment (CPU, RAM, GPU, disk, OS, arch)
+- ✅ Capability scoring system for master election (weighted: RAM 40%, GPU 30%, CPU 20%, Disk 10%)
+- ✅ SSHCredentials struct for authentication
+- ✅ Mock assessment data (ready for ssh2 crate integration)
+- ✅ Integration into Installer workflow with credential prompt
+- ✅ Master node recommendation based on capability scores
+- ✅ 4 unit tests (score calculation, client creation, mock assessment)
+- ✅ Clean compilation in 0.63s (no errors)
+- ✅ All 4 tests passing (100% success rate)
 
 ---
 

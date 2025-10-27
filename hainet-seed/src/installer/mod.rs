@@ -8,6 +8,11 @@ pub mod ollama;
 pub mod whisper;
 pub mod piper;
 pub mod dependencies;
+pub mod network_scanner;
+pub mod nmap_installer;
+pub mod ssh_client;
+pub mod ssh_keys;
+pub mod deployment;
 
 use anyhow::Result;
 use tracing::info;
@@ -16,6 +21,11 @@ use crate::installer::platform::{Platform, SystemTier};
 use crate::installer::ollama::OllamaInstaller;
 use crate::installer::whisper::WhisperInstaller;
 use crate::installer::piper::PiperInstaller;
+use crate::installer::network_scanner::{NetworkScanner, DeviceCandidate};
+use crate::installer::nmap_installer::ensure_nmap_installed;
+use crate::installer::ssh_client::{SSHClient, SSHCredentials, DeviceCapabilities};
+use crate::installer::ssh_keys::SSHKeyManager;
+use crate::installer::deployment::DeploymentOrchestrator;
 
 /// Main installer orchestrator
 pub struct Installer {
@@ -71,6 +81,11 @@ impl Installer {
         
         // Step 6: Download default Piper voice model based on tier
         self.download_piper_model().await?;
+        
+        // Step 7: Optionally set up multi-device mesh
+        if self.prompt_mesh_setup()? {
+            self.discover_mesh_devices().await?;
+        }
         
         info!("✅ Installation complete!");
         Ok(())
@@ -218,6 +233,240 @@ impl Installer {
         
         info!("✅ Voice model {} downloaded successfully", voice_model);
         Ok(())
+    }
+    
+    /// Prompt user if they want to set up multi-device mesh
+    fn prompt_mesh_setup(&self) -> Result<bool> {
+        use std::io::{self, Write};
+        
+        print!("\n🌐 Set up multi-device mesh network? (Y/n): ");
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        
+        let response = input.trim().to_lowercase();
+        Ok(response.is_empty() || response == "y" || response == "yes")
+    }
+    
+    /// Discover devices on local network with SSH enabled
+    pub async fn discover_mesh_devices(&self) -> Result<Vec<DeviceCandidate>> {
+        info!("🔍 Discovering devices on local network...");
+        
+        // Step 1: Ensure nmap is installed
+        ensure_nmap_installed(&self.platform).await?;
+        
+        // Step 2: Scan local network
+        let scanner = NetworkScanner::new()?;
+        let devices = scanner.scan_local_network()?;
+        
+        // Step 3: Display discovered devices
+        if devices.is_empty() {
+            info!("⚠️  No devices with SSH found on local network");
+            return Ok(devices);
+        }
+        
+        info!("✅ Discovered {} devices with SSH enabled:", devices.len());
+        for (i, device) in devices.iter().enumerate() {
+            let hostname_display = device.hostname.as_deref().unwrap_or("unknown");
+            info!("  [{}] {} ({})", i + 1, device.ip, hostname_display);
+        }
+        
+        // Step 4: Assess device capabilities (if user wants to proceed)
+        if self.prompt_assess_devices()? {
+            let capabilities = self.assess_device_capabilities(&devices).await?;
+            self.display_capabilities(&capabilities);
+            
+            // Step 5: Set up SSH keys and deploy (if user wants to proceed)
+            if self.prompt_deploy_mesh()? {
+                self.setup_and_deploy_mesh(&capabilities).await?;
+            } else {
+                info!("\n⚠️  Skipping mesh deployment");
+                info!("📋 You can deploy later using the hainet-seed CLI");
+            }
+        } else {
+            info!("\n⚠️  Skipping device assessment");
+            info!("📋 Module 3 will handle remote deployment");
+        }
+        
+        Ok(devices)
+    }
+    
+    /// Prompt user if they want to deploy to mesh
+    fn prompt_deploy_mesh(&self) -> Result<bool> {
+        use std::io::{self, Write};
+        
+        print!("\n🚀 Deploy HAI-Net to discovered devices? (Y/n): ");
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        
+        let response = input.trim().to_lowercase();
+        Ok(response.is_empty() || response == "y" || response == "yes")
+    }
+    
+    /// Set up SSH keys and deploy to mesh
+    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities]) -> Result<()> {
+        info!("\n🔐 Setting up SSH keys and deploying to mesh...");
+        
+        // Step 1: Generate SSH key pair
+        let key_manager = SSHKeyManager::new()?;
+        key_manager.generate_key_pair("hainet-mesh")?;
+        
+        // Step 2: Get username for SSH
+        use std::io::{self, Write};
+        print!("\nSSH Username (default: current user): ");
+        io::stdout().flush()?;
+        let mut username = String::new();
+        io::stdin().read_line(&mut username)?;
+        let username = username.trim();
+        let username = if username.is_empty() {
+            std::env::var("USER").unwrap_or_else(|_| "root".to_string())
+        } else {
+            username.to_string()
+        };
+        
+        // Step 3: Display manual key setup instructions
+        info!("\n📋 SSH Key Setup:");
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        info!("Public key location: {}", key_manager.public_key_path().display());
+        info!("\nFor automatic deployment, copy the key to each device:");
+        for caps in capabilities {
+            info!("\n  Device: {} ({})", caps.hostname, caps.ip);
+            info!("  $ ssh-copy-id {}@{}", username, caps.ip);
+        }
+        info!("\nOr manually append the key to ~/.ssh/authorized_keys on each device");
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        // Step 4: Assign roles and deploy
+        let mut orchestrator = DeploymentOrchestrator::new();
+        orchestrator.assign_roles(capabilities.to_vec())?;
+        
+        // Ask for confirmation before deploying
+        print!("\n⚠️  Ready to deploy. Continue? (Y/n): ");
+        io::stdout().flush()?;
+        let mut confirm = String::new();
+        io::stdin().read_line(&mut confirm)?;
+        let confirm = confirm.trim().to_lowercase();
+        
+        if confirm.is_empty() || confirm == "y" || confirm == "yes" {
+            orchestrator.deploy_all(&username).await?;
+            
+            let summary = orchestrator.summary();
+            info!("\n📊 Deployment Summary:");
+            info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            info!("  Total Devices: {}", summary.total_devices);
+            info!("  Master Nodes: {}", summary.master_count);
+            info!("  Slave Nodes: {}", summary.slave_count);
+            info!("  Standalone: {}", summary.standalone_count);
+            info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        } else {
+            info!("\n⚠️  Deployment cancelled by user");
+        }
+        
+        Ok(())
+    }
+    
+    /// Prompt user if they want to assess device capabilities
+    fn prompt_assess_devices(&self) -> Result<bool> {
+        use std::io::{self, Write};
+        
+        print!("\n🔍 Assess device capabilities via SSH? (Y/n): ");
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        
+        let response = input.trim().to_lowercase();
+        Ok(response.is_empty() || response == "y" || response == "yes")
+    }
+    
+    /// Assess capabilities of discovered devices
+    async fn assess_device_capabilities(&self, devices: &[DeviceCandidate]) -> Result<Vec<DeviceCapabilities>> {
+        use std::io::{self, Write};
+        
+        info!("\n📋 Please provide SSH credentials for device assessment");
+        
+        print!("Username (default: current user): ");
+        io::stdout().flush()?;
+        let mut username = String::new();
+        io::stdin().read_line(&mut username)?;
+        let username = username.trim();
+        let username = if username.is_empty() {
+            std::env::var("USER").unwrap_or_else(|_| "root".to_string())
+        } else {
+            username.to_string()
+        };
+        
+        print!("Password: ");
+        io::stdout().flush()?;
+        let mut password = String::new();
+        io::stdin().read_line(&mut password)?;
+        let password = password.trim().to_string();
+        
+        let credentials = SSHCredentials { username, password };
+        
+        let mut capabilities = Vec::new();
+        
+        for device in devices {
+            info!("\n🔍 Assessing device: {}", device.ip);
+            
+            let client = SSHClient::new(device.ip.clone(), credentials.clone());
+            
+            // Test connection
+            match client.test_connection() {
+                Ok(_) => {
+                    info!("✓ Connection successful");
+                    
+                    // Assess capabilities
+                    match client.assess_capabilities().await {
+                        Ok(caps) => {
+                            capabilities.push(caps);
+                        }
+                        Err(e) => {
+                            info!("⚠️  Failed to assess capabilities: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    info!("⚠️  Connection failed: {}", e);
+                }
+            }
+        }
+        
+        Ok(capabilities)
+    }
+    
+    /// Display device capabilities and suggest master node
+    fn display_capabilities(&self, capabilities: &[DeviceCapabilities]) {
+        if capabilities.is_empty() {
+            info!("\n⚠️  No device capabilities collected");
+            return;
+        }
+        
+        info!("\n📊 Device Capabilities Summary:");
+        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        for caps in capabilities {
+            info!("Device: {} ({})", caps.hostname, caps.ip);
+            info!("  CPU: {} cores", caps.cpu_cores);
+            info!("  RAM: {:.1} GB", caps.ram_gb);
+            info!("  GPU: {}", caps.gpu.as_deref().unwrap_or("None"));
+            info!("  Disk: {:.1} GB available", caps.disk_gb);
+            info!("  OS: {} ({})", caps.os, caps.arch);
+            info!("  Score: {:.1}", caps.score);
+            info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        }
+        
+        // Suggest master node (highest score)
+        if let Some(master) = capabilities.iter().max_by(|a, b| a.score.partial_cmp(&b.score).unwrap()) {
+            info!("\n🎯 Recommended Master Node: {} ({})", master.hostname, master.ip);
+            info!("   Score: {:.1} (Best hardware for coordination)", master.score);
+        }
+        
+        info!("\n⚠️  Remote deployment will be available in Module 3");
+        info!("📋 Next: SSH key setup and automated deployment");
     }
 }
 
