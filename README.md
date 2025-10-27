@@ -208,8 +208,6 @@ For more info read the [Project Tracking](helperfiles/PROJECT_STATUS.toml)
 
 ---
 
-
-
 ## 🔒 Security
 
 **Privacy Commitment:**

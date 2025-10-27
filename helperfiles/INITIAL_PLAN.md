@@ -455,6 +455,24 @@ Workers follow the same lifecycle as existing Workers (Planning → Executing �
    - Cloud APIs (OpenAI, AssemblyAI): 2-10s with network latency
    - Streaming transcription: Possible future enhancement
 
+## Testing Strategy
+
+### Unit Tests
+- ✅ STTHandler placeholder logic (compiles correctly)
+- 🚧 Audio data serialization/deserialization
+- 🚧 VAD threshold calculations
+
+### Integration Tests
+- 🚧 End-to-end STT flow (Portal → Admin AI → Worker → MCP → Portal)
+- 🚧 Provider discovery and selection
+- 🚧 Error handling for missing providers
+
+### Manual Testing
+- 🚧 Record audio in VoiceInput component
+- 🚧 Verify audio level visualization
+- 🚧 Test VAD with different threshold values
+- 🚧 Validate transcription accuracy
+
 ## Dependencies
 
 ### New Crates (Added in Cycle 2.2)
@@ -466,34 +484,15 @@ reqwest = "0.11"           # HTTP client for future API calls
 tracing = "0.1"            # Structured logging
 ```
 
-## Next Steps (Cycle 2.3+)
+### Frontend Dependencies
 
-### Priority 1: Complete STT Flow
-1. Implement Admin AI intent detection for audio input
-2. Create STT Worker agent in `hainet-persona`
-3. Extend `ai_providers` with STT capability types
-4. Build `hainet-stt` MCP server with Whisper integration
+In `hainet-portal/package.json` (existing):
+```json
+"@tauri-apps/api": "^2.0.0"  // IPC communication
+```
 
-### Priority 2: User Experience
-1. Add "listening..." animation to VoiceInput
-2. Display transcription in progress (streaming)
-3. Allow editing transcription before sending
-4. Save voice notes with timestamps
+## References
 
-### Priority 3: Advanced Features
-1. Multi-language support (auto-detect or manual select)
-2. Speaker diarization (identify multiple speakers)
-3. Punctuation and formatting improvements
-4. Custom vocabulary for domain-specific terms
-
-## Changelog
-
-### 2025-10-23 (Cycle 2.2)
-- ✅ Created VoiceInput.tsx component with VAD
-- ✅ Created STTHandler with placeholder logic
-- ✅ Integrated STT into AdminBridge
-- ✅ Added Tauri IPC command for transcription
-- ✅ Added required dependencies
-- ✅ Fixed compilation errors (Agent trait, Tauri v2 API)
-- ✅ Successful compilation with only warnings
-- 📝 Documented architecture and data flow
+- **Model Context Protocol**: See `helperfiles/external/MCP_SPECIFICATIONS.md`
+- **AI Providers System**: See `hainet-persona/src/ai_providers/` (implementation in progress)
+- **Whisper.cpp Documentation**: https://github.com/ggml-org/whisper.cpp
