@@ -5,21 +5,23 @@
 //! Worker agents follow this state machine:
 //! Idle → Planning → Working → Reporting → (Idle | Error)
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::messaging::{MessageBus, AgentId};
-use crate::prompts::{PromptManager, AgentType, AgentState, WorkerType};
+use crate::prompts::{PromptManager, AgentType, AgentState, WorkerType, PromptContext};
 use crate::projects::{ProjectManager, TaskId};
 use crate::tools::mcp::MCPClientManager;
+use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
 use super::state::AgentStateMachine;
+use super::templates::WorkerTemplate;
 use serde_json::json;
 
 /// Worker Agent
 /// 
 /// Responsible for:
-/// - Executing specific tasks assigned by PM
+/// - Executing specific tasks assigned by PM using LLM-powered planning
 /// - Using MCP tools to accomplish work
 /// - Reporting results back to PM for validation
 pub struct WorkerAgent {
@@ -28,6 +30,9 @@ pub struct WorkerAgent {
     
     /// Worker specialization type
     worker_type: WorkerType,
+    
+    /// Worker template with capabilities and system prompt
+    template: WorkerTemplate,
     
     /// Current task being executed
     current_task: Option<TaskId>,
@@ -46,10 +51,16 @@ pub struct WorkerAgent {
     
     /// MCP client for tool access
     mcp_client: Arc<RwLock<MCPClientManager>>,
+    
+    /// Ollama client for LLM-powered task analysis
+    ollama_client: OllamaClient,
+    
+    /// Maximum retry attempts for failed operations
+    max_retries: usize,
 }
 
 impl WorkerAgent {
-    /// Create new worker agent
+    /// Create new worker agent with template
     pub fn new(
         worker_type: WorkerType,
         message_bus: Arc<RwLock<MessageBus>>,
@@ -59,15 +70,52 @@ impl WorkerAgent {
     ) -> Self {
         let id = AgentId::new(AgentType::Worker, format!("Worker-{:?}", worker_type));
         
+        // Select appropriate template based on worker type
+        let template = match worker_type {
+            WorkerType::Files => WorkerTemplate::file_worker(),
+            WorkerType::Network => WorkerTemplate::network_worker(),
+            WorkerType::Research => WorkerTemplate::research_worker(),
+            WorkerType::Compute => WorkerTemplate::file_worker(), // Default to file worker
+            _ => WorkerTemplate::file_worker(),
+        };
+        
         Self {
             id,
             worker_type,
+            template,
             current_task: None,
             state_machine: AgentStateMachine::new(),
             message_bus,
             prompt_manager,
             project_manager,
             mcp_client,
+            ollama_client: OllamaClient::localhost(),
+            max_retries: 3,
+        }
+    }
+    
+    /// Create worker from template
+    pub fn from_template(
+        template: WorkerTemplate,
+        message_bus: Arc<RwLock<MessageBus>>,
+        prompt_manager: Arc<PromptManager>,
+        project_manager: Arc<RwLock<ProjectManager>>,
+        mcp_client: Arc<RwLock<MCPClientManager>>,
+    ) -> Self {
+        let id = AgentId::new(AgentType::Worker, template.name.clone());
+        
+        Self {
+            id,
+            worker_type: WorkerType::Files, // Default, overridden by template
+            template,
+            current_task: None,
+            state_machine: AgentStateMachine::new(),
+            message_bus,
+            prompt_manager,
+            project_manager,
+            mcp_client,
+            ollama_client: OllamaClient::localhost(),
+            max_retries: 3,
         }
     }
     
@@ -102,7 +150,7 @@ impl WorkerAgent {
         Ok(())
     }
     
-    /// Execute assigned task
+    /// Execute assigned task with LLM-powered planning
     pub async fn execute_task(&mut self) -> Result<()> {
         let task_id = self.current_task.as_ref()
             .ok_or_else(|| anyhow::anyhow!("No task assigned"))?;
@@ -113,8 +161,14 @@ impl WorkerAgent {
             "Analyzing task requirements".to_string()
         )?;
         
-        // TODO: Use LLM to analyze task and plan approach
-        // For now, this is a stub
+        // Get task details
+        let task = self.get_task_details(task_id).await?;
+        
+        // Use LLM to analyze task and plan tool execution
+        let execution_plan = self.plan_task_execution(&task.description).await?;
+        
+        tracing::info!("Worker {} planned {} steps for task: {}", 
+                       self.id.name, execution_plan.steps.len(), task.title);
         
         // Transition to Working
         self.state_machine.transition(
@@ -122,8 +176,8 @@ impl WorkerAgent {
             "Executing task".to_string()
         )?;
         
-        // Execute task using MCP tools
-        let deliverables = self.execute_with_tools().await?;
+        // Execute task using MCP tools with retry logic
+        let deliverables = self.execute_with_retries(&execution_plan).await?;
         
         // Transition to Reporting
         self.state_machine.transition(
@@ -134,6 +188,8 @@ impl WorkerAgent {
         // Submit task for review
         let project_manager = self.project_manager.write().await;
         project_manager.complete_task(task_id, deliverables).await?;
+        
+        tracing::info!("Worker {} completed task: {}", self.id.name, task.title);
         
         Ok(())
     }
@@ -170,41 +226,143 @@ impl WorkerAgent {
         self.state_machine.force_error(error);
     }
     
-    /// Execute task using MCP tools
-    async fn execute_with_tools(&self) -> Result<Vec<String>> {
-        let task_id = self.current_task.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No task assigned"))?;
+    /// Get task details from project manager
+    async fn get_task_details(&self, task_id: &TaskId) -> Result<crate::projects::Task> {
+        let pm = self.project_manager.read().await;
+        let projects = pm.list_active_projects().await?;
         
-        // Get task details from project manager
-        let tasks = {
-            let pm = self.project_manager.read().await;
-            pm.get_project_tasks(&pm.list_active_projects().await?[0].id).await?
-        };
-        
-        let task = tasks.iter()
-            .find(|t| &t.id == task_id)
-            .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
-        
-        // Based on worker type, select appropriate tools
-        match self.worker_type {
-            WorkerType::Files => self.execute_file_task(&task.description).await,
-            WorkerType::Network => {
-                // Network tools not yet implemented
-                Ok(vec!["Network task completed (stub)".to_string()])
-            }
-            WorkerType::Research => {
-                // Research tools not yet implemented
-                Ok(vec!["Research task completed (stub)".to_string()])
-            }
-            WorkerType::Compute => {
-                // Compute tools not yet implemented
-                Ok(vec!["Compute task completed (stub)".to_string()])
-            }
-            _ => {
-                // Default: try file operations
-                self.execute_generic_task(&task.description).await
+        for project in projects {
+            let tasks = pm.get_project_tasks(&project.id).await?;
+            if let Some(task) = tasks.iter().find(|t| &t.id == task_id) {
+                return Ok(task.clone());
             }
         }
+        
+        Err(anyhow::anyhow!("Task not found: {}", task_id))
+    }
+    
+    /// Plan task execution using LLM
+    async fn plan_task_execution(&self, task_description: &str) -> Result<ExecutionPlan> {
+        // Use template's system prompt directly
+        let system_prompt = self.template.system_prompt.clone();
+        
+        let planning_prompt = format!(
+            "Task: {}\\n\\nYou are a {} worker agent.\\n\\n\
+             Your capabilities: {:?}\\n\
+             Available MCP servers: {:?}\\n\\n\
+             Break this task into specific tool execution steps.\\n\\n\
+             Return JSON format:\\n\
+             {{\\n\
+               \\\"steps\\\": [\\n\
+                 {{\\\"tool\\\": \\\"server::tool_name\\\", \\\"params\\\": {{...}}, \\\"description\\\": \\\"what this does\\\"}}\\n\
+               ]\\n\
+             }}\\n\\n\
+             Your response (JSON only):",
+            task_description,
+            self.template.name,
+            self.template.capabilities,
+            self.template.mcp_servers
+        );
+        
+        let options = GenerationOptions {
+            temperature: Some(0.3), // Lower temperature for more deterministic planning
+            max_tokens: Some(1024),
+            system: Some(system_prompt),
+            ..Default::default()
+        };
+        
+        let response = self.ollama_client.generate(
+            "llama3.2:latest",
+            &planning_prompt,
+            options
+        ).await.context("Failed to generate execution plan")?;
+        
+        self.parse_execution_plan(&response.text)
+    }
+    
+    /// Parse LLM response into ExecutionPlan
+    fn parse_execution_plan(&self, llm_response: &str) -> Result<ExecutionPlan> {
+        let json_str = if let Some(start) = llm_response.find('{') {
+            if let Some(end) = llm_response.rfind('}') {
+                &llm_response[start..=end]
+            } else {
+                llm_response
+            }
+        } else {
+            llm_response
+        };
+        
+        let parsed: serde_json::Value = serde_json::from_str(json_str)
+            .context(format!("Failed to parse execution plan JSON: {}", json_str))?;
+        
+        let steps: Vec<ExecutionStep> = parsed["steps"].as_array()
+            .ok_or_else(|| anyhow::anyhow!("Missing 'steps' array"))?
+            .iter()
+            .filter_map(|s| {
+                Some(ExecutionStep {
+                    tool: s["tool"].as_str()?.to_string(),
+                    params: s["params"].clone(),
+                    description: s["description"].as_str().unwrap_or("").to_string(),
+                })
+            })
+            .collect();
+        
+        if steps.is_empty() {
+            return Err(anyhow::anyhow!("No valid execution steps found in plan"));
+        }
+        
+        Ok(ExecutionPlan { steps })
+    }
+    
+    /// Execute plan with retry logic
+    async fn execute_with_retries(&self, plan: &ExecutionPlan) -> Result<Vec<String>> {
+        let mut deliverables = Vec::new();
+        
+        for (idx, step) in plan.steps.iter().enumerate() {
+            tracing::info!("Worker {} executing step {}/{}: {}", 
+                           self.id.name, idx + 1, plan.steps.len(), step.description);
+            
+            let mut attempts = 0;
+            let result = loop {
+                attempts += 1;
+                
+                match self.execute_step(step).await {
+                    Ok(result) => break result,
+                    Err(e) if attempts < self.max_retries => {
+                        tracing::warn!("Worker {} step failed (attempt {}/{}): {}",
+                                       self.id.name, attempts, self.max_retries, e);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempts as u64)).await;
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(anyhow::anyhow!(
+                            "Step {} failed after {} attempts: {}", 
+                            idx + 1, self.max_retries, e
+                        ));
+                    }
+                }
+            };
+            
+            deliverables.push(format!("Step {}: {} - {}", idx + 1, step.description, result));
+        }
+        
+        Ok(deliverables)
+    }
+    
+    /// Execute single step with MCP tool
+    async fn execute_step(&self, step: &ExecutionStep) -> Result<String> {
+        // Parse tool name: "server::tool_name"
+        let parts: Vec<&str> = step.tool.split("::").collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid tool format: {}", step.tool));
+        }
+        
+        let (server, tool) = (parts[0], parts[1]);
+        
+        let mcp_client = self.mcp_client.read().await;
+        let result = mcp_client.call_tool(server, tool, step.params.clone()).await?;
+        
+        Ok(result.to_string())
     }
     
     /// Execute file-related task using hainet-files MCP server
@@ -312,6 +470,25 @@ impl WorkerAgent {
     pub fn project_manager(&self) -> &Arc<RwLock<ProjectManager>> {
         &self.project_manager
     }
+    
+    /// Get reference to template (for testing)
+    pub fn template(&self) -> &WorkerTemplate {
+        &self.template
+    }
+}
+
+/// Execution plan generated by LLM
+#[derive(Debug, Clone)]
+struct ExecutionPlan {
+    steps: Vec<ExecutionStep>,
+}
+
+/// Single execution step
+#[derive(Debug, Clone)]
+struct ExecutionStep {
+    tool: String,  // Format: "server::tool_name"
+    params: serde_json::Value,
+    description: String,
 }
 
 #[cfg(test)]

@@ -1,0 +1,33 @@
+# START OF FILE mcp-servers/hainet-system/Cargo.toml
+[package]
+name = "hainet-system"
+version = "0.1.0"
+edition = "2021"
+authors = ["HAI-Net Contributors"]
+description = "MCP server for system management and monitoring"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# MCP (Model Context Protocol) - Official SDK
+rmcp = { workspace = true, features = ["server", "transport-io"] }
+rmcp-macros = { workspace = true }
+async-trait = "0.1"
+
+# System information
+sysinfo = "0.30"
+
+# Additional dependencies
+clap = { version = "4.0", features = ["derive"] }
+regex = "1.10"
+chrono = "0.4"
+
+[[bin]]
+name = "hainet-system"
+path = "src/main.rs"

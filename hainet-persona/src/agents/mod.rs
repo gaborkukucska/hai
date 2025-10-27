@@ -10,17 +10,19 @@
 pub mod admin;
 pub mod intent;
 pub mod planner;
-pub mod pm;
 pub mod state;
+pub mod pm;
 pub mod worker;
+pub mod templates;
 
 // Re-export core agent types
 pub use admin::AdminAgent;
-pub use intent::{IntentParser, Intent, IntentType};
-pub use planner::{TaskPlanner, TaskPlan, TaskStep};
+pub use intent::IntentParser;
+pub use planner::TaskPlanner;
+pub use state::AgentStateMachine;
 pub use pm::PMAgent;
-pub use state::{AgentStateMachine, StateTransition};
 pub use worker::WorkerAgent;
+pub use templates::WorkerTemplate;
 
 use anyhow::Result;
 use crate::messaging::{AgentId, MessageBus};

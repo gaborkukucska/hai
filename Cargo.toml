@@ -9,6 +9,8 @@ members = [
     "hainet-portal",
     "hainet-bridge",
     "mcp-servers/hainet-files",
+    "mcp-servers/hainet-system",
+    "mcp-servers/hainet-dev",
 ]
 exclude = [
     "hainet-portal/src-tauri",

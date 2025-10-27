@@ -1,0 +1,15 @@
+# START OF FILE mcp-servers/hainet-dev/Cargo.toml
+[package]
+name = "hainet-dev"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+rmcp = { workspace = true, features = ["server", "transport-io"] }
+rmcp-macros = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

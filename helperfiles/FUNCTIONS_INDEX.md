@@ -702,12 +702,41 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+---
+
+## MCP Servers (Phase 5 - In Progress)
+
+### mcp-servers/hainet-system/src/main.rs (Phase 5.2 - Complete)
+- `SystemServer::new()` - Create system management MCP server
+- `SystemServer::handle_system_status()` - Get CPU, RAM, disk, uptime, OS info
+- `SystemServer::handle_list_services()` - List running HAI-Net services (core, chain, bridge, portal, ollama)
+- `SystemServer::handle_restart_service(service_name)` - Restart HAI-Net service via systemctl (whitelist-protected)
+- `SystemServer::handle_check_health()` - Run comprehensive health checks (CPU, RAM, disk, services)
+- **MCP Tools:** `system_status`, `list_services`, `restart_service`, `check_health`
+- **Target User:** Admin AI agent for system monitoring and management
+- **Status:** ✅ Complete - 450 LOC, 4 tools, compiles cleanly
+
+### mcp-servers/hainet-dev/src/main.rs (Phase 5.3 - Complete)
+- `DevServer::new()` - Create development tools MCP server
+- `DevServer::handle_git_status(repo_path)` - Get git repository status (modified/untracked files, branch)
+- `DevServer::handle_git_diff(repo_path, file_path)` - View git diff for file or entire repository
+- `DevServer::handle_git_commit(repo_path, message)` - Stage and commit all changes with message
+- `DevServer::handle_cargo_build(package, release)` - Build Rust packages with cargo (optional release mode)
+- `DevServer::handle_cargo_test(package, filter)` - Run cargo tests with package and name filters
+- `DevServer::handle_code_search(pattern, search_path)` - Search codebase using ripgrep/grep with line numbers
+- `DevServer::handle_read_file_lines(file_path, start_line, end_line)` - Read specific line ranges from files (1-based indexing)
+- **MCP Tools:** `git_status`, `git_diff`, `git_commit`, `cargo_build`, `cargo_test`, `code_search`, `read_file_lines`
+- **Target User:** Worker AI agents for development task execution
+- **Status:** ✅ Complete - 480 LOC, 7 tools, compiles cleanly in 1.39s
+
+---
+
 ## Statistics
 
-**Total Modules:** 59 (58 previous + 1 new: ssh_client)
-**Total Functions:** 189+ (182 previous + 7 new SSH/assessment functions)  
-**Lines of Code:** ~18,330 (18,080 previous + 250 new)  
-**Test Coverage:** 177 tests (173 previous + 4 new SSH client tests)  
+**Total Modules:** 61 (59 previous + 2 new: hainet-system, hainet-dev)
+**Total Functions:** 200+ (189 previous + 11 new MCP tools)  
+**Lines of Code:** ~19,260 (18,330 previous + 930 new MCP servers)  
+**Test Coverage:** 177 tests (compilation verified for new MCP servers)  
 **Constitutional Compliance:** Fully integrated (Articles I, II, III, V, VII)
 
 **Phase 0 Status:** ✅ COMPLETE (Cycles 0.1-0.6)
