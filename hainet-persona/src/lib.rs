@@ -4,6 +4,7 @@
 //! for HAI-Net nodes.
 
 // Core modules
+pub mod config;
 pub mod prompts;
 pub mod messaging;
 pub mod ai_providers;
@@ -20,6 +21,10 @@ use anyhow::Result;
 use tracing::info;
 
 // Re-export core types for convenience
+pub use config::{
+    HaiNetConfig, ModelDefaults, GenerationDefaults, ReliabilityDefaults, PathDefaults,
+};
+
 pub use prompts::{
     PromptManager, PromptLoader, PromptRenderer, PromptCache,
     AgentType, AgentState, PromptContext,

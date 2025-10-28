@@ -21,6 +21,7 @@ use tokio::sync::RwLock;
 
 use super::{Agent, AgentContext, IntentParser, TaskPlanner, AgentStateMachine};
 use super::pm::PMAgent;
+use crate::config::HaiNetConfig;
 use crate::messaging::{AgentId, Message};
 use crate::prompts::{AgentType, AgentState, PromptContext};
 use crate::projects::{ProjectManager, ProjectId};
@@ -28,6 +29,9 @@ use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOpt
 
 /// Threshold for detecting complex intents that require projects
 const COMPLEX_INTENT_THRESHOLD: f64 = 0.7;
+
+/// Maximum number of retries for LLM format validation failures
+const MAX_LLM_RETRIES: usize = 3;
 
 /// Admin AI - Primary user interface and orchestrator
 pub struct AdminAgent {
@@ -57,6 +61,9 @@ pub struct AdminAgent {
     
     /// Running flag
     running: bool,
+    
+    /// Configuration
+    config: HaiNetConfig,
 }
 
 impl AdminAgent {
@@ -66,6 +73,9 @@ impl AdminAgent {
         project_manager: Arc<RwLock<ProjectManager>>,
     ) -> Result<Self> {
         let id = AgentId::new(AgentType::Admin, "main-admin".to_string());
+        let config = HaiNetConfig::load_or_default();
+        
+        tracing::info!("Admin AI using model: {}", config.default_models.admin_model);
         
         Ok(Self {
             id,
@@ -77,6 +87,7 @@ impl AdminAgent {
             ollama_client: OllamaClient::localhost(),
             active_projects: HashMap::new(),
             running: false,
+            config,
         })
     }
     
@@ -192,11 +203,52 @@ impl AdminAgent {
         Ok(has_project_keyword || (intent.confidence >= COMPLEX_INTENT_THRESHOLD && has_multi_step))
     }
     
-    /// Generate project plan using LLM
+    /// Generate project plan using LLM with retry logic and format validation
     async fn generate_project_plan(
         &self,
         user_input: &str,
         intent: &super::intent::Intent,
+    ) -> Result<ProjectPlan> {
+        // Try up to MAX_LLM_RETRIES times
+        for attempt in 1..=MAX_LLM_RETRIES {
+            tracing::info!("Generating project plan (attempt {}/{})", attempt, MAX_LLM_RETRIES);
+            
+            // Generate plan using progressively simpler prompts
+            match self.generate_plan_attempt(user_input, intent, attempt).await {
+                Ok(plan) => {
+                    // Validate the plan structure
+                    if self.validate_project_plan(&plan).is_ok() {
+                        tracing::info!("Successfully generated valid project plan on attempt {}", attempt);
+                        return Ok(plan);
+                    } else {
+                        tracing::warn!("Plan validation failed on attempt {}, retrying...", attempt);
+                        if attempt == MAX_LLM_RETRIES {
+                            return Err(anyhow::anyhow!("Failed to generate valid project plan after {} attempts", MAX_LLM_RETRIES));
+                        }
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("Plan generation failed on attempt {}: {:?}", attempt, e);
+                    if attempt == MAX_LLM_RETRIES {
+                        return Err(e).context(format!("Failed to generate project plan after {} attempts", MAX_LLM_RETRIES));
+                    }
+                    // Small delay before retry
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempt as u64)).await;
+                    continue;
+                }
+            }
+        }
+        
+        Err(anyhow::anyhow!("Failed to generate project plan after {} attempts", MAX_LLM_RETRIES))
+    }
+    
+    /// Generate a single plan attempt with attempt-specific prompt
+    async fn generate_plan_attempt(
+        &self,
+        user_input: &str,
+        intent: &super::intent::Intent,
+        attempt: usize,
     ) -> Result<ProjectPlan> {
         // Load planning prompt
         let mut prompt_manager = self.context.prompt_manager.write().await;
@@ -220,40 +272,25 @@ impl AdminAgent {
         
         drop(prompt_manager);
         
-        // Create planning prompt with VERY explicit instructions
-        let planning_prompt = format!(
-            "User Request: {}\n\n\
-             CREATE A PROJECT PLAN IN THIS EXACT JSON FORMAT:\n\n\
-             {{\n\
-               \"title\": \"<project name here>\",\n\
-               \"overview\": \"<2-3 sentence description>\",\n\
-               \"tasks\": [\n\
-                 \"<task 1 description as a simple string>\",\n\
-                 \"<task 2 description as a simple string>\",\n\
-                 \"<task 3 description as a simple string>\"\n\
-               ]\n\
-             }}\n\n\
-             CRITICAL RULES:\n\
-             1. Return ONLY the JSON object above\n\
-             2. NO markdown code blocks (no ```json)\n\
-             3. NO explanations before or after\n\
-             4. The \"tasks\" array MUST contain simple strings, NOT objects\n\
-             5. Include 3-7 tasks\n\
-             6. Start your response with {{ and end with }}\n\n\
-             Your JSON response:",
-            user_input
-        );
+        // Create progressively simpler prompts based on attempt number
+        let planning_prompt = self.create_planning_prompt(user_input, attempt);
         
-        // Generate with Ollama
+        // Generate with Ollama - lower temperature for better format adherence
+        let temperature = match attempt {
+            1 => 0.3,  // Lower temperature for first attempt
+            2 => 0.2,  // Even lower on retry
+            _ => 0.1,  // Minimal creativity on final attempts
+        };
+        
         let options = GenerationOptions {
-            temperature: Some(0.7),
+            temperature: Some(temperature),
             max_tokens: Some(1024),
             system: Some(system_prompt),
             ..Default::default()
         };
         
         let response = self.ollama_client.generate(
-            "llama3.2:latest", // Default model
+            &self.config.default_models.admin_model,
             &planning_prompt,
             options
         ).await.context("Failed to generate project plan with LLM")?;
@@ -262,6 +299,108 @@ impl AdminAgent {
         let plan = self.parse_project_plan(&response.text)?;
         
         Ok(plan)
+    }
+    
+    /// Create planning prompt with progressive simplification
+    fn create_planning_prompt(&self, user_input: &str, attempt: usize) -> String {
+        match attempt {
+            1 => {
+                // Attempt 1: Full structured prompt with JSON schema
+                format!(
+                    "User Request: {}\n\n\
+                     YOUR RESPONSE MUST MATCH THIS JSON SCHEMA:\n\n\
+                     {{\n\
+                       \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n\
+                       \"type\": \"object\",\n\
+                       \"required\": [\"title\", \"overview\", \"tasks\"],\n\
+                       \"properties\": {{\n\
+                         \"title\": {{\n\
+                           \"type\": \"string\",\n\
+                           \"minLength\": 10,\n\
+                           \"maxLength\": 60\n\
+                         }},\n\
+                         \"overview\": {{\n\
+                           \"type\": \"string\",\n\
+                           \"minLength\": 20\n\
+                         }},\n\
+                         \"tasks\": {{\n\
+                           \"type\": \"array\",\n\
+                           \"items\": {{\"type\": \"string\"}},\n\
+                           \"minItems\": 3,\n\
+                           \"maxItems\": 7\n\
+                         }}\n\
+                       }}\n\
+                     }}\n\n\
+                     VALIDATION CHECKLIST:\n\
+                     [ ] Response starts with {{ and ends with }}\n\
+                     [ ] \"title\" is 10-60 characters\n\
+                     [ ] \"overview\" is 20+ characters\n\
+                     [ ] \"tasks\" is array of 3-7 strings\n\
+                     [ ] NO markdown (no ```json)\n\
+                     [ ] NO extra text\n\n\
+                     Your JSON:",
+                    user_input
+                )
+            },
+            2 => {
+                // Attempt 2: Simplified format-focused prompt
+                format!(
+                    "User Request: {}\n\n\
+                     CREATE JSON IN THIS EXACT FORMAT:\n\
+                     {{\n\
+                       \"title\": \"<project name>\",\n\
+                       \"overview\": \"<description>\",\n\
+                       \"tasks\": [\"<task 1>\", \"<task 2>\", \"<task 3>\"]\n\
+                     }}\n\n\
+                     RULES:\n\
+                     1. ONLY JSON (no markdown, no text)\n\
+                     2. Start with {{ end with }}\n\
+                     3. tasks = array of strings\n\
+                     4. 3-7 tasks\n\n\
+                     JSON:",
+                    user_input
+                )
+            },
+            _ => {
+                // Attempt 3+: Minimal template-fill prompt
+                format!(
+                    "Fill this JSON template for: {}\n\n\
+                     {{\n\
+                       \"title\": \"___\",\n\
+                       \"overview\": \"___\",\n\
+                       \"tasks\": [\"___\", \"___\", \"___\"]\n\
+                     }}",
+                    user_input
+                )
+            }
+        }
+    }
+    
+    /// Validate project plan structure
+    fn validate_project_plan(&self, plan: &ProjectPlan) -> Result<()> {
+        // Validate title
+        if plan.title.len() < 10 || plan.title.len() > 60 {
+            return Err(anyhow::anyhow!("Title must be 10-60 characters, got {}", plan.title.len()));
+        }
+        
+        // Validate overview
+        if plan.overview.len() < 20 {
+            return Err(anyhow::anyhow!("Overview must be at least 20 characters, got {}", plan.overview.len()));
+        }
+        
+        // Validate tasks
+        if plan.initial_tasks.len() < 3 || plan.initial_tasks.len() > 7 {
+            return Err(anyhow::anyhow!("Must have 3-7 tasks, got {}", plan.initial_tasks.len()));
+        }
+        
+        // Check each task is non-empty
+        for (i, task) in plan.initial_tasks.iter().enumerate() {
+            if task.trim().is_empty() {
+                return Err(anyhow::anyhow!("Task {} is empty", i + 1));
+            }
+        }
+        
+        Ok(())
     }
     
     /// Parse LLM response into ProjectPlan
@@ -458,7 +597,7 @@ impl AdminAgent {
         };
         
         let response = self.ollama_client.generate(
-            "llama3.2:latest",
+            &self.config.default_models.admin_model,
             user_input,
             options
         ).await.context("Failed to generate conversational response")?;

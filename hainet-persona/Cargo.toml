@@ -29,6 +29,7 @@ rmcp = { workspace = true, features = ["client", "transport-io", "transport-chil
 # Additional dependencies for prompt management
 toml = "0.8"
 chrono = "0.4"
+dirs = "5.0"
 
 # Messaging system dependencies
 sha2 = "0.10"
