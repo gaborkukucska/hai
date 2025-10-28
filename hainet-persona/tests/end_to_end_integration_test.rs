@@ -40,9 +40,15 @@ async fn create_test_context() -> Arc<hainet_persona::agents::AgentContext> {
 /// Helper to create Admin AI agent
 async fn create_admin_agent() -> Result<AdminAgent> {
     let context = create_test_context().await;
+    
+    // Create ProjectManager with in-memory database
+    // Migrations will run automatically via ProjectStorage::new()
     let project_manager = Arc::new(RwLock::new(
         ProjectManager::new("sqlite::memory:").await?
     ));
+    
+    // Give migrations time to complete
+    tokio::time::sleep(Duration::from_millis(50)).await;
     
     AdminAgent::new(context, project_manager).await
 }

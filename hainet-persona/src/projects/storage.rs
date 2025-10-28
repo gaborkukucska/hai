@@ -24,7 +24,10 @@ impl ProjectStorage {
         let pool = SqlitePool::connect(db_path).await?;
         let storage = Self { pool };
         
-        // Run migrations on startup
+        // Create base tables FIRST (migrations expect these to exist)
+        storage.create_tables().await?;
+        
+        // Then run migrations to add new columns
         storage.run_migrations().await?;
         
         Ok(storage)
@@ -61,7 +64,7 @@ impl ProjectStorage {
         .execute(&self.pool)
         .await?;
 
-        // Tasks table
+        // Tasks table (migration-added columns will be added via migrations)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS tasks (
@@ -74,9 +77,6 @@ impl ProjectStorage {
                 status TEXT NOT NULL,
                 deliverables TEXT NOT NULL,
                 validation_notes TEXT,
-                pm_feedback TEXT,
-                revision_count INTEGER NOT NULL DEFAULT 0,
-                max_revisions INTEGER NOT NULL DEFAULT 2,
                 blocking_reason TEXT,
                 failure_reason TEXT,
                 created_at INTEGER NOT NULL,

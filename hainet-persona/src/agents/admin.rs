@@ -220,36 +220,28 @@ impl AdminAgent {
         
         drop(prompt_manager);
         
-        // Create planning prompt
+        // Create planning prompt with VERY explicit instructions
         let planning_prompt = format!(
             "User Request: {}\n\n\
-             Detected Intent: {:?}\n\
-             Confidence: {:.2}\n\
-             Entities: {:?}\n\n\
-             Please create a detailed project plan.\n\n\
-             CRITICAL: You MUST respond with ONLY valid JSON. No markdown, no explanations.\n\n\
-             Required fields:\n\
-             1. \"title\": Clear project title (max 60 chars)\n\
-             2. \"overview\": Project overview (2-3 sentences)\n\
-             3. \"tasks\": Array of 3-7 task descriptions as STRINGS ONLY\n\n\
-             IMPORTANT: The \"tasks\" field MUST be a simple string array, NOT objects.\n\n\
-             Example format:\n\
-             {{\n  \
-               \"title\": \"Todo App Development\",\n  \
-               \"overview\": \"Create a modern todo application using React and TypeScript.\",\n  \
-               \"tasks\": [\n    \
-                 \"Set up React project with TypeScript\",\n    \
-                 \"Design UI components for todo list\",\n    \
-                 \"Implement CRUD operations\",\n    \
-                 \"Add local storage persistence\",\n    \
-                 \"Write unit tests\"\n  \
+             CREATE A PROJECT PLAN IN THIS EXACT JSON FORMAT:\n\n\
+             {{\n\
+               \"title\": \"<project name here>\",\n\
+               \"overview\": \"<2-3 sentence description>\",\n\
+               \"tasks\": [\n\
+                 \"<task 1 description as a simple string>\",\n\
+                 \"<task 2 description as a simple string>\",\n\
+                 \"<task 3 description as a simple string>\"\n\
                ]\n\
              }}\n\n\
-             Your response (JSON only, no other text):",
-            user_input,
-            intent.intent_type,
-            intent.confidence,
-            intent.entities
+             CRITICAL RULES:\n\
+             1. Return ONLY the JSON object above\n\
+             2. NO markdown code blocks (no ```json)\n\
+             3. NO explanations before or after\n\
+             4. The \"tasks\" array MUST contain simple strings, NOT objects\n\
+             5. Include 3-7 tasks\n\
+             6. Start your response with {{ and end with }}\n\n\
+             Your JSON response:",
+            user_input
         );
         
         // Generate with Ollama
@@ -306,9 +298,19 @@ impl AdminAgent {
                     .trim()                        // Remove leading/trailing whitespace
                     .to_string();
                 
-                // Check if JSON is missing closing brace (common LLM error)
+                // Check if JSON is missing closing brackets (common LLM truncation error)
                 let open_braces = repaired.chars().filter(|c| *c == '{').count();
                 let close_braces = repaired.chars().filter(|c| *c == '}').count();
+                let open_brackets = repaired.chars().filter(|c| *c == '[').count();
+                let close_brackets = repaired.chars().filter(|c| *c == ']').count();
+                
+                if open_brackets > close_brackets {
+                    tracing::warn!("JSON has {} open brackets but only {} close brackets, adding missing close brackets", 
+                                   open_brackets, close_brackets);
+                    for _ in 0..(open_brackets - close_brackets) {
+                        repaired.push(']');
+                    }
+                }
                 
                 if open_braces > close_braces {
                     tracing::warn!("JSON has {} open braces but only {} close braces, adding missing close braces", 

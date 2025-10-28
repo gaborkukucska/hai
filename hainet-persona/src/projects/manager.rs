@@ -38,8 +38,8 @@ pub struct ProjectManager {
 impl ProjectManager {
     /// Create a new ProjectManager with SQLite backend
     pub async fn new(db_path: &str) -> Result<Self> {
+        // ProjectStorage::new() now handles table creation AND migrations
         let storage = Arc::new(ProjectStorage::new(db_path).await?);
-        storage.create_tables().await?;
 
         // Load active projects from database
         let projects = storage.list_active_projects().await?;
