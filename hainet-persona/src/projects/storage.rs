@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::project::{Project, ProjectId, ProjectStatus};
 use super::task::{Task, TaskId, TaskStatus};
 use super::milestone::{Milestone, MilestoneId, MilestoneStatus};
+use super::migrations::MigrationRunner;
 
 /// SQLite storage backend for project management
 pub struct ProjectStorage {
@@ -21,7 +22,18 @@ impl ProjectStorage {
     /// Create a new storage instance with the given database path
     pub async fn new(db_path: &str) -> Result<Self> {
         let pool = SqlitePool::connect(db_path).await?;
-        Ok(Self { pool })
+        let storage = Self { pool };
+        
+        // Run migrations on startup
+        storage.run_migrations().await?;
+        
+        Ok(storage)
+    }
+
+    /// Run all pending database migrations
+    async fn run_migrations(&self) -> Result<()> {
+        let runner = MigrationRunner::new(self.pool.clone());
+        runner.run_migrations().await
     }
 
     /// Create all necessary database tables
@@ -62,6 +74,9 @@ impl ProjectStorage {
                 status TEXT NOT NULL,
                 deliverables TEXT NOT NULL,
                 validation_notes TEXT,
+                pm_feedback TEXT,
+                revision_count INTEGER NOT NULL DEFAULT 0,
+                max_revisions INTEGER NOT NULL DEFAULT 2,
                 blocking_reason TEXT,
                 failure_reason TEXT,
                 created_at INTEGER NOT NULL,
@@ -218,9 +233,10 @@ impl ProjectStorage {
             INSERT INTO tasks (
                 id, project_id, title, description, assigned_worker,
                 dependencies, status, deliverables, validation_notes,
+                pm_feedback, revision_count, max_revisions,
                 blocking_reason, failure_reason, created_at, assigned_at,
                 started_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(task.id.to_string())
@@ -232,6 +248,9 @@ impl ProjectStorage {
         .bind(task.status.to_string())
         .bind(deliverables)
         .bind(&task.validation_notes)
+        .bind(&task.pm_feedback)
+        .bind(task.revision_count as i64)
+        .bind(task.max_revisions as i64)
         .bind(&task.blocking_reason)
         .bind(&task.failure_reason)
         .bind(system_time_to_i64(task.created_at))
@@ -267,7 +286,8 @@ impl ProjectStorage {
             UPDATE tasks SET
                 title = ?, description = ?, assigned_worker = ?,
                 dependencies = ?, status = ?, deliverables = ?,
-                validation_notes = ?, blocking_reason = ?, failure_reason = ?,
+                validation_notes = ?, pm_feedback = ?, revision_count = ?, max_revisions = ?,
+                blocking_reason = ?, failure_reason = ?,
                 assigned_at = ?, started_at = ?, completed_at = ?
             WHERE id = ?
             "#
@@ -279,6 +299,9 @@ impl ProjectStorage {
         .bind(task.status.to_string())
         .bind(deliverables)
         .bind(&task.validation_notes)
+        .bind(&task.pm_feedback)
+        .bind(task.revision_count as i64)
+        .bind(task.max_revisions as i64)
         .bind(&task.blocking_reason)
         .bind(&task.failure_reason)
         .bind(task.assigned_at.map(system_time_to_i64))
@@ -454,9 +477,9 @@ fn row_to_task(row: &SqliteRow) -> Result<Task> {
         status,
         deliverables: serde_json::from_str(&row.try_get::<String, _>("deliverables")?)?,
         validation_notes: row.try_get("validation_notes")?,
-        pm_feedback: None, // Not stored in DB yet (future migration)
-        revision_count: 0, // Not stored in DB yet (future migration)
-        max_revisions: 2,  // Default value
+        pm_feedback: row.try_get("pm_feedback")?,
+        revision_count: row.try_get::<i64, _>("revision_count")? as u32,
+        max_revisions: row.try_get::<i64, _>("max_revisions")? as u32,
         blocking_reason: row.try_get("blocking_reason")?,
         failure_reason: row.try_get("failure_reason")?,
         created_at: i64_to_system_time(row.try_get("created_at")?),

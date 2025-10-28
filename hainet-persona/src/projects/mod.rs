@@ -10,6 +10,7 @@ pub mod task;
 pub mod milestone;
 pub mod storage;
 pub mod manager;
+pub mod migrations;
 
 // Re-export key types for convenience
 pub use project::{Project, ProjectId, ProjectStatus};
