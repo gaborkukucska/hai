@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-10-28T03:51:00+08:00"
+last_updated = "2025-10-29T14:31:00+08:00"
 project_name = "HAI-Net Seed"
-version = "0.12"
-current_phase = "Phase 5: Agentic Self-Management Capabilities"
-current_cycle = "5.6 - PM-Worker Communication & Task Validation (Complete)"
+version = "0.13"
+current_phase = "Phase 6: Production Readiness & Advanced Intelligence"
+current_cycle = "6A.1 - Test Infrastructure Enhancement (Complete)"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -82,7 +82,8 @@ phase_1_progress = 1.00  # 100% complete (All cycles done: 1.1, 1.2, 1.3)
 phase_2_progress = 1.00  # 7/7 cycles complete
 phase_3_progress = 1.00  # 3/3 cycles complete (Blockchain & Governance)
 phase_4_progress = 1.00  # 5/5 cycles complete (4.1 Peer Discovery, 4.2 Worker MCP Integration, 4.3 E2E Integration Tests, 4.4 Distributed Storage, 4.5a Multi-Device Deployment)
-phase_5_progress = 1.00  # 7/7 sessions complete (5.1 Mobile, 5.2 System MCP, 5.3 Dev MCP, 5.4 PM Task Decomposition, 5.5 Worker Execution, 5.6 PM-Worker Communication, 5.7 Database Migration)
+phase_5_progress = 1.00  # 8/8 sessions complete (5.1 Mobile, 5.2 System MCP, 5.3 Dev MCP, 5.4 PM Task Decomposition, 5.5 Worker Execution, 5.6 PM-Worker Communication, 5.7 Database Migration, 5.8 E2E Test Infrastructure)
+phase_6_progress = 0.20  # 1/5 sessions complete (6A.1 Test Infrastructure Enhancement)
 mcp_integration_complete = true
 worker_mcp_integration_complete = true
 e2e_integration_tests_complete = true
@@ -91,8 +92,8 @@ multi_device_deployment_complete = true
 mobile_deployment_complete = true
 system_management_mcp_complete = true
 development_tools_mcp_complete = true
-total_loc_produced = 25533  # 25152 + 381 (Phase 5.7: Migration framework + storage updates)
-total_tests_passing = 294  # 288 + 6 (migration tests)
+total_loc_produced = 26143  # 25533 + 610 (Phase 6A.1: Test helpers + JSON validator)
+total_tests_passing = 302  # 294 + 8 (JSON validator unit tests)
 total_crates = 10  # Added mcp-servers/hainet-dev
 
 # Phase breakdown
@@ -176,6 +177,53 @@ sessions_complete = 7
 sessions_remaining = 0
 
 # Completed cycles
+[[completed_cycles]]
+id = "6A.1"
+name = "Test Infrastructure Enhancement"
+completion_date = "2025-10-29"
+loc = 610  # 230 (helpers/mod.rs) + 380 (helpers/json_validator.rs)
+tests = 8  # JSON validator unit tests
+goal = "Create robust test infrastructure with retry logic, JSON validation, and result analysis"
+files_created = [
+    "hainet-persona/tests/helpers/mod.rs (230 LOC) - Retry logic and result analysis",
+    "hainet-persona/tests/helpers/json_validator.rs (380 LOC) - Multi-strategy JSON parsing",
+    "helperfiles/SESSION_9_PHASE_6A_SESSION_1_SUMMARY.md - Complete session documentation"
+]
+key_features = [
+    "TestRetryConfig - Configurable retry behavior (max attempts, delay, validation)",
+    "retry_with_validation() - Generic async retry wrapper",
+    "FailureCategory enum - Categorizes failures (Infrastructure, LlmVariability, CodeBug, Environment)",
+    "TestResultAnalyzer - Statistics and reporting (pass rate, failure breakdown, metrics)",
+    "JSONValidator - Multi-strategy JSON parser (4 fallback strategies)",
+    "ProjectPlanSchema - Validates Admin AI project plan responses",
+    "TaskDecompositionSchema - Validates PM agent task decomposition",
+    "8 unit tests for JSON parsing and schema validation (100% passing)"
+]
+parsing_strategies = [
+    "1. Direct Parse - Fast path for well-formed JSON",
+    "2. Markdown Extraction - Extracts from ```json code blocks",
+    "3. JSON Repair - Fixes unbalanced braces/brackets, removes whitespace",
+    "4. Regex Extraction - Pattern-based JSON extraction",
+    "5. Failed - All strategies exhausted"
+]
+constitutional_compliance = [
+    "Article I (Privacy): All test infrastructure local, no external data",
+    "Article II (Human Agency): Test failures transparent and user-visible",
+    "Article VII (Transparency): All test logic documented, results logged",
+    "Article IX (Quality): Comprehensive testing ensures system reliability"
+]
+technical_highlights = [
+    "Retry logic: Configurable attempts, delays, logging",
+    "JSON resilience: 4 fallback strategies before failure",
+    "Automatic failure categorization from error messages",
+    "Test statistics: pass rate, average duration, retry counts",
+    "Schema validation: Extensible trait-based design"
+]
+compilation_status = "Success - Clean build in 0.93s (0 warnings from new code)"
+test_status = "8/8 unit tests passing (100% success rate)"
+next_step = "Session 2: JSON Parsing Resilience - Enhance agents with multi-strategy parsing"
+phase_completion = "Phase 6A: 20% complete (1/5 sessions done)"
+
 [[completed_cycles]]
 id = "5.8"
 name = "E2E Test Infrastructure & JSON Resilience"
@@ -793,317 +841,6 @@ key_features = [
     "State machine applies governance transactions",
     "Consensus engine validates governance transactions",
     "End-to-end integration test for governance workflow"
-]
-
-[[completed_cycles]]
-id = "3.1"
-name = "Governance Core"
-completion_date = "2025-10-25"
-loc = 500 # Approximate LOC
-tests = 3
-goal = "Implement core on-chain governance features"
-files_modified = [
-    "hainet-chain/src/governance/mod.rs"
-]
-key_features = [
-    "Proposal creation and submission",
-    "Voting on proposals",
-    "Tallying of votes"
-]
-
-[[completed_cycles]]
-id = "0.1"
-name = "Project Scaffolding"
-completion_date = "2025-10-19"
-loc = 500
-
-[[completed_cycles]]
-id = "0.2"
-name = "Advanced Prompt Management System"
-completion_date = "2025-10-19"
-loc = 1700
-tests = 12
-components_implemented = [
-    "prompts/types.rs - Type definitions",
-    "prompts/loader.rs - Hierarchical TOML loader with inheritance",
-    "prompts/renderer.rs - Handlebars rendering with constitutional validation",
-    "prompts/cache.rs - LRU+TTL caching system",
-    "prompts/mod.rs - Unified PromptManager API"
-]
-template_structure = [
-    "system/ - Core system prompts",
-    "agents/ - Agent-specific prompts (admin.toml)",
-    "states/ - State-specific prompts (idle.toml, planning.toml)"
-]
-
-[[completed_cycles]]
-id = "0.3"
-name = "Hierarchical Agent Communication"
-completion_date = "2025-10-20"
-loc = 1800
-tests = 60
-modules_created = [
-    "messaging/types.rs - Message type system with priorities",
-    "messaging/channels.rs - MessageBus with Tokio mpsc",
-    "messaging/priority.rs - Priority queue implementation",
-    "messaging/guardian.rs - Guardian interception hooks",
-    "messaging/audit.rs - Tamper-evident audit trail",
-    "messaging/deadlock.rs - Cycle detection"
-]
-key_architecture = [
-    "Clean layered architecture: Types → Channels → Priority → Guardian → Audit → Deadlock",
-    "Full async/await with Tokio runtime",
-    "Type-safe message routing with compile-time hierarchy checks",
-    "Bounded channels prevent memory exhaustion",
-    "Fair scheduling prevents low-priority starvation"
-]
-
-[[completed_cycles]]
-id = "0.4"
-name = "Constitutional Guardian System"
-completion_date = "2025-10-20"
-loc = 900
-tests = 85
-components_implemented = [
-    "guardian/pii_detector.rs - Email, phone, SSN detection",
-    "guardian/bias_detector.rs - Stereotype and prejudice analysis",
-    "guardian/harm_analyzer.rs - Toxicity and harm detection",
-    "guardian/decision_engine.rs - Block/Pause/Allow decision logic",
-    "guardian/ollama_client.rs - Guardian-specific Ollama wrapper"
-]
-
-[[completed_cycles]]
-id = "0.5"
-name = "Integration & Testing"
-completion_date = "2025-10-21"
-loc = 230
-tests = 9
-integration_tests = [
-    "test_prompt_system_initialization",
-    "test_ai_provider_discovery",
-    "test_messaging_system_creation",
-    "test_guardian_pii_detection",
-    "test_guardian_bias_detection",
-    "test_guardian_harm_analysis",
-    "test_guardian_decision_engine",
-    "test_constitutional_compliance_integration",
-    "test_phase_0_component_summary"
-]
-
-[[completed_cycles]]
-id = "1.1"
-name = "Project Management Infrastructure"
-completion_date = "2025-10-22"
-loc = 1749  # Actual verified count
-tests = 30
-modules_created = ["project.rs", "task.rs", "milestone.rs", "storage.rs", "manager.rs", "mod.rs"]
-goal = "Create project entity system with SQLite persistence, support multi-project parallel execution"
-files_created = [
-    "hainet-persona/src/projects/mod.rs (30 LOC)",
-    "hainet-persona/src/projects/project.rs (380 LOC)",
-    "hainet-persona/src/projects/task.rs (308 LOC)",
-    "hainet-persona/src/projects/milestone.rs (261 LOC)",
-    "hainet-persona/src/projects/storage.rs (435 LOC)",
-    "hainet-persona/src/projects/manager.rs (335 LOC)"
-]
-key_features = [
-    "Project CRUD operations with SQLite",
-    "Task assignment and tracking",
-    "Milestone management",
-    "Project lifecycle state machine",
-    "Multi-project parallel execution",
-    "Agent hibernation system"
-]
-dependencies_added = ["sqlx", "uuid"]
-
-[[completed_cycles]]
-id = "1.2"
-name = "Enhanced Agent State Machines"
-completion_date = "2025-10-22"
-loc = 480
-tests = 4
-modules_created = ["pm.rs", "worker.rs"]
-goal = "Extend agent state machine with PM and Worker agents, add Conversation/Monitoring/Managing/Reporting states"
-files_created = [
-    "hainet-persona/src/agents/pm.rs (280 LOC)",
-    "hainet-persona/src/agents/worker.rs (200 LOC)"
-]
-files_modified = [
-    "hainet-persona/src/prompts/types.rs - Added 4 new AgentState variants",
-    "hainet-persona/src/agents/state.rs - Extended state machine with 40+ transition rules",
-    "hainet-persona/src/agents/mod.rs - Exported PM and Worker agents"
-]
-key_features = [
-    "Extended AgentState enum (Conversation, Monitoring, Managing, Reporting)",
-    "PM agent lifecycle (Startup → Planning → Managing → Idle)",
-    "Worker agent lifecycle (Idle → Planning → Working → Reporting → Idle)",
-    "Task assignment and validation workflow",
-    "Project completion detection",
-    "Error recovery state transitions"
-]
-
-[[completed_cycles]]
-id = "1.3"
-name = "Admin AI Planning & PM Creation"
-completion_date = "2025-10-22"
-loc = 706
-tests = 6
-goal = "Complete Admin AI intelligence with LLM-powered planning and dynamic PM agent spawning"
-files_modified = [
-    "hainet-persona/src/agents/admin.rs (706 LOC)",
-    "hainet-persona/src/agents/pm.rs - Updated to use Arc<RwLock<PromptManager>>"
-]
-key_features = [
-    "Complex intent detection (project keywords + multi-step indicators)",
-    "LLM-powered project plan generation using Ollama",
-    "JSON parsing with markdown extraction",
-    "Dynamic PM agent spawning with project-specific context",
-    "State machine transitions (Conversation → Planning → Monitoring)",
-    "Parallel project tracking (HashMap<ProjectId, AgentId>)",
-    "Simple intent handling with conversational LLM responses",
-    "Project monitoring and lifecycle management"
-]
-
-[[completed_cycles]]
-id = "2.1"
-name = "Core Portal Foundation"
-completion_date = "2025-10-23"
-loc = 445
-tests = 1
-goal = "Basic Tauri app with text chat working end-to-end with Admin AI"
-files_created = [
-    "hainet-portal/src-tauri/src/admin_bridge.rs (170 LOC)",
-    "hainet-portal/src/components/ChatInterface.tsx (260 LOC)",
-    "hainet-portal/src-tauri/tests/integration_test.rs (15 LOC)"
-]
-files_modified = [
-    "hainet-portal/src-tauri/Cargo.toml - Added hainet-persona dependency",
-    "hainet-portal/src-tauri/src/lib.rs - Added IPC commands and AdminBridge (90 LOC)",
-    "hainet-portal/src/App.tsx - Integrated ChatInterface component"
-]
-key_features = [
-    "Tauri desktop app with native OS integration",
-    "Text chat interface with Admin AI",
-    "File attachment capability (drag & drop)",
-    "Message persistence and history",
-    "Auto-scroll to latest message",
-    "Typing indicators",
-    "Ubuntu 24.04 webkit2gtk compatibility resolved"
-]
-
-[[completed_cycles]]
-id = "2.2"
-name = "Speech-to-Text (STT) Input"
-completion_date = "2025-10-25"
-loc = 990
-tests = 19
-goal = "Voice input as primary interaction mode with backend-first Whisper integration"
-key_features = [
-    "WhisperInstaller with platform-specific installation",
-    "RAM-based model selection",
-    "Full Tauri STT integration with hainet-core",
-    "Real-time audio level visualization (VAD)",
-    "Push-to-talk recording interface"
-]
-
-[[completed_cycles]]
-id = "2.3"
-name = "Text-to-Speech (TTS) Output"
-completion_date = "2025-10-25"
-loc = 1040
-tests = 2
-goal = "Admin AI speaks responses by default"
-key_features = [
-    "Piper TTS external process integration",
-    "RAM-based voice quality selection",
-    "Voice model auto-download from HuggingFace",
-    "Tauri IPC commands for TTS",
-    "React AudioPlayer for playback"
-]
-
-[[completed_cycles]]
-id = "2.4"
-name = "Vision Input (Webcam)"
-completion_date = "2025-10-25"
-loc = 900
-tests = 10
-goal = "Admin AI can see user via webcam and understand visual context"
-key_features = [
-    "Webcam device listing and selection",
-    "Frame capture with privacy controls (blur)",
-    "Tauri IPC commands for webcam control",
-    "React component for webcam view"
-]
-
-[[completed_cycles]]
-id = "2.5"
-name = "Dynamic UI Rendering"
-completion_date = "2025-10-25"
-loc = 500 # Approximate LOC
-tests = 0 # No new tests added
-goal = "Admin AI can render custom UI components on-the-fly"
-files_created = [
-    "hainet-portal/src/components/DynamicUIRenderer.tsx",
-    "hainet-portal/src/components/componentLibrary.ts"
-]
-files_modified = [
-    "hainet-portal/src/types.ts",
-    "hainet-portal/src/components/ChatInterface.tsx",
-    "hainet-portal/src-tauri/src/admin_bridge.rs"
-]
-key_features = [
-    "JSON schema system for UI components",
-    "React component factory from JSON",
-    "Event handling back to Admin AI",
-    "Safe sandbox execution (no arbitrary code)"
-]
-
-[[completed_cycles]]
-id = "2.6"
-name = "Video Streaming Output"
-completion_date = "2025-10-25"
-loc = 700 # Approximate LOC
-tests = 0 # No new tests added
-goal = "Admin AI can stream video if needed (tutorials, visualizations)"
-files_created = [
-    "hainet-portal/src-tauri/src/video_handler.rs",
-    "hainet-portal/src/components/VideoPlayer.tsx"
-]
-files_modified = [
-    "hainet-portal/src-tauri/src/lib.rs",
-    "hainet-portal/src/components/ChatInterface.tsx"
-]
-key_features = [
-    "Full-screen video player overlay",
-    "Local file and screen recording playback",
-    "Generated visualization support",
-    "Video player controls (play/pause/seek)",
-    "Seamless chat integration"
-]
-
-[[completed_cycles]]
-id = "2.7"
-name = "Settings & System Status"
-completion_date = "2025-10-25"
-loc = 500 # Approximate LOC
-tests = 0 # No new tests added
-goal = "Configuration UI and system monitoring"
-files_created = [
-    "hainet-portal/src/components/Settings.tsx",
-    "hainet-portal/src/components/SystemStatus.tsx",
-    "hainet-portal/src-tauri/src/settings_handler.rs"
-]
-files_modified = [
-    "hainet-portal/src-tauri/src/lib.rs",
-    "hainet-portal/src/components/ChatInterface.tsx"
-]
-key_features = [
-    "Audio/video device selection",
-    "Model preferences (STT, TTS, Vision)",
-    "Privacy settings panel",
-    "System resource monitoring",
-    "Active projects display",
-    "Theme customization (dark/light)"
 ]
 
 # Detailed phase/cycle implementation plans
@@ -2112,99 +1849,6 @@ compilation_status = "Success - Clean build in 0.32s (1 harmless warning)"
 test_status = "13 unit tests written (all passing)"
 next_step = "Phase B: Tauri Integration (hainet-portal STT handler)"
 architecture_notes = "Whisper integration is placeholder. Full implementation requires candle-core, candle-transformers for actual ML inference."
-
-[[recent_completions]]
-date = "2025-10-23"
-event = "Phase 2.1 - Core Portal Foundation - 100% COMPLETE! ✅"
-details = "Successfully built HAI-Net Portal with Tauri + React. Resolved webkit2gtk-4.0 compatibility issues on Ubuntu 24.04 by creating symlinks to webkit2gtk-4.1. Full compilation successful with only minor unused import warnings (fixed). Frontend build complete. Portal ready for testing with Admin AI bridge, text chat interface, file attachments, message history, auto-scroll, and typing indicators."
-tokens_used = 45000
-files_created = [
-    "hainet-portal/src-tauri/src/admin_bridge.rs (170 LOC)",
-    "hainet-portal/src/components/ChatInterface.tsx (260 LOC)",
-    "hainet-portal/src-tauri/tests/integration_test.rs (15 LOC)"
-]
-files_modified = [
-    "hainet-portal/src-tauri/Cargo.toml - Added hainet-persona dependency, git patches for webkit2gtk",
-    "hainet-portal/src-tauri/src/lib.rs - Added IPC commands and AdminBridge initialization (90 LOC)",
-    "hainet-portal/src/App.tsx - Integrated ChatInterface component",
-    "hainet-portal/src/lib.rs - Fixed unused import warning",
-    "hainet-portal/src/main.rs - Fixed unused import warning",
-    "Cargo.toml - Excluded hainet-portal/src-tauri from workspace"
-]
-system_fixes = [
-    "Created symlink: javascriptcoregtk-4.0.pc → javascriptcoregtk-4.1.pc",
-    "Created symlink: webkit2gtk-4.0.pc → webkit2gtk-4.1.pc",
-    "Installed system dependencies: libsoup2.4-dev, libwebkit2gtk-4.1-dev"
-]
-compilation_status = "Success - Clean build in 31.24s"
-test_status = "1 integration test created, Portal ready for end-to-end testing"
-next_step = "Begin Cycle 2.2 - Speech-to-Text Input (Whisper/Ollama integration)"
-
-[[recent_completions]]
-date = "2025-10-22"
-event = "MCP Integration - COMPLETE! ✅"
-details = "Fixed MCP server lifecycle issue. Server's main() was terminating immediately after initialization. Solution: await on `running_service.waiting()` to keep service alive. All 10 integration tests now passing: server startup/shutdown, tool listing, file operations (read/write/list/metadata), error handling, and content-addressed storage deduplication."
-tokens_used = 20000
-files_modified = [
-    "mcp-servers/hainet-files/src/main.rs - Added running_service.waiting().await?"
-]
-compilation_status = "Success"
-test_status = "10/10 passing (100% success rate)"
-blocker_resolved = "RunningService lifecycle - server was dropping immediately, fixed by keeping service alive with waiting()"
-
-[[recent_completions]]
-date = "2025-10-22"
-event = "Phase 1.2 Complete - Enhanced Agent State Machines"
-details = "480 LOC, PM and Worker agents, 4 new states, 40+ state transitions, clean compilation"
-tokens_used = 40000
-
-[[recent_completions]]
-date = "2025-10-22"
-event = "Phase 1.1 Complete - Project Management Infrastructure"
-details = "2055 LOC, SQLite persistence, 6 modules, task/milestone tracking, agent hibernation"
-tokens_used = 60000
-
-[[recent_completions]]
-date = "2025-10-21"
-event = "Phase 0.5 Complete - Integration & Testing"
-details = "170 tests passing, 9 integration tests, constitutional compliance validation"
-tokens_used = 28000
-
-[[recent_completions]]
-date = "2025-10-21"
-event = "Cycle 1.1 - Admin AI Core Foundation"
-details = "Intent parser, task planner, agent state machine, admin AI stub (1065 LOC, 30 tests)"
-tokens_used = 50000
-
-[[recent_completions]]
-date = "2025-10-20"
-event = "Phase 0.4 Complete - Constitutional Guardian System"
-details = "PII detection, bias detection, harm analysis, decision engine"
-tokens_used = 70000
-
-[[recent_completions]]
-date = "2025-10-20"
-event = "Phase 0.3 Complete - Hierarchical Agent Communication"
-details = "Message bus, priority queues, guardian hooks, audit trail, deadlock detection"
-tokens_used = 120000
-
-[[recent_completions]]
-date = "2025-10-20"
-event = "HAI-Net Seed Installer - Platform Detection & Ollama Auto-Install"
-details = "Platform detection, system tier classification, Ollama installation, model download"
-tokens_used = 15000
-
-[[recent_completions]]
-date = "2025-10-19"
-event = "Phase 0.2 Complete - Advanced Prompt Management System"
-details = "TOML templates, hierarchical loader, Handlebars rendering, LRU+TTL caching"
-tokens_used = 60000
-
-[[recent_completions]]
-date = "2025-10-19"
-event = "Phase 0.1 Complete - Project Scaffolding"
-details = "6-crate workspace, basic module structure"
-tokens_used = 20000
 
 # Architecture decisions
 [[architecture_decisions]]

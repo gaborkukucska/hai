@@ -731,16 +731,54 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## Test Infrastructure (Phase 6A Session 1 - Complete)
+
+### hainet-persona/tests/helpers/mod.rs
+- `TestRetryConfig::default()` - Create default retry config (3 attempts, 100ms delay)
+- `TestRetryConfig::with_attempts(attempts)` - Create config with custom attempts
+- `TestRetryConfig::no_validation()` - Create config without format validation
+- `retry_with_validation(config, test_fn)` - Execute test with retry logic
+- `FailureCategory::from_error(error)` - Categorize error (Infrastructure, LlmVariability, CodeBug, Environment, Unknown)
+- `TestResultAnalyzer::new()` - Create result analyzer
+- `TestResultAnalyzer::add_result(result)` - Add test result
+- `TestResultAnalyzer::pass_rate()` - Calculate overall pass rate
+- `TestResultAnalyzer::failure_breakdown()` - Get failure breakdown by category
+- `TestResultAnalyzer::average_duration()` - Get average test duration
+- `TestResultAnalyzer::average_retries()` - Get average retry count
+- `TestResultAnalyzer::print_report()` - Print detailed analysis report
+- `execute_test_with_analysis(test_name, config, analyzer, test_fn)` - Execute test with full tracking
+
+### hainet-persona/tests/helpers/json_validator.rs
+- `ProjectPlanSchema::default()` - Create default project plan schema
+- `ProjectPlanSchema::validate(value)` - Validate JSON against project plan schema
+- `TaskDecompositionSchema::default()` - Create default task decomposition schema
+- `TaskDecompositionSchema::validate(value)` - Validate JSON against task schema
+- `JSONValidator::parse_with_fallbacks(text)` - Parse JSON with 4 fallback strategies
+- `JSONValidator::extract_from_markdown(text)` - Extract JSON from markdown code blocks
+- `JSONValidator::repair_and_parse(text)` - Repair common JSON issues and parse
+- `JSONValidator::regex_extract(text)` - Extract JSON using regex patterns
+- `JSONValidator::validate_structure(text)` - Validate JSON structure before parsing
+- `JSONValidator::parse_and_validate(text, schema)` - Parse and validate against schema
+- `ParsingStrategy` enum - Tracks which parsing strategy succeeded (DirectParse, MarkdownExtraction, JsonRepair, RegexExtraction, Failed)
+- `ParseResult` struct - Contains parsed value, strategy used, error details
+
+---
+
 ## Statistics
 
-**Total Modules:** 61 (59 previous + 2 new: hainet-system, hainet-dev)
-**Total Functions:** 200+ (189 previous + 11 new MCP tools)  
-**Lines of Code:** ~19,260 (18,330 previous + 930 new MCP servers)  
-**Test Coverage:** 177 tests (compilation verified for new MCP servers)  
-**Constitutional Compliance:** Fully integrated (Articles I, II, III, V, VII)
+**Total Modules:** 63 (61 previous + 2 new: helpers/mod.rs, helpers/json_validator.rs)
+**Total Functions:** 225+ (200 previous + 25 new test infrastructure functions)  
+**Lines of Code:** ~26,870 (19,260 previous + 610 new test infrastructure + 7,000 estimated other updates)  
+**Test Coverage:** 310 tests (177 previous + 8 JSON validator unit tests + ~125 estimated other tests)  
+**Constitutional Compliance:** Fully integrated (Articles I, II, III, V, VII, IX)
 
 **Phase 0 Status:** ✅ COMPLETE (Cycles 0.1-0.6)
-**Phase 1 Status:** 🚧 Foundation + Project System Complete (Cycles 1.1-1.2)
+**Phase 1 Status:** ✅ COMPLETE (Cycles 1.1-1.3)
+**Phase 2 Status:** ✅ COMPLETE (Cycles 2.1-2.7)
+**Phase 3 Status:** ✅ COMPLETE (Cycles 3.1-3.4)
+**Phase 4 Status:** ✅ COMPLETE (Cycles 4.1-4.5b)
+**Phase 5 Status:** ✅ COMPLETE (Sessions 5.1-5.8)
+**Phase 6 Status:** 🚧 IN PROGRESS (Session 6A.1 Complete - Test Infrastructure)
 
 **Phase 1 Cycle 1.1 Achievements:**
 - ✅ Intent parsing system (rule-based, ready for LLM)

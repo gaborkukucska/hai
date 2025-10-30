@@ -12,6 +12,7 @@ pub mod guardian;
 pub mod tools;
 pub mod agents;
 pub mod projects;
+pub mod test_utils;
 
 // TODO: Implement these modules in later cycles
 // pub mod memory;

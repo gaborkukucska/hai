@@ -26,6 +26,7 @@ use crate::messaging::{AgentId, Message};
 use crate::prompts::{AgentType, AgentState, PromptContext};
 use crate::projects::{ProjectManager, ProjectId};
 use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
+use crate::test_utils::{JSONValidator, ProjectPlanSchema, RetryConfig, retry_with_validation};
 
 /// Threshold for detecting complex intents that require projects
 const COMPLEX_INTENT_THRESHOLD: f64 = 0.7;
@@ -403,81 +404,47 @@ impl AdminAgent {
         Ok(())
     }
     
-    /// Parse LLM response into ProjectPlan
+    /// Parse LLM response into ProjectPlan using multi-strategy JSON parsing
     fn parse_project_plan(&self, llm_response: &str) -> Result<ProjectPlan> {
         // Log the raw response for debugging
         tracing::debug!("LLM response for project plan: {}", llm_response);
         
-        // Try to extract JSON from response (LLM might wrap it in markdown)
-        let json_str = if let Some(start) = llm_response.find('{') {
-            if let Some(end) = llm_response.rfind('}') {
-                &llm_response[start..=end]
-            } else {
-                llm_response
-            }
-        } else {
-            llm_response
-        };
+        // Use multi-strategy JSON parser
+        let parse_result = JSONValidator::parse_with_fallbacks(llm_response);
         
-        tracing::debug!("Extracted JSON string: {}", json_str);
-        
-        // Try parsing with better error handling
-        let parsed: serde_json::Value = match serde_json::from_str(json_str) {
-            Ok(val) => val,
-            Err(e) => {
-                // Log detailed parse error
-                tracing::error!("JSON parse error: {:?}", e);
-                tracing::error!("Failed at position: {}", e.line());
-                tracing::error!("JSON string bytes: {:?}", json_str.as_bytes());
-                
-                // Try to repair common issues
-                let mut repaired = json_str
-                    .replace("\n", " ")           // Remove newlines
-                    .replace("\r", "")            // Remove carriage returns
-                    .trim()                        // Remove leading/trailing whitespace
-                    .to_string();
-                
-                // Check if JSON is missing closing brackets (common LLM truncation error)
-                let open_braces = repaired.chars().filter(|c| *c == '{').count();
-                let close_braces = repaired.chars().filter(|c| *c == '}').count();
-                let open_brackets = repaired.chars().filter(|c| *c == '[').count();
-                let close_brackets = repaired.chars().filter(|c| *c == ']').count();
-                
-                if open_brackets > close_brackets {
-                    tracing::warn!("JSON has {} open brackets but only {} close brackets, adding missing close brackets", 
-                                   open_brackets, close_brackets);
-                    for _ in 0..(open_brackets - close_brackets) {
-                        repaired.push(']');
-                    }
-                }
-                
-                if open_braces > close_braces {
-                    tracing::warn!("JSON has {} open braces but only {} close braces, adding missing close braces", 
-                                   open_braces, close_braces);
-                    for _ in 0..(open_braces - close_braces) {
-                        repaired.push('}');
-                    }
-                }
-                
-                tracing::debug!("Attempting to parse repaired JSON: {}", repaired);
-                
-                serde_json::from_str(&repaired)
-                    .context(format!("Failed to parse LLM response as JSON after repair. Original error: {:?}. Response was: {}", e, json_str))?
+        let parsed = match parse_result.value {
+            Some(val) => {
+                tracing::info!("Successfully parsed JSON using strategy: {}", parse_result.strategy_used);
+                val
+            },
+            None => {
+                tracing::error!("All JSON parsing strategies failed: {}", 
+                               parse_result.error.unwrap_or_else(|| "Unknown error".to_string()));
+                return Err(anyhow::anyhow!("Failed to parse LLM response as valid JSON"));
             }
         };
         
-        let title = parsed["title"].as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'title' in plan. Parsed JSON: {:?}", parsed))?
+        // Extract fields, supporting both new schema (plan_title/plan_overview/plan_task_list) 
+        // and old schema (title/overview/tasks)
+        let title = parsed.get("plan_title")
+            .or_else(|| parsed.get("title"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'plan_title' or 'title' in plan. Parsed JSON: {:?}", parsed))?
             .to_string();
         
-        let overview = parsed["overview"].as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'overview' in plan. Parsed JSON: {:?}", parsed))?
+        let overview = parsed.get("plan_overview")
+            .or_else(|| parsed.get("overview"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'plan_overview' or 'overview' in plan. Parsed JSON: {:?}", parsed))?
             .to_string();
         
         // Parse tasks - handle both string array and object array formats
-        let tasks: Vec<String> = parsed["tasks"].as_array()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'tasks' array in plan. Parsed JSON: {:?}", parsed))?
-            .iter()
+        let tasks_array = parsed.get("plan_task_list")
+            .or_else(|| parsed.get("tasks"))
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'plan_task_list' or 'tasks' array in plan. Parsed JSON: {:?}", parsed))?;
+        
+        let tasks: Vec<String> = tasks_array.iter()
             .filter_map(|t| {
                 // Try as string first
                 if let Some(s) = t.as_str() {
@@ -499,7 +466,8 @@ impl AdminAgent {
             return Err(anyhow::anyhow!("No valid tasks found in plan. Parsed JSON: {:?}", parsed));
         }
         
-        tracing::info!("Successfully parsed project plan: title='{}', {} tasks", title, tasks.len());
+        tracing::info!("Successfully parsed project plan: title='{}', {} tasks (strategy: {})", 
+                      title, tasks.len(), parse_result.strategy_used);
         
         Ok(ProjectPlan {
             title,

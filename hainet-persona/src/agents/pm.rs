@@ -14,6 +14,7 @@ use crate::messaging::{MessageBus, AgentId};
 use crate::prompts::{PromptManager, AgentType, AgentState, PromptContext};
 use crate::projects::{ProjectManager, ProjectId, TaskId};
 use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
+use crate::test_utils::JSONValidator;
 use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
 
@@ -437,20 +438,24 @@ impl PMAgent {
         self.parse_detailed_plan(&response.text)
     }
     
-    /// Parse LLM response into DetailedPlan
+    /// Parse LLM response into DetailedPlan using multi-strategy JSON parsing
     fn parse_detailed_plan(&self, llm_response: &str) -> Result<DetailedPlan> {
-        let json_str = if let Some(start) = llm_response.find('{') {
-            if let Some(end) = llm_response.rfind('}') {
-                &llm_response[start..=end]
-            } else {
-                llm_response
-            }
-        } else {
-            llm_response
-        };
+        tracing::debug!("PM parsing detailed plan from LLM response");
         
-        let parsed: serde_json::Value = serde_json::from_str(json_str)
-            .context(format!("Failed to parse detailed plan JSON: {}", json_str))?;
+        // Use multi-strategy JSON parser
+        let parse_result = JSONValidator::parse_with_fallbacks(llm_response);
+        
+        let parsed = match parse_result.value {
+            Some(val) => {
+                tracing::info!("Successfully parsed PM plan JSON using strategy: {}", parse_result.strategy_used);
+                val
+            },
+            None => {
+                tracing::error!("All JSON parsing strategies failed: {}", 
+                               parse_result.error.unwrap_or_else(|| "Unknown error".to_string()));
+                return Err(anyhow::anyhow!("Failed to parse detailed plan as valid JSON"));
+            }
+        };
         
         let tasks: Vec<TaskDetail> = parsed["tasks"].as_array()
             .ok_or_else(|| anyhow::anyhow!("Missing 'tasks' array"))?
@@ -476,6 +481,9 @@ impl PMAgent {
                 Some(TaskDependency { task_index, depends_on })
             })
             .collect();
+        
+        tracing::info!("PM parsed detailed plan: {} tasks, {} dependencies (strategy: {})", 
+                      tasks.len(), dependencies.len(), parse_result.strategy_used);
         
         Ok(DetailedPlan { tasks, dependencies })
     }
