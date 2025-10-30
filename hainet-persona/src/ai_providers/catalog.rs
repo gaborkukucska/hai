@@ -231,6 +231,11 @@ impl ModelCatalog {
                 ModelCapability::TaskPlanning,
             ],
             AgentType::Worker => vec![ModelCapability::InstructionFollowing],
+            AgentType::Guardian => vec![
+                ModelCapability::SafetyAnalysis,
+                ModelCapability::LogicalReasoning,
+                ModelCapability::ConstitutionalCompliance,
+            ],
         }
     }
 }

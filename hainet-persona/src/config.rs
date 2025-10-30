@@ -11,6 +11,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
+use crate::agents::llm_config::{AgentLLMConfig, AgentLLMConfigOverrides};
+use crate::prompts::AgentType;
 
 /// Main HAI-Net configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +28,10 @@ pub struct HaiNetConfig {
     
     /// Paths and directories
     pub paths: PathDefaults,
+    
+    /// AI agent configuration (new system)
+    #[serde(default)]
+    pub ai: AIConfig,
 }
 
 impl Default for HaiNetConfig {
@@ -35,6 +41,7 @@ impl Default for HaiNetConfig {
             generation: GenerationDefaults::default(),
             reliability: ReliabilityDefaults::default(),
             paths: PathDefaults::default(),
+            ai: AIConfig::default(),
         }
     }
 }
@@ -84,6 +91,57 @@ impl HaiNetConfig {
             .join(".hainet")
             .join("config.toml")
     }
+    
+    /// Load from hainet.toml in project root
+    pub fn load_from_project_root() -> Result<Self> {
+        let project_root = std::env::current_dir()?;
+        let config_path = project_root.join("hainet.toml");
+        Self::load_from_path(&config_path)
+    }
+    
+    /// Get LLM config for specific agent type with user overrides applied
+    pub fn get_agent_llm_config(&self, agent_type: AgentType) -> AgentLLMConfig {
+        let mut config = AgentLLMConfig::for_agent_type(agent_type);
+        
+        // Apply global defaults if provided
+        if let Some(ref defaults) = self.ai.defaults {
+            config.merge_with(defaults);
+        }
+        
+        // Apply agent-specific overrides
+        let overrides = match agent_type {
+            AgentType::User => &None, // Users don't have LLM config
+            AgentType::Admin => &self.ai.admin,
+            AgentType::PM => &self.ai.pm,
+            AgentType::Worker => &self.ai.worker,
+            AgentType::Guardian => &self.ai.guardian,
+        };
+        
+        if let Some(ref overrides) = overrides {
+            config.merge_with(overrides);
+        }
+        
+        config
+    }
+}
+
+/// AI agent configuration section
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AIConfig {
+    /// Global AI defaults (applied to all agents)
+    pub defaults: Option<AgentLLMConfigOverrides>,
+    
+    /// Admin AI specific overrides
+    pub admin: Option<AgentLLMConfigOverrides>,
+    
+    /// PM Agent specific overrides
+    pub pm: Option<AgentLLMConfigOverrides>,
+    
+    /// Worker Agent specific overrides
+    pub worker: Option<AgentLLMConfigOverrides>,
+    
+    /// Guardian Agent specific overrides
+    pub guardian: Option<AgentLLMConfigOverrides>,
 }
 
 /// Default models for different agent types
@@ -329,5 +387,19 @@ mod tests {
         let path = HaiNetConfig::default_config_path();
         assert!(path.to_string_lossy().contains(".hainet"));
         assert!(path.to_string_lossy().contains("config.toml"));
+    }
+    
+    #[test]
+    fn test_get_agent_llm_config() {
+        let config = HaiNetConfig::default();
+        
+        let admin_config = config.get_agent_llm_config(AgentType::Admin);
+        assert_eq!(admin_config.temperature, 0.7);
+        
+        let pm_config = config.get_agent_llm_config(AgentType::PM);
+        assert_eq!(pm_config.temperature, 0.3);
+        
+        let worker_config = config.get_agent_llm_config(AgentType::Worker);
+        assert_eq!(worker_config.temperature, 0.1);
     }
 }

@@ -164,7 +164,8 @@ impl SelectionContext {
             AgentType::Admin => 0.6, // Admin needs high-quality models
             AgentType::PM => 0.5,
             AgentType::Worker => 0.4,
-            AgentType::User => 0.3,
+            AgentType::Guardian => 0.7, // Guardian needs highest quality for safety analysis
+            AgentType::User => 0.0, // User is human, doesn't use models directly
         }
     }
 }

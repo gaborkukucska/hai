@@ -1,0 +1,135 @@
+# HAI-Net Configuration File
+# Central configuration for all HAI-Net components
+# 
+# This file allows users to override default settings for:
+# - AI model selection and parameters
+# - Agent behavior and performance
+# - Framework operational settings
+
+[framework]
+version = "0.13"
+log_level = "info"
+data_dir = "~/.hainet"
+
+# Global AI defaults (can be overridden per agent type)
+[ai.defaults]
+# Provider preference: local_first | cloud_fallback | hybrid
+provider_preference = "local_first"
+
+# Model size: 1b | 4b | 7b | 14b+
+model_size = "4b"
+
+# Quantization: q4_0 | q5_0 | q8_0 | f16
+quantization = "q4_0"
+
+# Generation parameters
+temperature = 0.5
+top_p = 0.9
+top_k = 40
+repeat_penalty = 1.1
+max_tokens = 2048
+
+# Prompt assembly options
+include_tool_feedback = true
+include_syntax_examples = true
+include_json_schema = true
+
+# Performance tracking
+track_metrics = true
+optimization_enabled = true
+
+# Admin AI specific overrides
+[ai.admin]
+# Admin needs higher temperature for creative conversation
+temperature = 0.7
+top_p = 0.95
+max_tokens = 4096
+include_tool_feedback = true
+include_syntax_examples = true
+include_json_schema = true
+
+# PM Agent specific overrides
+[ai.pm]
+# PM needs lower temperature for structured output
+temperature = 0.3
+top_p = 0.9
+max_tokens = 2048
+include_syntax_examples = true
+include_json_schema = true
+
+# Worker Agent specific overrides
+[ai.worker]
+# Worker needs very low temperature for deterministic execution
+temperature = 0.1
+top_p = 0.8
+repeat_penalty = 1.15
+max_tokens = 1024
+include_tool_feedback = true
+include_syntax_examples = false
+include_json_schema = false
+
+# Guardian Agent specific overrides
+[ai.guardian]
+# Guardian needs analytical consistency with larger model
+temperature = 0.2
+top_p = 0.9
+model_size = "7b"  # Guardian gets larger model for better reasoning
+max_tokens = 2048
+include_tool_feedback = false
+include_syntax_examples = false
+include_json_schema = true
+
+# Guardian optimization settings
+[guardian.optimization]
+# Enable automatic optimization based on metrics
+enabled = true
+
+# Trigger optimization after N operations
+trigger_threshold = 100
+
+# Number of operations to analyze in measurement window
+measurement_window = 100
+
+# Target success rate for agents (0.0-1.0)
+success_rate_threshold = 0.85
+
+# Auto-apply recommendations with confidence > this value
+auto_apply_confidence_threshold = 0.9
+
+# Database configuration
+[database]
+# Path to metrics database
+metrics_db_path = "~/.hainet/metrics.db"
+
+# Path to project database
+project_db_path = "~/.hainet/projects.db"
+
+# Prompt configuration
+[prompts]
+base_path = "prompts"
+cache_max_entries = 100
+cache_ttl_seconds = 3600
+
+# MCP configuration
+[mcp]
+servers_config = "mcp-servers.toml"
+
+# Multimodal configuration
+[multimodal]
+stt_enabled = true
+tts_enabled = true
+vision_enabled = true
+
+[multimodal.stt]
+model_path = "~/.hainet/models/whisper-base.en"
+push_to_talk_key = "Space"
+language = "auto"
+
+[multimodal.tts]
+model_path = "~/.hainet/models/piper"
+voice = "en_US-lessac-medium"
+
+# Networking configuration
+[networking]
+peer_discovery = true
+mesh_enabled = true

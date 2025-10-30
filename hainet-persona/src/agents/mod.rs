@@ -14,6 +14,8 @@ pub mod state;
 pub mod pm;
 pub mod worker;
 pub mod templates;
+pub mod llm_config;
+pub mod metrics;
 
 // Re-export core agent types
 pub use admin::AdminAgent;
@@ -24,6 +26,16 @@ pub use pm::PMAgent;
 pub use worker::WorkerAgent;
 pub use templates::WorkerTemplate;
 
+// Re-export configuration and metrics types
+pub use llm_config::{
+    AgentLLMConfig, AgentLLMConfigOverrides,
+    ProviderPreference, ModelSize, Quantization,
+};
+pub use metrics::{
+    AgentMetrics, OperationResult, MetricsCollector,
+    hash_config,
+};
+
 use anyhow::Result;
 use crate::messaging::{AgentId, MessageBus};
 use crate::prompts::PromptManager;
@@ -31,6 +43,9 @@ use crate::tools::mcp::MCPClientManager;
 use crate::guardian::GuardianSystem;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+// Re-export AgentType for convenience
+pub use crate::prompts::AgentType;
 
 /// Base trait for all agent types
 #[async_trait::async_trait]

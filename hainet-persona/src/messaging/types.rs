@@ -76,6 +76,16 @@ impl AgentId {
     pub fn user(name: String) -> Self {
         Self::new(AgentType::User, name)
     }
+    
+    pub fn new_guardian(name: String) -> Self {
+        Self {
+            agent_type: AgentType::Guardian,
+            name,
+            instance_id: Uuid::new_v4(),
+            domain: None,
+            worker_type: None,
+        }
+    }
 
     pub fn new_admin(name: String) -> Self {
         Self {
@@ -110,6 +120,10 @@ impl AgentId {
     /// Check if this agent can send to another agent (hierarchy enforcement)
     pub fn can_send_to(&self, other: &AgentId) -> bool {
         match (&self.agent_type, &other.agent_type) {
+            // User can send to Admin
+            (AgentType::User, AgentType::Admin) => true,
+            // Admin can send to User
+            (AgentType::Admin, AgentType::User) => true,
             // Admin can send to PMs
             (AgentType::Admin, AgentType::PM) => true,
             // PMs can send to Admin
@@ -122,9 +136,19 @@ impl AgentId {
             (AgentType::Worker, AgentType::PM) => true,
             // Workers can send to other Workers (peer collaboration)
             (AgentType::Worker, AgentType::Worker) => true,
+            // Guardian can send to anyone (oversight)
+            (AgentType::Guardian, _) => true,
+            // Anyone can send to Guardian (alerts)
+            (_, AgentType::Guardian) => true,
             // All other combinations are invalid
             _ => false,
         }
+    }
+}
+
+impl std::fmt::Display for AgentId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.agent_type, self.name)
     }
 }
 
@@ -171,6 +195,7 @@ impl ChannelType {
             (AgentType::PM, AgentType::Worker) => ChannelType::PMToWorker,
             (AgentType::Worker, AgentType::PM) => ChannelType::WorkerToPM,
             (AgentType::Worker, AgentType::Worker) => ChannelType::WorkerToWorker,
+            (AgentType::Guardian, _) | (_, AgentType::Guardian) => ChannelType::GuardianMonitoring,
             _ => ChannelType::Invalid,
         };
         Ok(channel_type)
@@ -441,12 +466,15 @@ impl Message {
     /// Determine channel type based on sender and receiver
     fn determine_channel_type(from: &AgentId, to: &AgentId) -> ChannelType {
         match (&from.agent_type, &to.agent_type) {
+            (AgentType::User, AgentType::Admin) => ChannelType::UserToAdmin,
+            (AgentType::Admin, AgentType::User) => ChannelType::AdminToUser,
             (AgentType::Admin, AgentType::PM) => ChannelType::AdminToPM,
             (AgentType::PM, AgentType::Admin) => ChannelType::PMToAdmin,
             (AgentType::PM, AgentType::PM) => ChannelType::PMToPM,
             (AgentType::PM, AgentType::Worker) => ChannelType::PMToWorker,
             (AgentType::Worker, AgentType::PM) => ChannelType::WorkerToPM,
             (AgentType::Worker, AgentType::Worker) => ChannelType::WorkerToWorker,
+            (AgentType::Guardian, _) | (_, AgentType::Guardian) => ChannelType::GuardianMonitoring,
             _ => ChannelType::AdminToUser, // fallback
         }
     }

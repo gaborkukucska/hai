@@ -9,10 +9,11 @@ use uuid::Uuid;
 /// Agent type hierarchy
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AgentType {
-    User,    // Human user (sovereign)
-    Admin,   // Top-level orchestrator
-    PM,      // Project Manager for a domain
-    Worker,  // Specialized task executor
+    User,     // Human user (sovereign)
+    Admin,    // Top-level orchestrator
+    PM,       // Project Manager for a domain
+    Worker,   // Specialized task executor
+    Guardian, // Constitutional oversight and optimization
 }
 
 impl std::fmt::Display for AgentType {
@@ -22,6 +23,7 @@ impl std::fmt::Display for AgentType {
             AgentType::Admin => write!(f, "Admin"),
             AgentType::PM => write!(f, "PM"),
             AgentType::Worker => write!(f, "Worker"),
+            AgentType::Guardian => write!(f, "Guardian"),
         }
     }
 }
