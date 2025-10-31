@@ -8,6 +8,7 @@
 //! All agents communicate via the MessageBus and are monitored by Constitutional Guardians.
 
 pub mod admin;
+pub mod guardian;
 pub mod intent;
 pub mod planner;
 pub mod state;
@@ -19,6 +20,11 @@ pub mod metrics;
 
 // Re-export core agent types
 pub use admin::AdminAgent;
+pub use guardian::{
+    GuardianAgent, GuardianConfig, GuardianState, Article,
+    ConstitutionalChecker, ComplianceContext, AuditReport,
+    LearningReport, ComplianceReport,
+};
 pub use intent::IntentParser;
 pub use planner::TaskPlanner;
 pub use state::AgentStateMachine;
