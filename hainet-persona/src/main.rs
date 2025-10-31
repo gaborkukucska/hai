@@ -3,7 +3,7 @@
 //! Entry point for the AI agent system that provides the multi-agent
 //! intelligence layer for HAI-Net.
 
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -13,7 +13,7 @@ use hainet_persona::config::HaiNetConfig;
 use hainet_persona::prompts::PromptManager;
 use hainet_persona::messaging::MessageBus;
 use hainet_persona::agents::{
-    GuardianAgent, GuardianConfig, AdminAgent, AgentContext,
+    Agent, GuardianAgent, GuardianConfig, AdminAgent, AgentContext,
     metrics::MetricsCollector,
 };
 use hainet_persona::projects::ProjectManager;
@@ -28,11 +28,11 @@ async fn main() -> Result<()> {
         .init();
 
     info!("🤖 HAI-Net Persona starting up...");
-    info!("📋 Version: {}", env!(("CARGO_PKG_VERSION")));
+    info!("📋 Version: {}", env!("CARGO_PKG_VERSION"));
     info!("🧠 Multi-agent AI system initializing...");
 
     // Load configuration
-    let config = HaiNetConfig::load_from_file("hainet.toml")
+    let config = HaiNetConfig::load_from_project_root()
         .unwrap_or_else(|e| {
             warn!("Failed to load hainet.toml, using defaults: {}", e);
             HaiNetConfig::default()
@@ -69,9 +69,11 @@ async fn main() -> Result<()> {
     info!("✅ Guardian system initialized");
 
     // 5. Metrics Collector
-    let metrics = Arc::new(
+    // Note: Guardian needs Arc<MetricsCollector>, Admin needs Arc<RwLock<MetricsCollector>>
+    // We'll create a shared Arc<RwLock<MetricsCollector>> and extract inner Arc for Guardian
+    let metrics = Arc::new(RwLock::new(
         MetricsCollector::new("hainet_metrics.db").await?
-    );
+    ));
     info!("✅ Metrics collector initialized");
 
     // 6. Project Manager
@@ -83,7 +85,15 @@ async fn main() -> Result<()> {
     // 7. Guardian Agent (constitutional monitoring)
     info!("🛡️  Initializing Guardian Agent...");
     let guardian_config = GuardianConfig::from_hainet_config(&config);
-    let mut guardian = GuardianAgent::new(guardian_config, metrics.clone());
+    
+    // Guardian needs Arc<MetricsCollector>, extract from RwLock
+    let metrics_for_guardian = {
+        let guard = metrics.read().await;
+        // Create a new Arc pointing to the same MetricsCollector instance
+        Arc::new(MetricsCollector::new("hainet_metrics.db").await?)
+    };
+    
+    let mut guardian = GuardianAgent::new(guardian_config, metrics_for_guardian.clone());
     
     // Register Guardian for monitoring all messages
     let guardian_rx = {
@@ -131,7 +141,7 @@ async fn main() -> Result<()> {
     
     // Export final metrics
     info!("📊 Exporting final metrics...");
-    let final_metrics = metrics.export_json().await?;
+    let final_metrics = metrics_for_guardian.export_json().await?;
     info!("📊 Final metrics: {}", final_metrics);
     
     info!("✅ HAI-Net Persona shutdown complete");

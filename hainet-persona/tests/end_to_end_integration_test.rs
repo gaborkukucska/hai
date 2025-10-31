@@ -12,7 +12,7 @@
 //! 5. Project Monitoring: Admin tracks multiple projects to completion
 
 use anyhow::Result;
-use hainet_persona::agents::{AdminAgent, Agent};
+use hainet_persona::agents::{AdminAgent, Agent, metrics::MetricsCollector};
 use hainet_persona::prompts::{PromptManager, AgentState};
 use hainet_persona::messaging::MessageBus;
 use hainet_persona::projects::ProjectManager;
@@ -47,10 +47,15 @@ async fn create_admin_agent() -> Result<AdminAgent> {
         ProjectManager::new("sqlite::memory:").await?
     ));
     
+    // Create MetricsCollector with in-memory database
+    let metrics = Arc::new(RwLock::new(
+        MetricsCollector::new("sqlite::memory:").await?
+    ));
+    
     // Give migrations time to complete
     tokio::time::sleep(Duration::from_millis(50)).await;
     
-    AdminAgent::new(context, project_manager).await
+    AdminAgent::new(context, project_manager, metrics).await
 }
 
 /// Helper to check if Ollama is running (required for LLM-powered tests)
