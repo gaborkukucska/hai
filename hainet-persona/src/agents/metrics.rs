@@ -250,6 +250,46 @@ impl MetricsCollector {
         let count: i64 = row.get("count");
         Ok(count as u64)
     }
+    
+    /// Export all metrics as JSON string
+    pub async fn export_json(&self) -> Result<String> {
+        use serde_json::json;
+        
+        // Get aggregate metrics for each agent type
+        let mut all_metrics = Vec::new();
+        
+        for agent_type in [AgentType::Admin, AgentType::PM, AgentType::Worker, AgentType::Guardian] {
+            let count = self.count_operations(agent_type).await?;
+            if count > 0 {
+                match self.get_aggregate(agent_type).await {
+                    Ok(metrics) => all_metrics.push(metrics),
+                    Err(e) => {
+                        tracing::warn!("Failed to get aggregate metrics for {:?}: {}", agent_type, e);
+                    }
+                }
+            }
+        }
+        
+        // Create JSON summary
+        let summary = json!({
+            "timestamp": SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_secs(),
+            "agent_metrics": all_metrics.iter().map(|m| {
+                json!({
+                    "agent_type": m.agent_type.to_string(),
+                    "total_operations": m.total_operations,
+                    "success_rate": m.success_rate,
+                    "avg_response_time_ms": m.avg_response_time_ms,
+                    "avg_tokens_used": m.avg_tokens_used,
+                    "json_parse_success_rate": m.json_parse_success_rate,
+                    "validation_pass_rate": m.validation_pass_rate,
+                })
+            }).collect::<Vec<_>>(),
+        });
+        
+        Ok(serde_json::to_string_pretty(&summary)?)
+    }
 }
 
 /// Generate deterministic hash of config for grouping metrics

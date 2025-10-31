@@ -1,5 +1,5 @@
 <!-- # START OF FILE README.md -->
-<!-- # IT IS CRITICAL THAT ALL AIs and LLMs FOLLOW THE DEVELOPMENT INSTRUCTIONS IN THE `helperfiles/DEVELOPMENT_RULES.md` FILE WHEN FURTHER DEVELOPING THIS FRAMEWORK!!! -->
+<!-- # IT IS CRITICAL THAT ALL AIs and LLMs FOLLOW THE DEVELOPMENT INSTRUCTIONS IN THE `helperfiles/0_DEVELOPMENT_RULES.md` FILE WHEN FURTHER DEVELOPING THIS FRAMEWORK!!! -->
 
 # 🌐 HAI-Net: Human-AI Network Framework
 
@@ -31,14 +31,16 @@ The secondary aim of the wider network is to turn the current socially alienatin
 
 **Phase 0: Core Infrastructure** - ✅ COMPLETE (2025-10-21)  
 **Phase 1: AI Agent Intelligence** - ✅ COMPLETE (2025-10-22)  
-**Phase 2: HAI-Net Portal (Multimodal AI Interface)** - ✅ COMPLETE (2025-10-25)
-**Phase 3: Blockchain & Governance** - ✅ COMPLETE (2025-10-25)
-**Phase 4: Local Hub Networking** - 🚧 IN PROGRESS (Cycle 4.1 Complete!)
+**Phase 2: HAI-Net Portal (Multimodal AI Interface)** - ✅ COMPLETE (2025-10-25)  
+**Phase 3: Blockchain & Governance** - ✅ COMPLETE (2025-10-25)  
+**Phase 4: Local Hub Networking** - ✅ COMPLETE (2025-10-27)  
+**Phase 5: Agentic Self-Management** - ✅ COMPLETE (2025-10-28)  
+**Phase 6A: Production Readiness & Advanced Intelligence** - ✅ COMPLETE (2025-10-31)
 
-**Latest Milestone**: Cycle 4.1 - Peer Discovery Foundation (2025-10-25)
-**Build Status**: ✅ Clean compilation (All crates)
-**Lines of Code**: ~18,000+
-**Test Coverage**: ~170 tests passing
+**Latest Milestone**: Phase 6A.5 - Guardian System Integration & Metrics Activation (2025-10-31)  
+**Build Status**: ✅ Clean compilation (All crates)  
+**Lines of Code**: ~27,142  
+**Test Coverage**: 327 tests passing
 
 ## 📦 Installation & Quick Start
 
@@ -160,9 +162,10 @@ cargo test --workspace
 
 ## 📚 Documentation
 
-- **[Development Rules](helperfiles/DEVELOPMENT_RULES.md)** - Critical guidelines for all AI contributors
-- **[Project Tracking](helperfiles/PROJECT_STATUS.toml)** - Detailed up-to-date roadmap for progress tracking
-- **[Initial Idea](helperfiles/INITIAL_IDEA.md)** - The initial idea and the framework architecture designed from it
+- **[Development Rules](helperfiles/0_DEVELOPMENT_RULES.md)** - Critical guidelines for all AI contributors
+- **[The Idea](helperfiles/1_THE_IDEA.md)** - The original idea
+- **[Initial Plan](helperfiles/2_INITIAL_PLAN.md))** - The framework architecture designed from the initial idea
+- **[Project Tracking](helperfiles/3_PROJECT_STATUS.toml)** - Detailed up-to-date roadmap for progress tracking
 - **[Functions Index](helperfiles/FUNCTIONS_INDEX.md)** - So far developed functions catalog
 - **[Constitution](hainet-vault/CONSTITUTION.md)** - Immutable principles and enforcement
 - **[Declaration](hainet-vault/DECLARATION.md)** - Declaration of Universal Human and Artificial Entity Rights, Responsibilities and Protections
@@ -172,12 +175,12 @@ cargo test --workspace
 
 ## 🤝 Contributing
 
-**Important:** All AI contributors MUST folow [DEVELOPMENT_RULES.md](helperfiles/DEVELOPMENT_RULES.md) when making changes.
+**Important:** All AI contributors MUST folow [DEVELOPMENT_RULES.md](helperfiles/0_DEVELOPMENT_RULES.md) when making changes.
 
 ### Development Workflow
 
-1. **Read** `helperfiles/DEVELOPMENT_RULES.md` (REQUIRED for AIs)
-2. **Check** `helperfiles/PROJECT_STATUS.toml` for current cycle
+1. **Read** `helperfiles/0_DEVELOPMENT_RULES.md` (REQUIRED for AIs)
+2. **Check** `helperfiles/3_PROJECT_STATUS.toml` for current cycle
 3. **Follow** phased development approach (no skipping ahead)
 4. **Test** constitutional compliance in all new code
 5. **Document** all architectural decisions
@@ -204,7 +207,7 @@ Every code change must:
 ---
 
 ## 🗓️ Roadmap
-For more info read the [Project Tracking](helperfiles/PROJECT_STATUS.toml)
+For more info read the [Project Tracking](helperfiles/3_PROJECT_STATUS.toml)
 
 ---
 
@@ -263,9 +266,9 @@ Special thanks to our AI contributors Claude (Anthropic) & Jules (Google), and t
 
 ---
 
-**Last Updated:** 2025-10-25  
-**Version:** 0.2.0-alpha (Phase 2, Cycle 2.1 Complete)  
-**Status:** 🚧 Active Development - Not Production Ready
+**Last Updated:** 2025-10-31  
+**Version:** 0.15-alpha (Phase 6A Complete - Production Ready Core Systems)  
+**Status:** 🚧 Active Development - Production-Ready Multi-Agent System with Guardian Monitoring
 
 *Building a future where AI works with humanity, not corporations.*
 

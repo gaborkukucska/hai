@@ -24,10 +24,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tracing::{debug, info, error};
+use tracing::{debug, info, error, warn};
 
 use crate::agents::state::AgentStateMachine;
 use crate::agents::llm_config::AgentLLMConfig;
@@ -112,6 +112,18 @@ impl Default for GuardianConfig {
                 Article::Article7Transparency,
                 Article::Article9Quality,
             ],
+        }
+    }
+}
+
+impl GuardianConfig {
+    /// Create GuardianConfig from HaiNetConfig
+    pub fn from_hainet_config(hainet_config: &HaiNetConfig) -> Self {
+        let llm_config = hainet_config.get_agent_llm_config(AgentType::Guardian);
+        
+        Self {
+            llm_config,
+            ..Self::default()
         }
     }
 }
@@ -439,8 +451,8 @@ impl GuardianAgent {
         Ok(())
     }
     
-    /// Start the Guardian agent
-    pub async fn start(&mut self) -> Result<()> {
+    /// Start the Guardian agent with message monitoring
+    pub async fn start(&mut self, mut monitoring_rx: mpsc::Receiver<Message>) -> Result<()> {
         info!("Starting Guardian agent: {}", self.agent_id);
         
         // Transition from Startup to Monitoring
@@ -452,6 +464,13 @@ impl GuardianAgent {
         // Start scheduled tasks
         self.start_scheduled_tasks().await?;
         
+        // Start message monitoring loop (spawn as background task)
+        let agent_handle = self.clone_for_task();
+        tokio::spawn(async move {
+            agent_handle.run_monitoring_loop(monitoring_rx).await;
+        });
+        
+        info!("Guardian monitoring loop started");
         Ok(())
     }
     
@@ -637,6 +656,72 @@ struct GuardianAgentHandle {
 }
 
 impl GuardianAgentHandle {
+    /// Run monitoring loop for real-time message interception
+    async fn run_monitoring_loop(&self, mut monitoring_rx: mpsc::Receiver<Message>) {
+        info!("Guardian {} monitoring loop active", self.agent_id);
+        
+        while let Some(message) = monitoring_rx.recv().await {
+            // Intercept and analyze message
+            if let Err(e) = self.process_monitored_message(message).await {
+                error!("Guardian monitoring error: {}", e);
+            }
+        }
+        
+        warn!("Guardian {} monitoring loop terminated", self.agent_id);
+    }
+    
+    /// Process a monitored message copy
+    async fn process_monitored_message(&self, message: Message) -> Result<()> {
+        debug!("Guardian processing monitored message: {:?} -> {:?}", message.from, message.to);
+        
+        let start_time = std::time::Instant::now();
+        
+        // Use the interceptor to analyze the message
+        let result = self.interceptor.intercept(&message).await?;
+        
+        let elapsed = start_time.elapsed();
+        
+        // Record metrics
+        let operation_result = crate::agents::metrics::OperationResult {
+            agent_type: crate::prompts::AgentType::Guardian,
+            agent_id: self.agent_id.clone(),
+            config_hash: "guardian_monitor".to_string(),
+            operation_type: "message_monitor".to_string(),
+            success: matches!(result, crate::messaging::guardian::InterceptResult::Allow),
+            response_time: elapsed,
+            tokens_used: None,
+            error_message: None,
+            json_parse_success: true,
+            had_syntax_errors: false,
+            validation_passed: true,
+        };
+        
+        // Record operation (fire and forget)
+        let metrics_clone = Arc::clone(&self.metrics);
+        tokio::spawn(async move {
+            if let Err(e) = metrics_clone.record_operation(operation_result).await {
+                error!("Failed to record Guardian metrics: {}", e);
+            }
+        });
+        
+        // Log violations
+        match result {
+            crate::messaging::guardian::InterceptResult::Block(reason) => {
+                error!("Guardian BLOCKED message {:?} -> {:?}: {:?}", 
+                    message.from, message.to, reason);
+            }
+            crate::messaging::guardian::InterceptResult::Pause(reason) => {
+                warn!("Guardian PAUSED message {:?} -> {:?}: {:?}", 
+                    message.from, message.to, reason);
+            }
+            crate::messaging::guardian::InterceptResult::Allow => {
+                // Normal operation, no logging needed
+            }
+        }
+        
+        Ok(())
+    }
+    
     async fn run_audit_workflow(&self) -> Result<AuditReport> {
         // Transition to Auditing state
         {
@@ -755,7 +840,11 @@ mod tests {
         let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
         let mut guardian = GuardianAgent::new(config, metrics);
         
-        guardian.start().await.unwrap();
+        // Create monitoring channel for Guardian
+        use tokio::sync::mpsc;
+        let (_tx, rx) = mpsc::channel::<Message>(100);
+        
+        guardian.start(rx).await.unwrap();
         assert_eq!(guardian.current_state().await, GuardianState::Monitoring);
     }
     

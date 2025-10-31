@@ -65,6 +65,9 @@ pub struct MessageBus {
     /// Channel statistics
     stats: Arc<RwLock<HashMap<AgentId, ChannelStats>>>,
     
+    /// Guardian monitoring channel (broadcast to Guardian for all messages)
+    guardian_channel: Arc<RwLock<Option<mpsc::Sender<Message>>>>,
+    
     /// Guardian interception hook (optional, set in Cycle 0.4)
     guardian_hook: Arc<RwLock<Option<GuardianHook>>>,
     
@@ -102,6 +105,7 @@ impl MessageBus {
         Ok(Self {
             channels: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(HashMap::new())),
+            guardian_channel: Arc::new(RwLock::new(None)),
             guardian_hook: Arc::new(RwLock::new(None)),
             priority_hook: Arc::new(RwLock::new(None)),
             buffer_size,
@@ -150,6 +154,32 @@ impl MessageBus {
         }))
     }
 
+    /// Register Guardian agent for monitoring all messages
+    ///
+    /// The Guardian receives a copy of every message (read-only monitoring).
+    /// This enables constitutional compliance checking without blocking normal operations.
+    pub async fn register_guardian_monitor(
+        &self,
+        guardian_id: AgentId,
+    ) -> Result<mpsc::Receiver<Message>> {
+        info!("Registering Guardian monitoring channel: {:?}", guardian_id);
+        
+        // Create channel for Guardian (larger buffer for monitoring all messages)
+        let (tx, rx) = mpsc::channel::<Message>(self.buffer_size * 10);
+        
+        // Store Guardian channel
+        {
+            let mut guardian_channel = self.guardian_channel.write().await;
+            if guardian_channel.is_some() {
+                return Err(anyhow!("Guardian already registered for monitoring"));
+            }
+            *guardian_channel = Some(tx);
+        }
+        
+        info!("Guardian monitoring channel registered successfully");
+        Ok(rx)
+    }
+
     /// Unregister an agent and close its channel
     pub async fn unregister_agent(&self, agent_id: &AgentId) -> Result<()> {
         debug!("Unregistering agent: {:?}", agent_id);
@@ -178,6 +208,9 @@ impl MessageBus {
     pub async fn send_message(&self, message: Message) -> Result<()> {
         // Validate route according to hierarchy
         self.validate_route(&message)?;
+
+        // Send copy to Guardian for monitoring (non-blocking, fire and forget)
+        self.notify_guardian(&message).await;
 
         // Guardian interception (if configured)
         if let Some(decision) = self.intercept_with_guardian(&message).await? {
@@ -213,6 +246,18 @@ impl MessageBus {
         self.update_stats(&message, result.is_ok()).await;
 
         result
+    }
+
+    /// Notify Guardian of message (non-blocking monitoring copy)
+    async fn notify_guardian(&self, message: &Message) {
+        let guardian_channel = self.guardian_channel.read().await;
+        
+        if let Some(tx) = guardian_channel.as_ref() {
+            // Send copy to Guardian (non-blocking, drop if full)
+            if let Err(e) = tx.try_send(message.clone()) {
+                debug!("Guardian monitoring channel full or closed: {}", e);
+            }
+        }
     }
 
     /// Validate that the message route follows the hierarchy rules
@@ -418,6 +463,33 @@ mod tests {
         endpoint.send(msg.clone()).await.unwrap();
         let received = rx.recv().await.unwrap();
         assert_eq!(received.content, msg.content);
+    }
+
+    #[tokio::test]
+    async fn test_guardian_monitoring_channel() {
+        let bus = MessageBus::new().await.unwrap();
+        
+        let guardian_id = AgentId::new_guardian("guardian-1".to_string());
+        let mut guardian_rx = bus.register_guardian_monitor(guardian_id).await.unwrap();
+        
+        let admin_id = AgentId::new(AgentType::Admin, "admin-1".to_string());
+        let pm_id = AgentId::new(AgentType::PM, "pm-1".to_string());
+        
+        let (_admin_rx, _admin_endpoint) = bus.register_agent(admin_id.clone()).await.unwrap();
+        let (_pm_rx, _pm_endpoint) = bus.register_agent(pm_id.clone()).await.unwrap();
+        
+        let msg = Message::new(
+            admin_id,
+            pm_id,
+            MessageContent::UserInput("test".to_string()),
+        )
+        .with_priority(Priority::Normal);
+        
+        bus.send_message(msg.clone()).await.unwrap();
+        
+        // Guardian should receive a copy
+        let guardian_msg = guardian_rx.recv().await.unwrap();
+        assert_eq!(guardian_msg.content, msg.content);
     }
 
     #[tokio::test]

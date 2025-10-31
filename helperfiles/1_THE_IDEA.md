@@ -1,4 +1,4 @@
-<!-- # START OF FILE helperfiles/THE_IDEA.md -->
+<!-- # START OF FILE helperfiles/1_THE_IDEA.md -->
 # HAI-Net Overview
 
 As to the overall function of the network (HAI-Net), I imagine it to become the AI integrated resource and knowledge sharing based replacement of the current cloud based internet. HAI-Net represents a fundamental reimagining of human-AI collaboration through a decentralized, privacy-first framework. It creates an unbreakable bond between local AI entities and their human counterparts while ensuring privacy, security, and shared prosperity through innovative resource sharing and community building.

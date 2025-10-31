@@ -21,12 +21,15 @@ use tokio::sync::RwLock;
 
 use super::{Agent, AgentContext, IntentParser, TaskPlanner, AgentStateMachine};
 use super::pm::PMAgent;
+use super::llm_config::AgentLLMConfig;
+use super::metrics::{MetricsCollector, OperationResult};
 use crate::config::HaiNetConfig;
 use crate::messaging::{AgentId, Message};
 use crate::prompts::{AgentType, AgentState, PromptContext};
 use crate::projects::{ProjectManager, ProjectId};
 use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
-use crate::test_utils::{JSONValidator, ProjectPlanSchema, RetryConfig, retry_with_validation};
+use crate::test_utils::JSONValidator;
+use std::time::Instant;
 
 /// Threshold for detecting complex intents that require projects
 const COMPLEX_INTENT_THRESHOLD: f64 = 0.7;
@@ -65,6 +68,12 @@ pub struct AdminAgent {
     
     /// Configuration
     config: HaiNetConfig,
+    
+    /// LLM configuration for Admin agent
+    llm_config: AgentLLMConfig,
+    
+    /// Metrics collector
+    metrics: Arc<RwLock<MetricsCollector>>,
 }
 
 impl AdminAgent {
@@ -72,14 +81,20 @@ impl AdminAgent {
     pub async fn new(
         context: Arc<AgentContext>,
         project_manager: Arc<RwLock<ProjectManager>>,
+        metrics: Arc<RwLock<MetricsCollector>>,
     ) -> Result<Self> {
         let id = AgentId::new(AgentType::Admin, "main-admin".to_string());
         let config = HaiNetConfig::load_or_default();
         
+        // Get Admin-specific LLM configuration
+        let llm_config = config.get_agent_llm_config(AgentType::Admin);
+        
         tracing::info!("Admin AI using model: {}", config.default_models.admin_model);
+        tracing::info!("Admin AI LLM config: temp={}, max_tokens={}, provider_pref={:?}", 
+                      llm_config.temperature, llm_config.max_tokens, llm_config.provider_preference);
         
         Ok(Self {
-            id,
+            id: id.clone(),
             context,
             intent_parser: IntentParser::new(),
             task_planner: TaskPlanner::new(),
@@ -89,11 +104,16 @@ impl AdminAgent {
             active_projects: HashMap::new(),
             running: false,
             config,
+            llm_config,
+            metrics,
         })
     }
     
     /// Process user input - main entry point for user interaction
     pub async fn process_user_input(&mut self, user_input: String) -> Result<String> {
+        // Record task start for metrics
+        let start_time = Instant::now();
+        
         // Parse user intent
         let intent = self.intent_parser.parse(&user_input).await?;
         
@@ -156,11 +176,37 @@ impl AdminAgent {
                 format!("Project {} created, PM agent {} spawned", project_id, pm_id.name)
             )?;
             
+            // Record successful task completion
+            let response_time = start_time.elapsed();
+            {
+                let metrics = self.metrics.read().await;
+                // Estimate tokens (rough approximation: ~4 chars per token)
+                let input_tokens = (user_input.len() / 4) as u32;
+                let output_tokens = ((project_plan.title.len() + project_plan.overview.len()) / 4) as u32;
+                let total_tokens = input_tokens + output_tokens;
+                
+                let result = OperationResult {
+                    agent_type: AgentType::Admin,
+                    agent_id: self.id.clone(),
+                    config_hash: super::metrics::hash_config(&self.llm_config),
+                    operation_type: "complex_intent_planning".to_string(),
+                    success: true,
+                    response_time,
+                    tokens_used: Some(total_tokens),
+                    error_message: None,
+                    json_parse_success: true,
+                    had_syntax_errors: false,
+                    validation_passed: true,
+                };
+                
+                let _ = metrics.record_operation(result).await;
+            }
+            
             Ok(format!(
-                "I've created a project to handle your request:\n\n\
-                 **{}**\n\n\
-                 {}\n\n\
-                 I'll work on this in the background and keep you updated on progress. \
+                "I've created a project to handle your request:\\n\\n\\\
+                 **{}**\\n\\n\\\
+                 {}\\n\\n\\\
+                 I'll work on this in the background and keep you updated on progress. \\\
                  Feel free to ask me anything else in the meantime!",
                 project_plan.title,
                 project_plan.overview
@@ -174,7 +220,54 @@ impl AdminAgent {
                 )?;
             }
             
-            self.handle_simple_intent(&user_input, &intent).await
+            let result = self.handle_simple_intent(&user_input, &intent).await;
+            
+            // Record metrics for simple intent
+            let response_time = start_time.elapsed();
+            let metrics = self.metrics.read().await;
+            
+            match &result {
+                Ok(response) => {
+                    let input_tokens = (user_input.len() / 4) as u32;
+                    let output_tokens = (response.len() / 4) as u32;
+                    let total_tokens = input_tokens + output_tokens;
+                    
+                    let op_result = OperationResult {
+                        agent_type: AgentType::Admin,
+                        agent_id: self.id.clone(),
+                        config_hash: super::metrics::hash_config(&self.llm_config),
+                        operation_type: "simple_intent_response".to_string(),
+                        success: true,
+                        response_time,
+                        tokens_used: Some(total_tokens),
+                        error_message: None,
+                        json_parse_success: true,
+                        had_syntax_errors: false,
+                        validation_passed: true,
+                    };
+                    
+                    let _ = metrics.record_operation(op_result).await;
+                },
+                Err(e) => {
+                    let op_result = OperationResult {
+                        agent_type: AgentType::Admin,
+                        agent_id: self.id.clone(),
+                        config_hash: super::metrics::hash_config(&self.llm_config),
+                        operation_type: "simple_intent_response".to_string(),
+                        success: false,
+                        response_time,
+                        tokens_used: None,
+                        error_message: Some(e.to_string()),
+                        json_parse_success: false,
+                        had_syntax_errors: false,
+                        validation_passed: false,
+                    };
+                    
+                    let _ = metrics.record_operation(op_result).await;
+                }
+            }
+            
+            result
         }
     }
     
@@ -276,16 +369,16 @@ impl AdminAgent {
         // Create progressively simpler prompts based on attempt number
         let planning_prompt = self.create_planning_prompt(user_input, attempt);
         
-        // Generate with Ollama - lower temperature for better format adherence
-        let temperature = match attempt {
-            1 => 0.3,  // Lower temperature for first attempt
-            2 => 0.2,  // Even lower on retry
+        // Use LLM config with adjustment for planning (lower temp for structured output)
+        let planning_temp = match attempt {
+            1 => self.llm_config.temperature * 0.5,  // Lower temperature for first attempt
+            2 => self.llm_config.temperature * 0.3,  // Even lower on retry
             _ => 0.1,  // Minimal creativity on final attempts
         };
         
         let options = GenerationOptions {
-            temperature: Some(temperature),
-            max_tokens: Some(1024),
+            temperature: Some(planning_temp),
+            max_tokens: Some(self.llm_config.max_tokens.min(1024) as usize), // Cap at 1024 for planning
             system: Some(system_prompt),
             ..Default::default()
         };
@@ -500,7 +593,7 @@ impl AdminAgent {
     async fn spawn_pm_agent(
         &self,
         project_id: &ProjectId,
-        plan: &ProjectPlan,
+        _plan: &ProjectPlan,
     ) -> Result<AgentId> {
         // Create PM agent
         let mut pm_agent = PMAgent::new(
@@ -556,10 +649,10 @@ impl AdminAgent {
         
         drop(prompt_manager);
         
-        // Generate conversational response
+        // Generate conversational response using LLM config
         let options = GenerationOptions {
-            temperature: Some(0.8),
-            max_tokens: Some(512),
+            temperature: Some(self.llm_config.temperature),
+            max_tokens: Some(self.llm_config.max_tokens.min(512) as usize), // Cap at 512 for conversation
             system: Some(system_prompt),
             ..Default::default()
         };
@@ -696,8 +789,11 @@ mod tests {
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
+        let metrics = Arc::new(RwLock::new(
+            MetricsCollector::new("sqlite::memory:").await.unwrap()
+        ));
         
-        AdminAgent::new(context, project_manager).await.unwrap()
+        AdminAgent::new(context, project_manager, metrics).await.unwrap()
     }
     
     #[tokio::test]
