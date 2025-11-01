@@ -5,9 +5,9 @@
 [meta]
 last_updated = "2025-11-01T19:20:00+08:00"
 project_name = "HAI-Net Seed"
-version = "0.22"
-current_phase = "Phase 6B: Portal UI Enhancements"
-current_cycle = "6B.6 - Frontend Metrics UI & Export (Complete)"
+version = "0.23"
+current_phase = "Phase 7: Production Readiness & Deployment"
+current_cycle = "7.1 - SSH Deployment Verification"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -181,6 +181,30 @@ sessions_complete = 7
 sessions_remaining = 0
 
 # Completed cycles
+[[completed_cycles]]
+id = "7.1"
+name = "SSH Deployment Verification"
+completion_date = "2025-11-01"
+loc = 0 # Refactoring and tests
+tests = 2 # New integration tests
+goal = "Verify and complete the ssh2 integration for remote deployment"
+files_created = [
+    "hainet-seed/tests/deployment_integration_test.rs"
+]
+files_modified = [
+    "hainet-seed/src/installer/ssh_client.rs",
+    "hainet-seed/src/installer/deployment.rs",
+    "hainet-seed/src/installer/mod.rs"
+]
+key_features = [
+    "Refactored `DeploymentOrchestrator` to use a generic `SSHClientTrait`",
+    "Added a mock `SSHClient` for testing",
+    "Added integration tests for the deployment logic",
+    "Verified the completeness of the `ssh2` integration"
+]
+test_status = "All tests passing (35 total)"
+phase_completion = "Phase 7: 20% complete"
+
 [[completed_cycles]]
 id = "6B.6"
 name = "Frontend Metrics UI & Export"

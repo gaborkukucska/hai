@@ -23,7 +23,7 @@ use crate::installer::whisper::WhisperInstaller;
 use crate::installer::piper::PiperInstaller;
 use crate::installer::network_scanner::{NetworkScanner, DeviceCandidate};
 use crate::installer::nmap_installer::ensure_nmap_installed;
-use crate::installer::ssh_client::{SSHClient, SSHCredentials, DeviceCapabilities};
+use crate::installer::ssh_client::{SSHClient, SSHCredentials, DeviceCapabilities, SSHClientTrait};
 use crate::installer::ssh_keys::SSHKeyManager;
 use crate::installer::deployment::DeploymentOrchestrator;
 
@@ -351,7 +351,10 @@ impl Installer {
         let confirm = confirm.trim().to_lowercase();
         
         if confirm.is_empty() || confirm == "y" || confirm == "yes" {
-            orchestrator.deploy_all(&username).await?;
+            let client_factory = |ip: String, credentials: SSHCredentials| {
+                SSHClient::new(ip, credentials)
+            };
+            orchestrator.deploy_all(&username, client_factory).await?;
             
             let summary = orchestrator.summary();
             info!("\n📊 Deployment Summary:");
