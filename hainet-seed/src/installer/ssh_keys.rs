@@ -6,6 +6,9 @@ use anyhow::{Result, Context, bail};
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::process::Command;
+use std::net::TcpStream;
+use ssh2::Session;
+use std::io::{Read, Write};
 
 /// SSH key pair manager
 pub struct SSHKeyManager {
@@ -106,25 +109,36 @@ impl SSHKeyManager {
     /// to handle the file transfer over SSH.
     pub fn copy_to_remote(&self, ip: &str, username: &str, password: &str) -> Result<()> {
         println!("📤 Copying public key to {}@{}...", username, ip);
-        
-        // TODO: Implement actual SSH file transfer using ssh2 crate
-        // Steps:
-        // 1. Connect to remote device via SSH
-        // 2. Create ~/.ssh directory if not exists
-        // 3. Append public key to ~/.ssh/authorized_keys
-        // 4. Set proper permissions (700 for ~/.ssh, 600 for authorized_keys)
-        
-        // For now, provide manual instructions
+
+        let tcp = TcpStream::connect(format!("{}:22", ip))?;
+        let mut sess = Session::new()?;
+        sess.set_tcp_stream(tcp);
+        sess.handshake()?;
+
+        sess.userauth_password(username, password)?;
+
         let public_key = self.read_public_key()?;
+        let mut channel = sess.channel_session()?;
         
-        println!("\n📋 Manual Setup Required:");
-        println!("Run this command on {}@{}:", username, ip);
-        println!("\nmkdir -p ~/.ssh && echo '{}' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys", public_key.trim());
+        let command = format!(
+            "mkdir -p ~/.ssh && echo '{}' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys",
+            public_key.trim()
+        );
         
-        println!("\n⚠️  Automatic key deployment will be available in the next iteration (ssh2 integration)");
+        channel.exec(&command)?;
         
-        // Placeholder success
-        let _ = password; // Suppress unused warning
+        let mut s = String::new();
+        channel.read_to_string(&mut s)?;
+        
+        channel.wait_close()?;
+        
+        let exit_code = channel.exit_status()?;
+        if exit_code == 0 {
+            println!("✓ Public key copied successfully.");
+        } else {
+            bail!("Failed to copy public key. Exit code: {}", exit_code);
+        }
+
         Ok(())
     }
     
