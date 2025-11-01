@@ -3,7 +3,7 @@
 //! Handles role assignment, binary deployment, and service initialization.
 
 use anyhow::{Result, bail, Context};
-use crate::installer::ssh_client::DeviceCapabilities;
+use crate::installer::ssh_client::{DeviceCapabilities, SSHCredentials, SSHClientTrait};
 use std::collections::HashMap;
 
 /// Device role in the HAI-Net mesh
@@ -195,7 +195,11 @@ impl DeploymentOrchestrator {
     /// - SCP/rsync for file transfer
     /// - Remote systemd service creation
     /// - Distributed storage initialization
-    pub async fn deploy_all(&self, username: &str) -> Result<()> {
+    pub async fn deploy_all<'a, F, C>(&'a self, username: &str, mut client_factory: F) -> Result<()>
+    where
+        F: FnMut(String, SSHCredentials) -> C,
+        C: SSHClientTrait + 'a,
+    {
         println!("\n🚀 Starting deployment to {} devices...", self.assignments.len());
         
         if self.assignments.is_empty() {
@@ -205,16 +209,25 @@ impl DeploymentOrchestrator {
         // Display deployment plan
         self.display_deployment_plan();
         
+        // Build binaries once for each required architecture
+        let required_arches = self.assignments.iter()
+            .map(|a| a.capabilities.arch.clone())
+            .collect::<std::collections::HashSet<_>>();
+
+        for arch in required_arches {
+            self.build_binaries(&arch)?;
+        }
+
         // Deploy to each device
         for assignment in &self.assignments {
-            self.deploy_to_device(assignment, username).await?;
+            self.deploy_to_device(assignment, username, &mut client_factory).await?;
         }
         
         println!("\n✅ Deployment complete!");
         
         // Initialize mesh coordination
         if let Some(master) = self.master_node() {
-            self.initialize_mesh(master, username).await?;
+            self.initialize_mesh(master, username, client_factory).await?;
         }
         
         Ok(())
@@ -268,23 +281,22 @@ impl DeploymentOrchestrator {
     }
     
     /// Deploy HAI-Net to a single device
-    async fn deploy_to_device(&self, assignment: &DeviceAssignment, username: &str) -> Result<()> {
+    async fn deploy_to_device<'a, F, C>(&'a self, assignment: &DeviceAssignment, username: &str, client_factory: &mut F) -> Result<()>
+    where
+        F: FnMut(String, SSHCredentials) -> C,
+        C: SSHClientTrait + 'a,
+    {
         println!("\n📦 Deploying to {} ({})...", assignment.hostname, assignment.ip);
         
-        use crate::installer::ssh_client::{SSHClient, SSHCredentials};
         use std::path::Path;
         
-        // Step 1: Build binaries for target architecture
-        println!("🔨 Building binaries for {}...", assignment.capabilities.arch);
-        self.build_binaries(&assignment.capabilities.arch)?;
-        
-        // Step 2: Connect via SSH
+        // Step 1: Connect via SSH
         let credentials = SSHCredentials {
             username: username.to_string(),
             password: String::new(), // SSH key auth assumed
         };
         
-        let mut client = SSHClient::new(assignment.ip.clone(), credentials);
+        let mut client = client_factory(assignment.ip.clone(), credentials);
         client.connect()?;
         
         // Use SSH key authentication (keys should be set up by now)
@@ -294,20 +306,20 @@ impl DeploymentOrchestrator {
         
         client.authenticate_pubkey(&key_path, None)?;
         
-        // Step 3: Create installation directory
+        // Step 2: Create installation directory
         println!("📁 Creating installation directories...");
         client.create_remote_directory("/opt/hainet/bin")?;
         client.create_remote_directory("/etc/hainet")?;
         
-        // Step 4: Transfer binaries based on role
+        // Step 3: Transfer binaries based on role
         println!("📤 Transferring binaries...");
         self.transfer_binaries(&client, &assignment.role)?;
         
-        // Step 5: Configure role-specific settings
+        // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
         self.configure_device(&client, &assignment)?;
         
-        // Step 6: Create and enable systemd services
+        // Step 5: Create and enable systemd services
         println!("🔧 Setting up services...");
         self.setup_services(&client, &assignment.role)?;
         
@@ -326,7 +338,11 @@ impl DeploymentOrchestrator {
     /// # Implementation Notes
     /// This is Phase 7B implementation - service orchestration.
     /// Full P2P mesh networking (libp2p) will be implemented in Phase 8.
-    async fn initialize_mesh(&self, master: &DeviceAssignment, username: &str) -> Result<()> {
+    async fn initialize_mesh<'a, F, C>(&'a self, master: &DeviceAssignment, username: &str, mut client_factory: F) -> Result<()>
+    where
+        F: FnMut(String, SSHCredentials) -> C,
+        C: SSHClientTrait + 'a,
+    {
         println!("\n🌐 Initializing mesh network...");
         println!("   Master: {} ({})", master.hostname, master.ip);
         
@@ -335,19 +351,19 @@ impl DeploymentOrchestrator {
         
         // Step 1: Start services on master node
         println!("\n🚀 Starting services on master node...");
-        self.start_services_on_device(&master.ip, username, &master.role).await?;
+        self.start_services_on_device(&master.ip, username, &master.role, &mut client_factory).await?;
         
         // Step 2: Start services on slave nodes
         if slave_count > 0 {
             println!("\n🚀 Starting services on {} slave node(s)...", slave_count);
             for slave in self.slave_nodes() {
-                self.start_services_on_device(&slave.ip, username, &slave.role).await?;
+                self.start_services_on_device(&slave.ip, username, &slave.role, &mut client_factory).await?;
             }
         }
         
         // Step 3: Verify mesh health
         println!("\n🔍 Verifying mesh health...");
-        self.verify_mesh_health(master, username).await?;
+        self.verify_mesh_health(master, username, &mut client_factory).await?;
         
         println!("\n✅ Mesh network initialized successfully!");
         println!("   Master: {} (services running)", master.hostname);
@@ -366,13 +382,17 @@ impl DeploymentOrchestrator {
     /// Start HAI-Net services on a remote device
     /// 
     /// Connects via SSH and starts systemd services based on device role.
-    async fn start_services_on_device(
-        &self, 
-        ip: &str, 
-        username: &str, 
-        role: &DeviceRole
-    ) -> Result<()> {
-        use crate::installer::ssh_client::{SSHClient, SSHCredentials};
+    async fn start_services_on_device<'a, F, C>(
+        &'a self,
+        ip: &str,
+        username: &str,
+        role: &DeviceRole,
+        client_factory: &mut F,
+    ) -> Result<()>
+    where
+        F: FnMut(String, SSHCredentials) -> C,
+        C: SSHClientTrait + 'a,
+    {
         use std::path::Path;
         
         let credentials = SSHCredentials {
@@ -380,7 +400,7 @@ impl DeploymentOrchestrator {
             password: String::new(),
         };
         
-        let mut client = SSHClient::new(ip.to_string(), credentials);
+        let mut client = client_factory(ip.to_string(), credentials);
         client.connect()?;
         
         // Use SSH key authentication
@@ -437,8 +457,11 @@ impl DeploymentOrchestrator {
     }
     
     /// Verify mesh network health by checking master node services
-    async fn verify_mesh_health(&self, master: &DeviceAssignment, username: &str) -> Result<()> {
-        use crate::installer::ssh_client::{SSHClient, SSHCredentials};
+    async fn verify_mesh_health<'a, F, C>(&'a self, master: &DeviceAssignment, username: &str, client_factory: &mut F) -> Result<()>
+    where
+        F: FnMut(String, SSHCredentials) -> C,
+        C: SSHClientTrait + 'a,
+    {
         use std::path::Path;
         
         let credentials = SSHCredentials {
@@ -446,7 +469,7 @@ impl DeploymentOrchestrator {
             password: String::new(),
         };
         
-        let mut client = SSHClient::new(master.ip.clone(), credentials);
+        let mut client = client_factory(master.ip.clone(), credentials);
         client.connect()?;
         
         let key_path = dirs::home_dir()
@@ -506,6 +529,7 @@ impl DeploymentOrchestrator {
     }
     
     /// Build binaries for target architecture
+    #[cfg(not(test))]
     fn build_binaries(&self, arch: &str) -> Result<()> {
         use std::process::Command;
         
@@ -535,9 +559,15 @@ impl DeploymentOrchestrator {
         println!("✓ Build complete for {}", target);
         Ok(())
     }
-    
+
+    #[cfg(test)]
+    fn build_binaries(&self, _arch: &str) -> Result<()> {
+        // No-op for tests
+        Ok(())
+    }
+
     /// Transfer binaries to remote device based on role
-    fn transfer_binaries(&self, client: &crate::installer::ssh_client::SSHClient, role: &DeviceRole) -> Result<()> {
+    fn transfer_binaries<C: SSHClientTrait>(&self, client: &C, role: &DeviceRole) -> Result<()> {
         use std::path::PathBuf;
         
         // Determine which binaries to transfer based on role
@@ -583,7 +613,7 @@ impl DeploymentOrchestrator {
     }
     
     /// Configure device with role-specific settings
-    fn configure_device(&self, client: &crate::installer::ssh_client::SSHClient, assignment: &DeviceAssignment) -> Result<()> {
+    fn configure_device<C: SSHClientTrait>(&self, client: &C, assignment: &DeviceAssignment) -> Result<()> {
         // Create hainet.toml configuration
         let config = match assignment.role {
             DeviceRole::Master => {
@@ -635,7 +665,7 @@ impl DeploymentOrchestrator {
     }
     
     /// Set up systemd services for the device role
-    fn setup_services(&self, client: &crate::installer::ssh_client::SSHClient, role: &DeviceRole) -> Result<()> {
+    fn setup_services<C: SSHClientTrait>(&self, client: &C, role: &DeviceRole) -> Result<()> {
         let services = match role {
             DeviceRole::Master | DeviceRole::Slave | DeviceRole::Standalone => {
                 vec!["hainet-core", "hainet-chain"]

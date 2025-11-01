@@ -223,31 +223,25 @@ This file tracks the core functions/methods defined within the framework, catego
 - `ensure_nmap_installed(platform)` - Auto-install nmap if not present
 - `is_nmap_installed()` - Check if nmap is available
 
-### hainet-seed/src/installer/ssh_client.rs (Phase 4.5b - ssh2 Integration Complete)
+### hainet-seed/src/installer/ssh_client.rs (Phase 7.1 - Complete)
+- `SSHClientTrait` - Trait for SSH client operations, to allow for mocking in tests.
 - `DeviceCapabilities` - Device assessment result (IP, hostname, CPU, RAM, GPU, disk, OS, arch, score)
 - `DeviceCapabilities::calculate_score()` - Calculate capability score for master election (RAM 40%, GPU 30%, CPU 20%, Disk 10%)
 - `SSHCredentials` - SSH authentication credentials (username, password)
 - `SSHClient::new(ip, credentials)` - Create SSH client for remote device
-- `SSHClient::connect()` - Establish SSH connection with TCP handshake (5s timeout)
-- `SSHClient::authenticate_password()` - Authenticate with password
-- `SSHClient::authenticate_pubkey(private_key_path, passphrase)` - Authenticate with SSH key
-- `SSHClient::disconnect()` - Disconnect SSH session cleanly
-- `SSHClient::is_connected()` - Check if client is connected and authenticated
+- `SSHClientTrait::connect()` - Establish SSH connection with TCP handshake (5s timeout)
+- `SSHClientTrait::authenticate_password()` - Authenticate with password
+- `SSHClientTrait::authenticate_pubkey(private_key_path, passphrase)` - Authenticate with SSH key
+- `SSHClientTrait::disconnect()` - Disconnect SSH session cleanly
+- `SSHClientTrait::is_connected()` - Check if client is connected and authenticated
 - `SSHClient::test_connection()` - Test TCP connection to SSH port (22) with 5s timeout (legacy)
-- `SSHClient::execute_command(command)` - Execute remote command via SSH channel
+- `SSHClientTrait::execute_command(command)` - Execute remote command via SSH channel
 - `SSHClient::execute_command_with_timeout(command, timeout)` - Execute command with timeout
-- `SSHClient::assess_capabilities()` - **Real SSH-based device assessment** (CPU, RAM, GPU, disk, OS, arch)
-- `SSHClient::get_cpu_cores()` - Get CPU cores via nproc/proc/sysctl
-- `SSHClient::get_ram_gb()` - Get RAM in GB via free/sysctl
-- `SSHClient::get_gpu_info()` - Get GPU info via lspci (optional)
-- `SSHClient::get_disk_space_gb()` - Get available disk space in GB via df
-- `SSHClient::get_os()` - Get OS name via uname
-- `SSHClient::get_architecture()` - Get CPU architecture via uname
-- `SSHClient::get_hostname()` - Get hostname
-- `SSHClient::upload_file(local_path, remote_path)` - Upload file via SFTP
+- `SSHClientTrait::assess_capabilities()` - **Real SSH-based device assessment** (CPU, RAM, GPU, disk, OS, arch)
+- `SSHClientTrait::upload_file(local_path, remote_path)` - Upload file via SFTP
 - `SSHClient::download_file(remote_path, local_path)` - Download file via SFTP
-- `SSHClient::create_remote_directory(path)` - Create directory on remote device
-- `SSHClient::set_permissions(path, mode)` - Set file permissions via chmod
+- `SSHClientTrait::create_remote_directory(path)` - Create directory on remote device
+- `SSHClientTrait::set_permissions(path, mode)` - Set file permissions via chmod
 - `SSHClient::remote_file_exists(path)` - Check if file exists on remote device
 
 ### hainet-seed/src/installer/mod.rs (Updated Phase 4.5a.2)
@@ -257,20 +251,20 @@ This file tracks the core functions/methods defined within the framework, catego
 - `Installer::assess_device_capabilities(devices)` - Connect via SSH and assess each device
 - `Installer::display_capabilities(capabilities)` - Display assessment results and recommend master node
 
-### hainet-seed/src/installer/deployment.rs (Phase 7B - Service Orchestration Complete)
+### hainet-seed/src/installer/deployment.rs (Phase 7.1 - Complete)
 - `DeviceRole` - Enum for device roles (Master, Slave, Standalone, UIOnly)
 - `DeviceAssignment` - Device with assigned role and capabilities
 - `DeploymentOrchestrator::new()` - Create deployment orchestrator
 - `DeploymentOrchestrator::assign_roles(capabilities)` - Assign roles based on capability scores
-- `DeploymentOrchestrator::deploy_all(username)` - Deploy HAI-Net to all assigned devices
-- `DeploymentOrchestrator::deploy_to_device(assignment, username)` - Deploy to single device
+- `DeploymentOrchestrator::deploy_all(username, client_factory)` - Deploy HAI-Net to all assigned devices
+- `DeploymentOrchestrator::deploy_to_device(assignment, username, client_factory)` - Deploy to single device
 - `DeploymentOrchestrator::build_binaries(arch)` - Cross-compile binaries for target architecture
 - `DeploymentOrchestrator::transfer_binaries(client, role)` - Transfer role-specific binaries via SFTP
 - `DeploymentOrchestrator::configure_device(client, assignment)` - Create hainet.toml configuration
 - `DeploymentOrchestrator::setup_services(client, role)` - Create and enable systemd services
-- `DeploymentOrchestrator::initialize_mesh(master, username)` - **Start services and verify mesh health**
-- `DeploymentOrchestrator::start_services_on_device(ip, username, role)` - **Start systemd services remotely**
-- `DeploymentOrchestrator::verify_mesh_health(master, username)` - **Check master node service status**
+- `DeploymentOrchestrator::initialize_mesh(master, username, client_factory)` - **Start services and verify mesh health**
+- `DeploymentOrchestrator::start_services_on_device(ip, username, role, client_factory)` - **Start systemd services remotely**
+- `DeploymentOrchestrator::verify_mesh_health(master, username, client_factory)` - **Check master node service status**
 
 ---
 

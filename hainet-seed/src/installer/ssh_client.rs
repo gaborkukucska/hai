@@ -9,6 +9,21 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::time::Duration;
 
+// A trait for SSH client operations, to allow for mocking in tests.
+pub trait SSHClientTrait {
+    fn connect(&mut self) -> Result<()>;
+    fn authenticate_password(&mut self) -> Result<()>;
+    fn authenticate_pubkey(&mut self, private_key_path: &Path, passphrase: Option<&str>) -> Result<()>;
+    fn disconnect(&mut self) -> Result<()>;
+    fn is_connected(&self) -> bool;
+    fn assess_capabilities(&self) -> Result<DeviceCapabilities>;
+    fn execute_command(&self, command: &str) -> Result<String>;
+    fn upload_file(&self, local_path: &Path, remote_path: &str) -> Result<()>;
+    fn create_remote_directory(&self, path: &str) -> Result<()>;
+    fn set_permissions(&self, path: &str, mode: u32) -> Result<()>;
+}
+
+
 /// Device capabilities assessment result
 #[derive(Debug, Clone)]
 pub struct DeviceCapabilities {
@@ -76,6 +91,175 @@ impl SSHClient {
         }
     }
     
+    /// Test SSH connection to the device (legacy method for backward compatibility)
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Cannot connect to SSH port (22)
+    /// - Connection times out (5 seconds)
+    pub fn test_connection(&self) -> Result<bool> {
+        println!("Testing SSH connection to {}...", self.ip);
+
+        let addr = format!("{}:22", self.ip);
+        let timeout = Duration::from_secs(5);
+
+        match TcpStream::connect_timeout(&addr.parse()?, timeout) {
+            Ok(_) => {
+                println!("✓ SSH port is reachable on {}", self.ip);
+                Ok(true)
+            }
+            Err(e) => {
+                bail!("Cannot connect to SSH on {}: {}", self.ip, e);
+            }
+        }
+    }
+
+    /// Execute a command with timeout
+    ///
+    /// # Arguments
+    /// * `command` - Shell command to execute
+    /// * `timeout` - Maximum execution time
+    ///
+    /// # Returns
+    /// Returns stdout from the command as a String
+    ///
+    /// # Errors
+    /// Returns an error if command fails or times out
+    pub fn execute_command_with_timeout(&self, command: &str, _timeout: Duration) -> Result<String> {
+        // Note: ssh2 doesn't have built-in timeout for command execution
+        // For now, we use the session's read timeout set during connect()
+        // In the future, we could spawn a thread with timeout handling
+        self.execute_command(command)
+    }
+
+    /// Download a file from the remote device via SFTP
+    ///
+    /// # Arguments
+    /// * `remote_path` - Path on remote device
+    /// * `local_path` - Destination path on local machine
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Not connected/authenticated
+    /// - Remote file doesn't exist
+    /// - SFTP session creation fails
+    /// - File transfer fails
+    pub fn download_file(&self, remote_path: &str, local_path: &Path) -> Result<()> {
+        if !self.is_connected() {
+            bail!("Not connected to device. Call connect() and authenticate first.");
+        }
+
+        println!("Downloading {}:{} to {}...", self.ip, remote_path, local_path.display());
+
+        let session = self.session.as_ref().unwrap();
+        let sftp = session.sftp()
+            .context("Failed to create SFTP session")?;
+
+        // Create parent directory if needed
+        if let Some(parent) = local_path.parent() {
+            std::fs::create_dir_all(parent)
+                .context("Failed to create local directory")?;
+        }
+
+        // Read from remote file
+        let mut remote_file = sftp.open(Path::new(remote_path))
+            .context(format!("Failed to open remote file: {}", remote_path))?;
+
+        // Write to local file
+        let mut local_file = std::fs::File::create(local_path)
+            .context(format!("Failed to create local file: {}", local_path.display()))?;
+
+        std::io::copy(&mut remote_file, &mut local_file)
+            .context("Failed to read file content")?;
+
+        println!("✓ Downloaded {}", local_path.display());
+
+        Ok(())
+    }
+
+
+    /// Check if a file exists on the remote device
+    ///
+    /// # Arguments
+    /// * `path` - File path to check
+    ///
+    /// # Returns
+    /// Returns true if file exists, false otherwise
+    pub fn remote_file_exists(&self, path: &str) -> Result<bool> {
+        let result = self.execute_command(&format!("test -e {} && echo 1 || echo 0", path))?;
+        Ok(result == "1")
+    }
+
+    /// Get number of CPU cores
+    fn get_cpu_cores(&self) -> Result<usize> {
+        // Try nproc first (most reliable on Linux)
+        let output = self.execute_command("nproc 2>/dev/null || grep -c processor /proc/cpuinfo 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1")?;
+        output.parse::<usize>()
+            .context("Failed to parse CPU core count")
+    }
+
+    /// Get total RAM in GB
+    fn get_ram_gb(&self) -> Result<f64> {
+        // Try free -g (Linux), fall back to calculating from KB
+        let output = self.execute_command(
+            "free -g 2>/dev/null | awk '/^Mem:/ {print $2}' || \
+             free -k 2>/dev/null | awk '/^Mem:/ {print int($2/1024/1024)}' || \
+             sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1024/1024/1024)}' || \
+             echo 1"
+        )?;
+
+        let ram_gb = output.parse::<f64>()
+            .context("Failed to parse RAM size")?;
+
+        // Ensure at least 1GB reported
+        Ok(ram_gb.max(1.0))
+    }
+
+    /// Get GPU info (if available)
+    fn get_gpu_info(&self) -> Result<String> {
+        // Try lspci for VGA devices
+        let output = self.execute_command("lspci 2>/dev/null | grep -i 'vga\\|3d\\|display' | head -1")?;
+
+        if output.is_empty() {
+            bail!("No GPU detected");
+        }
+
+        Ok(output)
+    }
+
+    /// Get available disk space in GB
+    fn get_disk_space_gb(&self) -> Result<f64> {
+        // Get available space on root filesystem
+        let output = self.execute_command(
+            "df -BG / 2>/dev/null | awk 'NR==2 {gsub(\"G\",\"\",$4); print $4}' || \
+             df -k / 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}' || \
+             echo 10"
+        )?;
+
+        output.parse::<f64>()
+            .context("Failed to parse disk space")
+    }
+
+    /// Get operating system
+    fn get_os(&self) -> Result<String> {
+        let output = self.execute_command("uname -s")?;
+        Ok(output)
+    }
+
+    /// Get CPU architecture
+    fn get_architecture(&self) -> Result<String> {
+        let output = self.execute_command("uname -m")?;
+        Ok(output)
+    }
+
+    /// Get hostname
+    fn get_hostname(&self) -> Result<String> {
+        let output = self.execute_command("hostname")?;
+        Ok(output)
+    }
+}
+
+impl SSHClientTrait for SSHClient {
     /// Establish SSH connection to the device
     /// 
     /// # Errors
@@ -83,7 +267,7 @@ impl SSHClient {
     /// - Cannot connect to SSH port (22)
     /// - Connection times out (5 seconds)
     /// - SSH handshake fails
-    pub fn connect(&mut self) -> Result<()> {
+    fn connect(&mut self) -> Result<()> {
         println!("Connecting to {}...", self.ip);
         
         let addr = format!("{}:22", self.ip);
@@ -110,7 +294,7 @@ impl SSHClient {
     /// 
     /// # Errors
     /// Returns an error if authentication fails
-    pub fn authenticate_password(&mut self) -> Result<()> {
+    fn authenticate_password(&mut self) -> Result<()> {
         let session = self.session.as_mut()
             .context("No active session. Call connect() first")?;
         
@@ -135,7 +319,7 @@ impl SSHClient {
     /// 
     /// # Errors
     /// Returns an error if authentication fails
-    pub fn authenticate_pubkey(&mut self, private_key_path: &Path, passphrase: Option<&str>) -> Result<()> {
+    fn authenticate_pubkey(&mut self, private_key_path: &Path, passphrase: Option<&str>) -> Result<()> {
         let session = self.session.as_mut()
             .context("No active session. Call connect() first")?;
         
@@ -155,32 +339,9 @@ impl SSHClient {
         println!("✓ Authenticated successfully with SSH key");
         Ok(())
     }
-    
-    /// Test SSH connection to the device (legacy method for backward compatibility)
-    /// 
-    /// # Errors
-    /// Returns an error if:
-    /// - Cannot connect to SSH port (22)
-    /// - Connection times out (5 seconds)
-    pub fn test_connection(&self) -> Result<bool> {
-        println!("Testing SSH connection to {}...", self.ip);
         
-        let addr = format!("{}:22", self.ip);
-        let timeout = Duration::from_secs(5);
-        
-        match TcpStream::connect_timeout(&addr.parse()?, timeout) {
-            Ok(_) => {
-                println!("✓ SSH port is reachable on {}", self.ip);
-                Ok(true)
-            }
-            Err(e) => {
-                bail!("Cannot connect to SSH on {}: {}", self.ip, e);
-            }
-        }
-    }
-    
     /// Disconnect SSH session
-    pub fn disconnect(&mut self) -> Result<()> {
+    fn disconnect(&mut self) -> Result<()> {
         if let Some(session) = self.session.take() {
             session.disconnect(None, "Client disconnecting", None)?;
             println!("✓ Disconnected from {}", self.ip);
@@ -189,7 +350,7 @@ impl SSHClient {
     }
     
     /// Check if client is connected and authenticated
-    pub fn is_connected(&self) -> bool {
+    fn is_connected(&self) -> bool {
         self.session.as_ref()
             .map(|s| s.authenticated())
             .unwrap_or(false)
@@ -206,7 +367,7 @@ impl SSHClient {
     /// 
     /// # Errors
     /// Returns an error if SSH commands fail or device is not connected
-    pub fn assess_capabilities(&self) -> Result<DeviceCapabilities> {
+    fn assess_capabilities(&self) -> Result<DeviceCapabilities> {
         if !self.is_connected() {
             bail!("Not connected to device. Call connect() and authenticate first.");
         }
@@ -252,74 +413,6 @@ impl SSHClient {
         Ok(capabilities)
     }
     
-    /// Get number of CPU cores
-    fn get_cpu_cores(&self) -> Result<usize> {
-        // Try nproc first (most reliable on Linux)
-        let output = self.execute_command("nproc 2>/dev/null || grep -c processor /proc/cpuinfo 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1")?;
-        output.parse::<usize>()
-            .context("Failed to parse CPU core count")
-    }
-    
-    /// Get total RAM in GB
-    fn get_ram_gb(&self) -> Result<f64> {
-        // Try free -g (Linux), fall back to calculating from KB
-        let output = self.execute_command(
-            "free -g 2>/dev/null | awk '/^Mem:/ {print $2}' || \
-             free -k 2>/dev/null | awk '/^Mem:/ {print int($2/1024/1024)}' || \
-             sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1024/1024/1024)}' || \
-             echo 1"
-        )?;
-        
-        let ram_gb = output.parse::<f64>()
-            .context("Failed to parse RAM size")?;
-        
-        // Ensure at least 1GB reported
-        Ok(ram_gb.max(1.0))
-    }
-    
-    /// Get GPU info (if available)
-    fn get_gpu_info(&self) -> Result<String> {
-        // Try lspci for VGA devices
-        let output = self.execute_command("lspci 2>/dev/null | grep -i 'vga\\|3d\\|display' | head -1")?;
-        
-        if output.is_empty() {
-            bail!("No GPU detected");
-        }
-        
-        Ok(output)
-    }
-    
-    /// Get available disk space in GB
-    fn get_disk_space_gb(&self) -> Result<f64> {
-        // Get available space on root filesystem
-        let output = self.execute_command(
-            "df -BG / 2>/dev/null | awk 'NR==2 {gsub(\"G\",\"\",$4); print $4}' || \
-             df -k / 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}' || \
-             echo 10"
-        )?;
-        
-        output.parse::<f64>()
-            .context("Failed to parse disk space")
-    }
-    
-    /// Get operating system
-    fn get_os(&self) -> Result<String> {
-        let output = self.execute_command("uname -s")?;
-        Ok(output)
-    }
-    
-    /// Get CPU architecture
-    fn get_architecture(&self) -> Result<String> {
-        let output = self.execute_command("uname -m")?;
-        Ok(output)
-    }
-    
-    /// Get hostname
-    fn get_hostname(&self) -> Result<String> {
-        let output = self.execute_command("hostname")?;
-        Ok(output)
-    }
-    
     /// Execute a command on the remote device via SSH
     /// 
     /// # Arguments
@@ -334,7 +427,7 @@ impl SSHClient {
     /// - Channel creation fails
     /// - Command execution fails
     /// - Reading output fails
-    pub fn execute_command(&self, command: &str) -> Result<String> {
+    fn execute_command(&self, command: &str) -> Result<String> {
         let session = self.session.as_ref()
             .context("No active session. Call connect() and authenticate first")?;
         
@@ -359,24 +452,6 @@ impl SSHClient {
         Ok(output.trim().to_string())
     }
     
-    /// Execute a command with timeout
-    /// 
-    /// # Arguments
-    /// * `command` - Shell command to execute
-    /// * `timeout` - Maximum execution time
-    /// 
-    /// # Returns
-    /// Returns stdout from the command as a String
-    /// 
-    /// # Errors
-    /// Returns an error if command fails or times out
-    pub fn execute_command_with_timeout(&self, command: &str, _timeout: Duration) -> Result<String> {
-        // Note: ssh2 doesn't have built-in timeout for command execution
-        // For now, we use the session's read timeout set during connect()
-        // In the future, we could spawn a thread with timeout handling
-        self.execute_command(command)
-    }
-    
     /// Upload a file to the remote device via SFTP
     /// 
     /// # Arguments
@@ -389,7 +464,7 @@ impl SSHClient {
     /// - Local file doesn't exist
     /// - SFTP session creation fails
     /// - File transfer fails
-    pub fn upload_file(&self, local_path: &Path, remote_path: &str) -> Result<()> {
+    fn upload_file(&self, local_path: &Path, remote_path: &str) -> Result<()> {
         if !self.is_connected() {
             bail!("Not connected to device. Call connect() and authenticate first.");
         }
@@ -423,52 +498,7 @@ impl SSHClient {
         
         Ok(())
     }
-    
-    /// Download a file from the remote device via SFTP
-    /// 
-    /// # Arguments
-    /// * `remote_path` - Path on remote device
-    /// * `local_path` - Destination path on local machine
-    /// 
-    /// # Errors
-    /// Returns an error if:
-    /// - Not connected/authenticated
-    /// - Remote file doesn't exist
-    /// - SFTP session creation fails
-    /// - File transfer fails
-    pub fn download_file(&self, remote_path: &str, local_path: &Path) -> Result<()> {
-        if !self.is_connected() {
-            bail!("Not connected to device. Call connect() and authenticate first.");
-        }
         
-        println!("Downloading {}:{} to {}...", self.ip, remote_path, local_path.display());
-        
-        let session = self.session.as_ref().unwrap();
-        let sftp = session.sftp()
-            .context("Failed to create SFTP session")?;
-        
-        // Create parent directory if needed
-        if let Some(parent) = local_path.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create local directory")?;
-        }
-        
-        // Read from remote file
-        let mut remote_file = sftp.open(Path::new(remote_path))
-            .context(format!("Failed to open remote file: {}", remote_path))?;
-        
-        // Write to local file
-        let mut local_file = std::fs::File::create(local_path)
-            .context(format!("Failed to create local file: {}", local_path.display()))?;
-        
-        std::io::copy(&mut remote_file, &mut local_file)
-            .context("Failed to read file content")?;
-        
-        println!("✓ Downloaded {}", local_path.display());
-        
-        Ok(())
-    }
-    
     /// Create a directory on the remote device
     /// 
     /// # Arguments
@@ -476,7 +506,7 @@ impl SSHClient {
     /// 
     /// # Errors
     /// Returns an error if directory creation fails
-    pub fn create_remote_directory(&self, path: &str) -> Result<()> {
+    fn create_remote_directory(&self, path: &str) -> Result<()> {
         // Use mkdir -p to create parent directories recursively
         // Redirect errors to /dev/null and always succeed (directory might already exist)
         self.execute_command(&format!("mkdir -p {} 2>/dev/null || true", path))?;
@@ -491,26 +521,13 @@ impl SSHClient {
     /// 
     /// # Errors
     /// Returns an error if chmod fails
-    pub fn set_permissions(&self, path: &str, mode: u32) -> Result<()> {
+    fn set_permissions(&self, path: &str, mode: u32) -> Result<()> {
         let mode_octal = format!("{:o}", mode);
         self.execute_command(&format!("chmod {} {}", mode_octal, path))?;
         println!("✓ Set permissions {} on {}", mode_octal, path);
         Ok(())
     }
-    
-    /// Check if a file exists on the remote device
-    /// 
-    /// # Arguments
-    /// * `path` - File path to check
-    /// 
-    /// # Returns
-    /// Returns true if file exists, false otherwise
-    pub fn remote_file_exists(&self, path: &str) -> Result<bool> {
-        let result = self.execute_command(&format!("test -e {} && echo 1 || echo 0", path))?;
-        Ok(result == "1")
-    }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
