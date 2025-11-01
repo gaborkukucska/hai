@@ -515,10 +515,28 @@ This file tracks the core functions/methods defined within the framework, catego
 - `get_agent_metrics_by_type(agent_type)` - Get metrics filtered by agent type
 - `get_metrics_summary()` - Get high-level metrics summary with totals and averages
 - `export_metrics_json()` - Export full metrics report as JSON string
+- `get_historical_metrics(time_range)` - Get historical metrics with time filtering
+- `get_metrics_trend(interval)` - Get aggregated trend data (Hourly, Daily, Weekly)
+- `export_metrics_csv(time_range)` - Export metrics as CSV with time filtering
+
+### hainet-portal/src/hooks/useMetrics.ts
+- `useMetrics()` - React hook for fetching and managing real-time and historical metrics
+- `useMetrics()::refetch` - Manually refetch real-time metrics
+- `useMetrics()::getTrendData(interval)` - Fetch historical trend data
+- `useMetrics()::exportMetrics(format, time_range)` - Export metrics as CSV or JSON
+
+### hainet-portal/src/components/MetricsDashboard.tsx
+- `MetricsDashboard()` - Main component for displaying the metrics dashboard, including real-time data, trend charts, and the metrics toolbar.
+
+### hainet-portal/src/components/MetricsToolbar.tsx
+- `MetricsToolbar(onExport, onIntervalChange, selectedInterval, isExporting)` - Toolbar for metrics export and interval selection
 
 ### hainet-portal/src/types.ts
 - `AgentMetrics` - TypeScript interface for individual agent metrics
 - `MetricsSummary` - TypeScript interface for aggregated metrics summary
+- `TrendDataPoint` - TypeScript interface for a single historical trend data point
+- `TrendInterval` - TypeScript type for trend interval ('Hourly', 'Daily', 'Weekly')
+- `TimeRange` - TypeScript interface for time range filtering
 
 ---
 

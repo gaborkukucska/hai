@@ -48,6 +48,21 @@ export interface MetricsSummary {
   timestamp_unix: number;
 }
 
+export interface TrendDataPoint {
+  timestamp: number;
+  operations: number;
+  success_rate: number;
+  avg_latency_ms: number;
+}
+
+export type TrendInterval = 'Hourly' | 'Daily' | 'Weekly';
+
+export interface TimeRange {
+  start?: number; // Unix timestamp
+  end?: number;   // Unix timestamp
+  interval?: TrendInterval;
+}
+
 // Settings Types
 export interface Settings {
   theme: string;
