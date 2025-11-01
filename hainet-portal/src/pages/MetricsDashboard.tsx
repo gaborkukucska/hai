@@ -1,10 +1,14 @@
 //! # START OF FILE hainet-portal/src/pages/MetricsDashboard.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { RefreshCw, TrendingUp, DollarSign, Cpu, Activity } from 'lucide-react';
+import { RefreshCw, TrendingUp, DollarSign, Cpu, Activity, Download } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useMetrics } from '../hooks/useMetrics';
 import { AgentMetrics } from '../types';
+import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/api/dialog';
+import { writeTextFile } from '@tauri-apps/api/fs';
+
 
 export default function MetricsDashboard() {
   const { metrics, loading, error, refetch } = useMetrics();
@@ -12,6 +16,37 @@ export default function MetricsDashboard() {
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExport = async (format: 'csv' | 'json') => {
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const command = `export_metrics_${format}`;
+      const content = await invoke<string>(command);
+
+      const filePath = await save({
+        defaultPath: `hainet-metrics-export-${new Date().toISOString().split('T')[0]}.${format}`,
+        filters: [{
+          name: format.toUpperCase(),
+          extensions: [format],
+        }],
+      });
+
+      if (filePath) {
+        await writeTextFile(filePath, content);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : `Failed to export as ${format}`;
+      console.error(errorMessage, err);
+      setExportError(errorMessage);
+      // Hide error after 5 seconds
+      setTimeout(() => setExportError(null), 5000);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Auto-scroll to bottom when new data arrives
   useEffect(() => {
@@ -105,15 +140,42 @@ export default function MetricsDashboard() {
             Updated {formatDistanceToNow(lastUpdated, { addSuffix: true })}
           </p>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition disabled:opacity-50"
-          aria-label="Refresh metrics"
-        >
-          <RefreshCw className={`w-5 h-5 text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2">
+           <button
+             onClick={() => handleExport('csv')}
+             disabled={isExporting}
+             className="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition disabled:opacity-50 flex items-center gap-2"
+             aria-label="Export as CSV"
+           >
+             <Download className="w-5 h-5 text-gray-400" />
+             <span className="text-sm text-gray-300">CSV</span>
+           </button>
+           <button
+             onClick={() => handleExport('json')}
+             disabled={isExporting}
+             className="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition disabled:opacity-50 flex items-center gap-2"
+             aria-label="Export as JSON"
+           >
+             <Download className="w-5 h-5 text-gray-400" />
+             <span className="text-sm text-gray-300">JSON</span>
+           </button>
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing || isExporting}
+            className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition disabled:opacity-50"
+            aria-label="Refresh metrics"
+          >
+            <RefreshCw className={`w-5 h-5 text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
+
+      {/* Export Error Toast */}
+      {exportError && (
+        <div className="fixed top-20 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm z-50">
+          {exportError}
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -142,6 +204,9 @@ export default function MetricsDashboard() {
           color="green"
         />
       </div>
+
+      {/* Historical Trends Section */}
+      <HistoricalTrends />
 
       {/* Agent Performance Cards */}
       <div className="space-y-4">
@@ -181,6 +246,84 @@ export default function MetricsDashboard() {
         <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-yellow-600 text-white px-4 py-2 rounded-full text-sm shadow-lg">
           Auto-scroll paused for 10s
         </div>
+      )}
+    </div>
+  );
+}
+
+// Historical Trends Component
+type TrendInterval = 'Hourly' | 'Daily' | 'Weekly';
+
+function HistoricalTrends() {
+  const [interval, setInterval] = useState<TrendInterval>('Daily');
+  const [trendData, setTrendData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchTrendData = async (selectedInterval: TrendInterval) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await invoke<any[]>('get_metrics_trend', { interval: selectedInterval });
+      const formattedData = data.map(d => ({
+        ...d,
+        timestamp_str: new Date(d.timestamp_unix * 1000).toLocaleString(),
+        success_rate_percent: d.success_rate * 100,
+      }));
+      setTrendData(formattedData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch trend data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTrendData(interval);
+  }, [interval]);
+
+  return (
+    <div className="bg-gray-800 rounded-lg p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-white">Historical Trends</h3>
+        <div className="flex items-center gap-2">
+          {(['Hourly', 'Daily', 'Weekly'] as TrendInterval[]).map((i) => (
+            <button
+              key={i}
+              onClick={() => setInterval(i)}
+              className={`px-3 py-1 text-sm rounded-md transition ${
+                interval === i ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+              }`}
+            >
+              {i}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading && <p className="text-center text-gray-400">Loading trends...</p>}
+      {error && <p className="text-center text-red-500">Error: {error}</p>}
+
+      {!loading && !error && trendData.length > 0 && (
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={trendData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <XAxis dataKey="timestamp_str" stroke="#9CA3AF" />
+            <YAxis yAxisId="left" stroke="#3B82F6" label={{ value: 'Success Rate (%)', angle: -90, position: 'insideLeft', fill: '#9CA3AF' }} />
+            <YAxis yAxisId="right" orientation="right" stroke="#8B5CF6" label={{ value: 'Operations', angle: 90, position: 'insideRight', fill: '#9CA3AF' }} />
+            <Tooltip
+              contentStyle={{ backgroundColor: '#1F2937', border: 'none', borderRadius: '0.5rem' }}
+              labelStyle={{ color: '#F9FAFB' }}
+            />
+            <Legend />
+            <Line yAxisId="left" type="monotone" dataKey="success_rate_percent" name="Success Rate" stroke="#3B82F6" strokeWidth={2} dot={false} />
+            <Line yAxisId="right" type="monotone" dataKey="total_operations" name="Operations" stroke="#8B5CF6" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+
+      {!loading && !error && trendData.length === 0 && (
+        <p className="text-center text-gray-400 py-10">No historical data available for this period.</p>
       )}
     </div>
   );

@@ -520,6 +520,15 @@ This file tracks the core functions/methods defined within the framework, catego
 - `AgentMetrics` - TypeScript interface for individual agent metrics
 - `MetricsSummary` - TypeScript interface for aggregated metrics summary
 
+### hainet-portal/src/pages/MetricsDashboard.tsx
+- `MetricsDashboard()` - Main component for the metrics dashboard.
+- `HistoricalTrends()` - Component to display historical trend data.
+- `AgentCard(agent)` - Component to display metrics for a single agent.
+- `SummaryCard(icon, label, value, color)` - Component to display a summary metric.
+
+### hainet-portal/src/hooks/useMetrics.ts
+- `useMetrics()` - Hook to fetch and manage real-time metrics data.
+
 ---
 
 ## Local Hub Networking (Phase 4 - In Progress)
