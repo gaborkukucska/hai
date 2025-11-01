@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use hainet_persona::agents::{AdminAgent, Agent, AgentContext};
+use hainet_persona::agents::{AdminAgent, Agent, AgentContext, MetricsCollector};
 use hainet_persona::messaging::MessageBus;
 use hainet_persona::prompts::PromptManager;
 use hainet_persona::tools::mcp::MCPClientManager;
@@ -134,8 +134,14 @@ impl AdminBridge {
             ProjectManager::new(&db_connection_string).await?
         ));
         
+        // Create metrics collector with database path
+        let metrics_db_path = data_dir.join("metrics.db");
+        let metrics_collector = Arc::new(RwLock::new(
+            MetricsCollector::new(&format!("sqlite://{}?mode=rwc", metrics_db_path.display())).await?
+        ));
+        
         // Create Admin AI agent
-        let mut admin = AdminAgent::new(context, project_manager).await?;
+        let mut admin = AdminAgent::new(context, project_manager, metrics_collector).await?;
         
         // Start Admin AI
         admin.start().await?;

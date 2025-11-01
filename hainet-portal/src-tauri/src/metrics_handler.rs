@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 use anyhow::Result;
+use tauri::{AppHandle, Emitter};
 
 /// Frontend-compatible agent metrics structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,6 +165,33 @@ pub async fn export_metrics_json() -> Result<String, String> {
     
     serde_json::to_string_pretty(&summary)
         .map_err(|e| format!("Failed to serialize metrics: {}", e))
+}
+
+/// Start background task to broadcast metrics updates via Tauri events
+pub fn start_metrics_broadcast(app_handle: AppHandle) {
+    tracing::info!("Starting metrics broadcast service...");
+    
+    tauri::async_runtime::spawn(async move {
+        loop {
+            // Wait 5 seconds between updates
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            
+            // Fetch latest metrics summary
+            match get_metrics_summary().await {
+                Ok(summary) => {
+                    // Emit event to all frontend listeners
+                    if let Err(e) = app_handle.emit("metrics-updated", summary) {
+                        tracing::warn!("Failed to emit metrics-updated event: {}", e);
+                    } else {
+                        tracing::debug!("Metrics update broadcast successful");
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch metrics for broadcast: {}", e);
+                }
+            }
+        }
+    });
 }
 
 #[cfg(test)]

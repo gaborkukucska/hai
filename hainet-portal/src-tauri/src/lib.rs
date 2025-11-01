@@ -141,6 +141,10 @@ pub fn run() {
       
       log::info!("HAI-Net Portal initialized successfully");
       
+      // Start metrics broadcast service for real-time updates
+      metrics_handler::start_metrics_broadcast(app.handle().clone());
+      log::info!("Metrics broadcast service started");
+      
       Ok(())
     })
     .manage(AppState {
