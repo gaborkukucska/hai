@@ -6,11 +6,12 @@ pub mod tts_handler;
 mod vision_handler;
 mod video_handler;
 mod settings_handler;
+mod settings_storage;
 mod metrics_handler;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{Manager, State};
 use tiny_http::Server;
 use tokio::sync::RwLock;
 
@@ -19,6 +20,7 @@ use stt_handler::{AudioData, TranscriptionResult};
 use tts_handler::{TTSHandler, SynthesisRequest, SynthesisResponse};
 use vision_handler::VisionState;
 use settings_handler::SystemInfo;
+use settings_storage::SettingsStorage;
 use sysinfo::System;
 use hainet_persona::agents::metrics::MetricsCollector;
 
@@ -30,6 +32,9 @@ struct AppState {
 
 /// Metrics collector state
 type MetricsState = Arc<RwLock<MetricsCollector>>;
+
+/// Settings storage state
+type SettingsState = Arc<RwLock<SettingsStorage>>;
 
 /// State for managing video streaming servers
 struct VideoStreamingState(pub Arc<Mutex<HashMap<u16, Arc<Server>>>>);
@@ -117,17 +122,18 @@ pub fn run() {
   let runtime = tokio::runtime::Runtime::new()
       .expect("Failed to create Tokio runtime");
   
-  let (admin_bridge, metrics_collector) = runtime.block_on(async {
+  let (admin_bridge, metrics_collector, settings_storage) = runtime.block_on(async {
       let admin_bridge = AdminBridge::new().await
           .expect("Failed to initialize Admin AI Bridge");
       
-      // Initialize MetricsCollector with database path
+      // Initialize database directory
       let data_dir = dirs::data_dir()
           .expect("Failed to get data directory")
           .join("hainet-portal");
       std::fs::create_dir_all(&data_dir)
           .expect("Failed to create data directory");
       
+      // Initialize MetricsCollector with database path
       let metrics_db_path = data_dir.join("metrics.db");
       let metrics_collector = MetricsCollector::new(
           &format!("sqlite://{}?mode=rwc", metrics_db_path.display())
@@ -135,11 +141,22 @@ pub fn run() {
       .await
       .expect("Failed to initialize MetricsCollector");
       
-      (admin_bridge, metrics_collector)
+      // Initialize SettingsStorage with database path
+      let settings_db_path = data_dir.join("settings.db");
+      let settings_storage = SettingsStorage::new(
+          &format!("sqlite://{}?mode=rwc", settings_db_path.display())
+      )
+      .await
+      .expect("Failed to initialize SettingsStorage");
+      
+      (admin_bridge, metrics_collector, settings_storage)
   });
   
   // Wrap MetricsCollector in Arc<RwLock<>> for shared state
   let metrics_state: MetricsState = Arc::new(RwLock::new(metrics_collector));
+  
+  // Wrap SettingsStorage in Arc<RwLock<>> for shared state
+  let settings_state: SettingsState = Arc::new(RwLock::new(settings_storage));
   
   // Initialize TTS handler
   let tts_handler = TTSHandler::new();
@@ -181,6 +198,7 @@ pub fn run() {
         tts_handler: Arc::new(RwLock::new(tts_handler)),
     })
     .manage(metrics_state)
+    .manage(settings_state)
     .manage(VisionState(Mutex::new(None)))
     .manage(video_streaming_state)
     .manage(system_info_state)
@@ -202,6 +220,9 @@ pub fn run() {
         video_handler::stop_video_stream,
         settings_handler::get_settings,
         settings_handler::update_settings,
+        settings_handler::save_device_preference,
+        settings_handler::get_device_preferences,
+        settings_handler::get_default_device,
         settings_handler::get_system_status,
         metrics_handler::get_agent_metrics,
         metrics_handler::get_agent_metrics_by_type,

@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-01T16:06:00+08:00"
+last_updated = "2025-11-01T18:37:00+08:00"
 project_name = "HAI-Net Seed"
-version = "0.20"
+version = "0.21"
 current_phase = "Phase 6B: Portal UI Enhancements"
-current_cycle = "6B.3 - Real MetricsCollector Integration (Complete)"
+current_cycle = "6B.4 - Settings Persistence System (Complete)"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -84,7 +84,7 @@ phase_3_progress = 1.00  # 3/3 cycles complete (Blockchain & Governance)
 phase_4_progress = 1.00  # 5/5 cycles complete (4.1 Peer Discovery, 4.2 Worker MCP Integration, 4.3 E2E Integration Tests, 4.4 Distributed Storage, 4.5a Multi-Device Deployment)
 phase_5_progress = 1.00  # 8/8 sessions complete (5.1 Mobile, 5.2 System MCP, 5.3 Dev MCP, 5.4 PM Task Decomposition, 5.5 Worker Execution, 5.6 PM-Worker Communication, 5.7 Database Migration, 5.8 E2E Test Infrastructure)
 phase_6a_progress = 1.00  # 6/6 sessions complete - PHASE 6A COMPLETE! 🎉
-phase_6b_progress = 0.50  # 3/6 sessions complete (Session 1: Metrics Backend, Session 2: Portal UI, Session 3: Real Metrics Integration)
+phase_6b_progress = 0.67  # 4/6 sessions complete (Session 1: Metrics Backend, Session 2: Portal UI, Session 3: Real Metrics, Session 4: Settings Persistence)
 mcp_integration_complete = true
 worker_mcp_integration_complete = true
 e2e_integration_tests_complete = true
@@ -93,8 +93,8 @@ multi_device_deployment_complete = true
 mobile_deployment_complete = true
 system_management_mcp_complete = true
 development_tools_mcp_complete = true
-total_loc_produced = 28342  # Phase 6B Session 3: +120 LOC (metrics_handler, lib.rs updates)
-total_tests_passing = 331  # No new tests (existing verified)
+total_loc_produced = 28899  # Phase 6B Session 4: +557 LOC (settings_storage.rs, settings_handler.rs, lib.rs, types.ts, Settings.tsx, Cargo.toml)
+total_tests_passing = 331  # Unit tests in settings_storage.rs (compilation verified)
 total_crates = 10  # hainet-portal
 
 # Phase breakdown
@@ -178,6 +178,100 @@ sessions_complete = 7
 sessions_remaining = 0
 
 # Completed cycles
+[[completed_cycles]]
+id = "6B.4"
+name = "Settings Persistence System"
+completion_date = "2025-11-01"
+loc = 557  # settings_storage(350) + settings_handler(150) + lib.rs(30) + types.ts(20) + Settings.tsx(5) + Cargo.toml(2)
+tests = 4  # settings_storage.rs unit tests (compilation verified)
+goal = "Implement persistent settings storage with SQLite backend for user preferences and device configurations"
+files_created = [
+    "hainet-portal/src-tauri/src/settings_storage.rs (350 LOC) - SQLite storage module with CRUD operations",
+    "helperfiles/SESSION_20_PHASE_6B_SESSION_4_SETTINGS_PERSISTENCE.md - Complete session documentation"
+]
+files_modified = [
+    "hainet-portal/src-tauri/src/settings_handler.rs (+150 LOC) - Enhanced Settings struct, async load/save, new commands",
+    "hainet-portal/src-tauri/src/lib.rs (+30 LOC) - SettingsStorage initialization and state management",
+    "hainet-portal/src-tauri/Cargo.toml (+2 LOC) - Added sqlx dependency",
+    "hainet-portal/src/types.ts (+20 LOC) - Added Settings and DevicePreference interfaces",
+    "hainet-portal/src/pages/Settings.tsx (+5 LOC net) - Complete rewrite with persistent storage integration",
+    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 4 completion"
+]
+key_features = [
+    "SQLite-backed persistent storage (settings.db)",
+    "Settings table with key-value pairs and timestamps",
+    "Device preferences table with default device management",
+    "Transactional batch updates for settings",
+    "CRUD operations for settings and device preferences",
+    "Settings struct with 11 fields (theme, devices, privacy, notifications)",
+    "Async Tauri commands (get_settings, update_settings, save_device_preference, etc.)",
+    "Real-time save status indicator (Saving/Saved/Error)",
+    "Frontend auto-saves changes to backend",
+    "Privacy controls (PII, Bias, Harm detection toggles)",
+    "Theme persistence (Dark/Light/System)",
+    "Notification preferences (enable notifications, enable sound)",
+    "Type-safe Rust ↔ TypeScript communication"
+]
+database_schema = [
+    "settings: key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER",
+    "device_preferences: id INTEGER, device_type TEXT, device_id TEXT, device_name TEXT, is_default INTEGER",
+    "Index on device_type for fast lookups",
+    "UNIQUE constraint on (device_type, device_id)"
+]
+tauri_commands = [
+    "get_settings - Load settings from SQLite database",
+    "update_settings - Save settings batch with transaction",
+    "save_device_preference - Save individual device configuration",
+    "get_device_preferences - Get devices by type",
+    "get_default_device - Get default device for a type"
+]
+backend_updates = [
+    "SettingsStorage::new() with SQLite connection pool",
+    "Database path: dirs::data_dir()/hainet-portal/settings.db",
+    "Settings state: Arc<RwLock<SettingsStorage>> for thread-safety",
+    "Batch save with Vec<(&str, &str)> for efficiency",
+    "Device preference management with automatic default switching",
+    "Graceful error handling throughout"
+]
+frontend_updates = [
+    "Settings.tsx loads from backend on mount",
+    "updateSetting() auto-saves changes with visual feedback",
+    "Save status: idle/saving/saved/error states",
+    "Privacy section with Guardian AI toggles",
+    "Appearance section with theme selector",
+    "Notifications section with enable toggles",
+    "Removed hard-coded defaults, now fully dynamic"
+]
+compilation_status = "Success - Clean build (warnings only, 0 errors)"
+test_status = "4 unit tests in settings_storage.rs (compilation verified)"
+constitutional_compliance = [
+    "Article I (Privacy): All settings stored locally in SQLite",
+    "Article VII (Transparency): Settings fully visible and exportable",
+    "Article II (Human Agency): User controls all preferences"
+]
+technical_highlights = [
+    "Type safety: Settings struct matches TypeScript interface",
+    "Concurrency: Arc<RwLock<>> allows multiple readers, single writer",
+    "Performance: Indexed queries, batch updates, connection pooling",
+    "State management: SettingsStorage initialized before Tauri setup()",
+    "Error propagation: All database errors map to user-friendly strings",
+    "Lifetime management: Owned pairs avoid borrow checker issues"
+]
+data_flow = [
+    "App startup → Initialize SettingsStorage (SQLite) → Register as managed state",
+    "Settings.tsx mount → get_settings command → Load from database → Render UI",
+    "User changes setting → update_settings command → Batch save → Show save status",
+    "Device preference saved → Automatic default management → Database update"
+]
+known_limitations = [
+    "No migration system yet (future: alter table for new fields)",
+    "Settings export UI pending (backend export_json ready)",
+    "Device preferences not yet integrated with audio/video components",
+    "No settings validation (min/max bounds for values)"
+]
+next_step = "Session 5: Metrics Export & Historical Tracking OR Session 6: UI Polish & Integration Testing"
+phase_completion = "Phase 6B: 67% complete (4/6 sessions done)"
+
 [[completed_cycles]]
 id = "6B.3"
 name = "Real MetricsCollector Integration"

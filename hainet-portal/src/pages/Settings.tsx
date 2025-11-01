@@ -1,36 +1,99 @@
 //! # START OF FILE hainet-portal/src/pages/Settings.tsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Shield, Moon, Database, Bell, Info } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import type { Settings as SettingsType } from '../types';
 
 export default function Settings() {
+  const [settings, setSettings] = useState<SettingsType | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Load settings on component mount
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    try {
+      const loadedSettings = await invoke<SettingsType>('get_settings');
+      setSettings(loadedSettings);
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateSetting = async (key: keyof SettingsType, value: any) => {
+    if (!settings) return;
+
+    const updatedSettings = { ...settings, [key]: value };
+    setSettings(updatedSettings);
+
+    // Save to backend
+    setSaveStatus('saving');
+    try {
+      await invoke('update_settings', { settings: updatedSettings });
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    }
+  };
+
+  if (loading || !settings) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-white">Loading settings...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-white">Settings</h2>
-        <p className="text-sm text-gray-400">Configure your HAI-Net Portal</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Settings</h2>
+          <p className="text-sm text-gray-400">Configure your HAI-Net Portal</p>
+        </div>
+        {saveStatus === 'saving' && (
+          <span className="text-sm text-blue-400">Saving...</span>
+        )}
+        {saveStatus === 'saved' && (
+          <span className="text-sm text-green-400">✓ Saved</span>
+        )}
+        {saveStatus === 'error' && (
+          <span className="text-sm text-red-400">Save failed</span>
+        )}
       </div>
 
       {/* Privacy Settings */}
       <SettingsSection
         icon={<Shield className="w-6 h-6" />}
         title="Privacy & Security"
-        description="All data remains local and private"
+        description="Guardian AI protection and monitoring"
       >
         <SettingToggle
-          label="Local-only mode"
-          description="Never connect to external services"
-          defaultChecked={true}
+          label="PII Detection"
+          description="Detect and flag personally identifiable information"
+          checked={settings.pii_detection}
+          onChange={(value) => updateSetting('pii_detection', value)}
         />
         <SettingToggle
-          label="Encrypt local data"
-          description="AES-256 encryption for all stored data"
-          defaultChecked={true}
+          label="Bias Detection"
+          description="Monitor for biased language and recommendations"
+          checked={settings.bias_detection}
+          onChange={(value) => updateSetting('bias_detection', value)}
         />
         <SettingToggle
-          label="Audit logging"
-          description="Track all AI interactions for transparency"
-          defaultChecked={true}
+          label="Harm Detection"
+          description="Check for potentially harmful content"
+          checked={settings.harm_detection}
+          onChange={(value) => updateSetting('harm_detection', value)}
         />
       </SettingsSection>
 
@@ -40,16 +103,18 @@ export default function Settings() {
         title="Appearance"
         description="Customize the interface"
       >
-        <SettingToggle
-          label="Dark mode"
-          description="Use dark theme (currently active)"
-          defaultChecked={true}
-        />
-        <SettingToggle
-          label="Reduced motion"
-          description="Minimize animations for accessibility"
-          defaultChecked={false}
-        />
+        <div className="py-2">
+          <label className="block text-white font-medium mb-2">Theme</label>
+          <select
+            value={settings.theme}
+            onChange={(e) => updateSetting('theme', e.target.value)}
+            className="w-full bg-gray-700 text-white rounded px-3 py-2 border border-gray-600 focus:border-blue-500 focus:outline-none"
+          >
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="system">System</option>
+          </select>
+        </div>
       </SettingsSection>
 
       {/* Storage */}
@@ -80,14 +145,16 @@ export default function Settings() {
         description="Configure system alerts"
       >
         <SettingToggle
-          label="Guardian alerts"
-          description="Notify when constitutional violations detected"
-          defaultChecked={true}
+          label="Enable Notifications"
+          description="Show desktop notifications for important events"
+          checked={settings.enable_notifications}
+          onChange={(value) => updateSetting('enable_notifications', value)}
         />
         <SettingToggle
-          label="Task completion"
-          description="Alert when agent tasks complete"
-          defaultChecked={true}
+          label="Enable Sound"
+          description="Play sounds for notifications and alerts"
+          checked={settings.enable_sound}
+          onChange={(value) => updateSetting('enable_sound', value)}
         />
       </SettingsSection>
 
@@ -147,12 +214,11 @@ function SettingsSection({ icon, title, description, children }: SettingsSection
 interface SettingToggleProps {
   label: string;
   description: string;
-  defaultChecked?: boolean;
+  checked: boolean;
+  onChange: (value: boolean) => void;
 }
 
-function SettingToggle({ label, description, defaultChecked = false }: SettingToggleProps) {
-  const [checked, setChecked] = React.useState(defaultChecked);
-
+function SettingToggle({ label, description, checked, onChange }: SettingToggleProps) {
   return (
     <div className="flex items-center justify-between py-2">
       <div className="flex-1">
@@ -160,7 +226,7 @@ function SettingToggle({ label, description, defaultChecked = false }: SettingTo
         <p className="text-sm text-gray-400">{description}</p>
       </div>
       <button
-        onClick={() => setChecked(!checked)}
+        onClick={() => onChange(!checked)}
         className={`relative w-12 h-6 rounded-full transition-colors ${
           checked ? 'bg-blue-600' : 'bg-gray-600'
         }`}

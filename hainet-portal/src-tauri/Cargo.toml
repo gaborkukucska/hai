@@ -34,6 +34,7 @@ base64 = "0.21"
 reqwest = { version = "0.11", features = ["json", "multipart"] }
 tracing = "0.1"
 tiny_http = "0.12"
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite"] }
 
 # HAI-Net dependencies
 hainet-persona = { path = "../../hainet-persona" }

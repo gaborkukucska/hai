@@ -47,3 +47,27 @@ export interface MetricsSummary {
   agents: AgentMetrics[];
   timestamp_unix: number;
 }
+
+// Settings Types
+export interface Settings {
+  theme: string;
+  audio_input_device: string | null;
+  video_input_device: string | null;
+  stt_model: string | null;
+  tts_model: string | null;
+  vision_model: string | null;
+  // Privacy settings
+  pii_detection: boolean;
+  bias_detection: boolean;
+  harm_detection: boolean;
+  // Notification settings
+  enable_notifications: boolean;
+  enable_sound: boolean;
+}
+
+export interface DevicePreference {
+  device_type: string;  // 'microphone', 'speaker', 'camera'
+  device_id: string;
+  device_name: string;
+  is_default: boolean;
+}
