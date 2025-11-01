@@ -6,6 +6,7 @@ pub mod tts_handler;
 mod vision_handler;
 mod video_handler;
 mod settings_handler;
+mod metrics_handler;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -168,6 +169,10 @@ pub fn run() {
         settings_handler::get_settings,
         settings_handler::update_settings,
         settings_handler::get_system_status,
+        metrics_handler::get_agent_metrics,
+        metrics_handler::get_agent_metrics_by_type,
+        metrics_handler::get_metrics_summary,
+        metrics_handler::export_metrics_json,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

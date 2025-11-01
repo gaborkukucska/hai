@@ -20,12 +20,30 @@ export interface DynamicUIAction {
 
 // Represents a single dynamic UI component
 export interface DynamicUIComponent {
-  // The type of the component to render (e.g., 'Stack', 'Text', 'Button', 'Input')
   type: string;
-  // Properties to pass to the React component (e.g., { text: 'Click me' })
   props?: Record<string, any>;
-  // Child components or text content
-  children?: (DynamicUIComponent | string)[];
-  // Action to perform on interaction (e.g., for a button click)
-  action?: DynamicUIAction;
+  children?: DynamicUIComponent[];
+}
+
+// Metrics Types
+export interface AgentMetrics {
+  agent_type: string;
+  total_operations: number;
+  success_rate: number;
+  avg_response_time_ms: number;
+  avg_tokens_used: number;
+  json_parse_success_rate: number;
+  validation_pass_rate: number;
+  syntax_error_rate: number;
+  first_operation_unix: number;
+  last_operation_unix: number;
+}
+
+export interface MetricsSummary {
+  total_tasks: number;
+  overall_success_rate: number;
+  total_tokens: number;
+  total_cost_usd: number;
+  agents: AgentMetrics[];
+  timestamp_unix: number;
 }

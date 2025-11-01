@@ -508,6 +508,20 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## Metrics System (Phase 6B Session 1 - Complete)
+
+### hainet-portal/src-tauri/src/metrics_handler.rs
+- `get_agent_metrics()` - Get metrics for all agent types (Admin, PM, Worker)
+- `get_agent_metrics_by_type(agent_type)` - Get metrics filtered by agent type
+- `get_metrics_summary()` - Get high-level metrics summary with totals and averages
+- `export_metrics_json()` - Export full metrics report as JSON string
+
+### hainet-portal/src/types.ts
+- `AgentMetrics` - TypeScript interface for individual agent metrics
+- `MetricsSummary` - TypeScript interface for aggregated metrics summary
+
+---
+
 ## Local Hub Networking (Phase 4 - In Progress)
 
 ### hainet-core/src/networking/coordinator.rs
