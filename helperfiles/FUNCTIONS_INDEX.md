@@ -243,6 +243,9 @@ This file tracks the core functions/methods defined within the framework, catego
 - `SSHClientTrait::create_remote_directory(path)` - Create directory on remote device
 - `SSHClientTrait::set_permissions(path, mode)` - Set file permissions via chmod
 - `SSHClient::remote_file_exists(path)` - Check if file exists on remote device
+- `MockSSHClient::new(ip)` - Create a new mock SSH client for testing
+- `MockSSHClient::expect_command(command, output)` - Set an expected command and its output
+- `MockSSHClient::set_capabilities(caps)` - Set the mock device capabilities to be returned by `assess_capabilities`
 
 ### hainet-seed/src/installer/mod.rs (Updated Phase 4.5a.2)
 - `Installer::prompt_mesh_setup()` - Prompt user for multi-device mesh setup
