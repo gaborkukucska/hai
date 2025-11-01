@@ -1,17 +1,37 @@
 //! # START OF FILE hainet-portal/src/pages/MetricsDashboard.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { formatDistanceToNow } from 'date-fns';
-import { RefreshCw, TrendingUp, DollarSign, Cpu, Activity } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { format, fromUnixTime, formatDistanceToNow } from 'date-fns';
+import { RefreshCw, TrendingUp, DollarSign, Cpu, Activity, BarChart2 } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Bar, ComposedChart } from 'recharts';
 import { useMetrics } from '../hooks/useMetrics';
-import { AgentMetrics } from '../types';
+import { AgentMetrics, TrendInterval } from '../types';
+import MetricsToolbar from '../components/MetricsToolbar';
 
 export default function MetricsDashboard() {
-  const { metrics, loading, error, refetch } = useMetrics();
+  const {
+    metrics,
+    loading,
+    error,
+    refetch,
+    trendData,
+    trendLoading,
+    trendError,
+    getTrendData,
+    exportMetrics,
+  } = useMetrics();
   const scrollableRef = useRef<HTMLDivElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedInterval, setSelectedInterval] = useState<TrendInterval>('Daily');
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Fetch trend data on interval change
+  useEffect(() => {
+    if (getTrendData) {
+      getTrendData(selectedInterval);
+    }
+  }, [selectedInterval, getTrendData]);
 
   // Auto-scroll to bottom when new data arrives
   useEffect(() => {
@@ -37,7 +57,21 @@ export default function MetricsDashboard() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await refetch();
+    if (getTrendData) {
+      await getTrendData(selectedInterval);
+    }
     setTimeout(() => setIsRefreshing(false), 500);
+  };
+
+  const handleExport = async (format: 'csv' | 'json') => {
+    if (!exportMetrics) return;
+    setIsExporting(true);
+    await exportMetrics(format, { interval: selectedInterval });
+    setIsExporting(false);
+  };
+
+  const handleIntervalChange = (interval: TrendInterval) => {
+    setSelectedInterval(interval);
   };
 
   // Cleanup timeout on unmount
@@ -143,6 +177,14 @@ export default function MetricsDashboard() {
         />
       </div>
 
+      {/* Toolbar */}
+      <MetricsToolbar
+        onExport={handleExport}
+        onIntervalChange={handleIntervalChange}
+        selectedInterval={selectedInterval}
+        isExporting={isExporting}
+      />
+
       {/* Agent Performance Cards */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-white">Agent Performance</h3>
@@ -174,6 +216,41 @@ export default function MetricsDashboard() {
             />
           </LineChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Historical Trend Chart */}
+      <div className="bg-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white mb-4">Historical Trends ({selectedInterval})</h3>
+        {trendLoading && <p className="text-gray-400">Loading trend data...</p>}
+        {trendError && <p className="text-red-500">Error loading trends: {trendError}</p>}
+        {!trendLoading && !trendError && trendData && (
+          <ResponsiveContainer width="100%" height={400}>
+            <ComposedChart data={trendData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis
+                dataKey="timestamp"
+                stroke="#9CA3AF"
+                tickFormatter={(unixTime) => format(fromUnixTime(unixTime), 'MMM dd, HH:mm')}
+              />
+              <YAxis yAxisId="left" stroke="#3B82F6" label={{ value: 'Success Rate (%) / Latency (ms)', angle: -90, position: 'insideLeft', fill: '#9CA3AF' }} />
+              <YAxis yAxisId="right" orientation="right" stroke="#10B981" label={{ value: 'Operations', angle: 90, position: 'insideRight', fill: '#9CA3AF' }} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#1F2937', border: 'none', borderRadius: '0.5rem' }}
+                labelStyle={{ color: '#F9FAFB' }}
+                formatter={(value: number, name: string) => {
+                  if (name === 'Success Rate') return [`${value.toFixed(1)}%`, name];
+                  if (name === 'Avg Latency') return [`${value.toFixed(0)}ms`, name];
+                  return [value, name];
+                }}
+                labelFormatter={(label) => format(fromUnixTime(label), 'eee, MMM dd yyyy, HH:mm')}
+              />
+              <Legend />
+              <Bar yAxisId="right" dataKey="operations" fill="#10B981" name="Operations" />
+              <Line yAxisId="left" type="monotone" dataKey="success_rate" stroke="#3B82F6" name="Success Rate" strokeWidth={2} />
+              <Line yAxisId="left" type="monotone" dataKey="avg_latency_ms" stroke="#F59E0B" name="Avg Latency" strokeWidth={2} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
       {/* Scroll indicator when user scrolling is paused */}

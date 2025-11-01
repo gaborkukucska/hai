@@ -2,13 +2,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { MetricsSummary } from '../types';
+import { save } from '@tauri-apps/api/dialog';
+import { writeTextFile } from '@tauri-apps/api/fs';
+import { MetricsSummary, TrendDataPoint, TrendInterval, TimeRange } from '../types';
 
 interface UseMetricsResult {
   metrics: MetricsSummary | null;
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
+  trendData: TrendDataPoint[] | null;
+  trendLoading: boolean;
+  trendError: string | null;
+  getTrendData: (interval: TrendInterval) => Promise<void>;
+  exportMetrics: (format: 'csv' | 'json', timeRange?: TimeRange) => Promise<void>;
 }
 
 export function useMetrics(): UseMetricsResult {
@@ -16,16 +23,58 @@ export function useMetrics(): UseMetricsResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [trendData, setTrendData] = useState<TrendDataPoint[] | null>(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendError, setTrendError] = useState<string | null>(null);
+
   const fetchMetrics = useCallback(async () => {
     try {
       setError(null);
       const summary = await invoke<MetricsSummary>('get_metrics_summary');
       setMetrics(summary);
-      setLoading(false);
     } catch (err) {
       console.error('Failed to fetch metrics:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch metrics');
+    } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const getTrendData = useCallback(async (interval: TrendInterval) => {
+    setTrendLoading(true);
+    setTrendError(null);
+    try {
+      const data = await invoke<TrendDataPoint[]>('get_metrics_trend', { interval });
+      setTrendData(data);
+    } catch (err) {
+      console.error('Failed to fetch trend data:', err);
+      setTrendError(err instanceof Error ? err.message : 'Failed to fetch trend data');
+    } finally {
+      setTrendLoading(false);
+    }
+  }, []);
+
+  const exportMetrics = useCallback(async (format: 'csv' | 'json', timeRange?: TimeRange) => {
+    try {
+      const command = `export_metrics_${format}`;
+      const content = await invoke<string>(command, { timeRange });
+
+      const suggestedFilename = `hainet-metrics-${new Date().toISOString().split('T')[0]}.${format}`;
+      const filePath = await save({
+        title: `Export Metrics as ${format.toUpperCase()}`,
+        defaultPath: suggestedFilename,
+        filters: [{
+          name: format.toUpperCase(),
+          extensions: [format],
+        }],
+      });
+
+      if (filePath) {
+        await writeTextFile(filePath, content);
+      }
+    } catch (err) {
+      console.error(`Failed to export metrics as ${format}:`, err);
+      // Optionally, set an export-specific error state to show in the UI
     }
   }, []);
 
@@ -72,5 +121,10 @@ export function useMetrics(): UseMetricsResult {
     loading,
     error,
     refetch: fetchMetrics,
+    trendData,
+    trendLoading,
+    trendError,
+    getTrendData,
+    exportMetrics,
   };
 }
