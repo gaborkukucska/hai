@@ -5,8 +5,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
+use std::sync::Arc;
 use anyhow::Result;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
+use tokio::sync::RwLock;
+use hainet_persona::agents::{AgentType, metrics::MetricsCollector};
 
 /// Frontend-compatible agent metrics structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,99 +39,148 @@ pub struct MetricsSummaryResponse {
 
 /// Get metrics for all agent types
 #[tauri::command]
-pub async fn get_agent_metrics() -> Result<Vec<AgentMetricsResponse>, String> {
-    // TODO: Connect to hainet-persona MetricsCollector
-    // For now, return mock data until integration is complete
+pub async fn get_agent_metrics(
+    metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
+) -> Result<Vec<AgentMetricsResponse>, String> {
+    tracing::info!("Fetching agent metrics from database...");
     
-    tracing::info!("Fetching agent metrics...");
+    let collector = metrics_collector.read().await;
+    let mut all_metrics = Vec::new();
     
-    let mock_metrics = vec![
-        AgentMetricsResponse {
-            agent_type: "Admin".to_string(),
-            total_operations: 42,
-            success_rate: 0.95,
-            avg_response_time_ms: 250.5,
-            avg_tokens_used: 1024.0,
-            json_parse_success_rate: 0.92,
-            validation_pass_rate: 0.97,
-            syntax_error_rate: 0.03,
-            first_operation_unix: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() - 86400, // 1 day ago
-            last_operation_unix: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        },
-        AgentMetricsResponse {
-            agent_type: "PM".to_string(),
-            total_operations: 28,
-            success_rate: 0.92,
-            avg_response_time_ms: 180.3,
-            avg_tokens_used: 768.0,
-            json_parse_success_rate: 0.89,
-            validation_pass_rate: 0.94,
-            syntax_error_rate: 0.06,
-            first_operation_unix: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() - 72000,
-            last_operation_unix: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() - 120,
-        },
-        AgentMetricsResponse {
-            agent_type: "Worker".to_string(),
-            total_operations: 156,
-            success_rate: 0.98,
-            avg_response_time_ms: 120.7,
-            avg_tokens_used: 512.0,
-            json_parse_success_rate: 0.96,
-            validation_pass_rate: 0.99,
-            syntax_error_rate: 0.01,
-            first_operation_unix: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() - 43200,
-            last_operation_unix: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() - 30,
-        },
-    ];
+    // Fetch metrics for each agent type
+    for agent_type in [AgentType::Admin, AgentType::PM, AgentType::Worker, AgentType::Guardian] {
+        // Check if this agent type has any operations
+        let count = collector.count_operations(agent_type).await
+            .map_err(|e| format!("Failed to count operations: {}", e))?;
+        
+        if count > 0 {
+            let metrics = collector.get_aggregate(agent_type).await
+                .map_err(|e| format!("Failed to get aggregate metrics: {}", e))?;
+            
+            // Convert to frontend-compatible format
+            all_metrics.push(AgentMetricsResponse {
+                agent_type: agent_type.to_string(),
+                total_operations: metrics.total_operations,
+                success_rate: metrics.success_rate,
+                avg_response_time_ms: metrics.avg_response_time_ms,
+                avg_tokens_used: metrics.avg_tokens_used,
+                json_parse_success_rate: metrics.json_parse_success_rate,
+                validation_pass_rate: metrics.validation_pass_rate,
+                syntax_error_rate: metrics.syntax_error_rate,
+                first_operation_unix: metrics.first_operation
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs(),
+                last_operation_unix: metrics.last_operation
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs(),
+            });
+        }
+    }
     
-    Ok(mock_metrics)
+    tracing::debug!("Retrieved metrics for {} agent types", all_metrics.len());
+    Ok(all_metrics)
 }
 
 /// Get metrics for specific agent type
 #[tauri::command]
-pub async fn get_agent_metrics_by_type(agent_type: String) -> Result<AgentMetricsResponse, String> {
-    tracing::info!("Fetching metrics for agent type: {}", agent_type);
+pub async fn get_agent_metrics_by_type(
+    agent_type_str: String,
+    metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
+) -> Result<AgentMetricsResponse, String> {
+    tracing::info!("Fetching metrics for agent type: {}", agent_type_str);
     
-    let all_metrics = get_agent_metrics().await?;
+    // Parse agent type string
+    let agent_type = match agent_type_str.as_str() {
+        "Admin" => AgentType::Admin,
+        "PM" => AgentType::PM,
+        "Worker" => AgentType::Worker,
+        "Guardian" => AgentType::Guardian,
+        _ => return Err(format!("Invalid agent type: {}", agent_type_str)),
+    };
     
-    all_metrics
-        .into_iter()
-        .find(|m| m.agent_type == agent_type)
-        .ok_or_else(|| format!("No metrics found for agent type: {}", agent_type))
+    let collector = metrics_collector.read().await;
+    
+    // Check if this agent type has any operations
+    let count = collector.count_operations(agent_type).await
+        .map_err(|e| format!("Failed to count operations: {}", e))?;
+    
+    if count == 0 {
+        return Err(format!("No metrics found for agent type: {}", agent_type_str));
+    }
+    
+    let metrics = collector.get_aggregate(agent_type).await
+        .map_err(|e| format!("Failed to get aggregate metrics: {}", e))?;
+    
+    Ok(AgentMetricsResponse {
+        agent_type: agent_type.to_string(),
+        total_operations: metrics.total_operations,
+        success_rate: metrics.success_rate,
+        avg_response_time_ms: metrics.avg_response_time_ms,
+        avg_tokens_used: metrics.avg_tokens_used,
+        json_parse_success_rate: metrics.json_parse_success_rate,
+        validation_pass_rate: metrics.validation_pass_rate,
+        syntax_error_rate: metrics.syntax_error_rate,
+        first_operation_unix: metrics.first_operation
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs(),
+        last_operation_unix: metrics.last_operation
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs(),
+    })
 }
 
 /// Get high-level metrics summary
 #[tauri::command]
-pub async fn get_metrics_summary() -> Result<MetricsSummaryResponse, String> {
-    tracing::info!("Fetching metrics summary...");
+pub async fn get_metrics_summary(
+    metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
+) -> Result<MetricsSummaryResponse, String> {
+    tracing::info!("Fetching metrics summary from database...");
     
-    let agents = get_agent_metrics().await?;
+    let collector = metrics_collector.read().await;
+    let mut all_metrics = Vec::new();
     
-    let total_tasks: u64 = agents.iter().map(|a| a.total_operations).sum();
-    let total_tokens: u64 = agents.iter()
+    // Fetch metrics for each agent type
+    for agent_type in [AgentType::Admin, AgentType::PM, AgentType::Worker, AgentType::Guardian] {
+        let count = collector.count_operations(agent_type).await
+            .map_err(|e| format!("Failed to count operations: {}", e))?;
+        
+        if count > 0 {
+            let metrics = collector.get_aggregate(agent_type).await
+                .map_err(|e| format!("Failed to get aggregate metrics: {}", e))?;
+            
+            all_metrics.push(AgentMetricsResponse {
+                agent_type: agent_type.to_string(),
+                total_operations: metrics.total_operations,
+                success_rate: metrics.success_rate,
+                avg_response_time_ms: metrics.avg_response_time_ms,
+                avg_tokens_used: metrics.avg_tokens_used,
+                json_parse_success_rate: metrics.json_parse_success_rate,
+                validation_pass_rate: metrics.validation_pass_rate,
+                syntax_error_rate: metrics.syntax_error_rate,
+                first_operation_unix: metrics.first_operation
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs(),
+                last_operation_unix: metrics.last_operation
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs(),
+            });
+        }
+    }
+    
+    // Calculate aggregates
+    let total_tasks: u64 = all_metrics.iter().map(|a| a.total_operations).sum();
+    let total_tokens: u64 = all_metrics.iter()
         .map(|a| (a.avg_tokens_used * a.total_operations as f32) as u64)
         .sum();
     
     // Calculate weighted average success rate
-    let weighted_success: f32 = agents.iter()
+    let weighted_success: f32 = all_metrics.iter()
         .map(|a| a.success_rate * a.total_operations as f32)
         .sum();
     let overall_success_rate = if total_tasks > 0 {
@@ -137,15 +189,22 @@ pub async fn get_metrics_summary() -> Result<MetricsSummaryResponse, String> {
         0.0
     };
     
-    // Rough cost estimation (OpenAI pricing: ~$0.002 per 1K tokens)
+    // Cost estimation (OpenAI pricing: ~$0.002 per 1K tokens)
     let total_cost_usd = (total_tokens as f32 / 1000.0) * 0.002;
+    
+    tracing::debug!(
+        "Summary: {} tasks, {:.2}% success rate, {} tokens",
+        total_tasks,
+        overall_success_rate * 100.0,
+        total_tokens
+    );
     
     Ok(MetricsSummaryResponse {
         total_tasks,
         overall_success_rate,
         total_tokens,
         total_cost_usd,
-        agents,
+        agents: all_metrics,
         timestamp_unix: SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -155,20 +214,20 @@ pub async fn get_metrics_summary() -> Result<MetricsSummaryResponse, String> {
 
 /// Export full metrics report as JSON string
 #[tauri::command]
-pub async fn export_metrics_json() -> Result<String, String> {
-    tracing::info!("Exporting metrics as JSON...");
+pub async fn export_metrics_json(
+    metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
+) -> Result<String, String> {
+    tracing::info!("Exporting metrics as JSON from database...");
     
-    // TODO: Call hainet-persona MetricsCollector::export_json()
-    // For now, return summary as JSON
+    let collector = metrics_collector.read().await;
     
-    let summary = get_metrics_summary().await?;
-    
-    serde_json::to_string_pretty(&summary)
-        .map_err(|e| format!("Failed to serialize metrics: {}", e))
+    // Use MetricsCollector's built-in export functionality
+    collector.export_json().await
+        .map_err(|e| format!("Failed to export metrics: {}", e))
 }
 
 /// Start background task to broadcast metrics updates via Tauri events
-pub fn start_metrics_broadcast(app_handle: AppHandle) {
+pub fn start_metrics_broadcast(app_handle: AppHandle, metrics_collector: Arc<RwLock<MetricsCollector>>) {
     tracing::info!("Starting metrics broadcast service...");
     
     tauri::async_runtime::spawn(async move {
@@ -177,18 +236,71 @@ pub fn start_metrics_broadcast(app_handle: AppHandle) {
             tokio::time::sleep(Duration::from_secs(5)).await;
             
             // Fetch latest metrics summary
-            match get_metrics_summary().await {
-                Ok(summary) => {
-                    // Emit event to all frontend listeners
-                    if let Err(e) = app_handle.emit("metrics-updated", summary) {
-                        tracing::warn!("Failed to emit metrics-updated event: {}", e);
-                    } else {
-                        tracing::debug!("Metrics update broadcast successful");
+            let collector = metrics_collector.read().await;
+            let mut all_metrics = Vec::new();
+            
+            // Fetch metrics for each agent type
+            for agent_type in [AgentType::Admin, AgentType::PM, AgentType::Worker, AgentType::Guardian] {
+                if let Ok(count) = collector.count_operations(agent_type).await {
+                    if count > 0 {
+                        if let Ok(metrics) = collector.get_aggregate(agent_type).await {
+                            all_metrics.push(AgentMetricsResponse {
+                                agent_type: agent_type.to_string(),
+                                total_operations: metrics.total_operations,
+                                success_rate: metrics.success_rate,
+                                avg_response_time_ms: metrics.avg_response_time_ms,
+                                avg_tokens_used: metrics.avg_tokens_used,
+                                json_parse_success_rate: metrics.json_parse_success_rate,
+                                validation_pass_rate: metrics.validation_pass_rate,
+                                syntax_error_rate: metrics.syntax_error_rate,
+                                first_operation_unix: metrics.first_operation
+                                    .duration_since(SystemTime::UNIX_EPOCH)
+                                    .unwrap_or(Duration::ZERO)
+                                    .as_secs(),
+                                last_operation_unix: metrics.last_operation
+                                    .duration_since(SystemTime::UNIX_EPOCH)
+                                    .unwrap_or(Duration::ZERO)
+                                    .as_secs(),
+                            });
+                        }
                     }
                 }
-                Err(e) => {
-                    tracing::error!("Failed to fetch metrics for broadcast: {}", e);
-                }
+            }
+            
+            drop(collector); // Release read lock
+            
+            // Calculate summary
+            let total_tasks: u64 = all_metrics.iter().map(|a| a.total_operations).sum();
+            let total_tokens: u64 = all_metrics.iter()
+                .map(|a| (a.avg_tokens_used * a.total_operations as f32) as u64)
+                .sum();
+            let weighted_success: f32 = all_metrics.iter()
+                .map(|a| a.success_rate * a.total_operations as f32)
+                .sum();
+            let overall_success_rate = if total_tasks > 0 {
+                weighted_success / total_tasks as f32
+            } else {
+                0.0
+            };
+            let total_cost_usd = (total_tokens as f32 / 1000.0) * 0.002;
+            
+            let summary = MetricsSummaryResponse {
+                total_tasks,
+                overall_success_rate,
+                total_tokens,
+                total_cost_usd,
+                agents: all_metrics,
+                timestamp_unix: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            };
+            
+            // Emit event to all frontend listeners
+            if let Err(e) = app_handle.emit("metrics-updated", summary) {
+                tracing::warn!("Failed to emit metrics-updated event: {}", e);
+            } else {
+                tracing::debug!("Metrics update broadcast successful");
             }
         }
     });
@@ -197,39 +309,68 @@ pub fn start_metrics_broadcast(app_handle: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hainet_persona::agents::metrics::{MetricsCollector, OperationResult};
     
-    #[tokio::test]
-    async fn test_get_agent_metrics() {
-        let metrics = get_agent_metrics().await.unwrap();
-        assert_eq!(metrics.len(), 3); // Admin, PM, Worker
-        assert!(metrics.iter().any(|m| m.agent_type == "Admin"));
+    async fn create_test_collector() -> Arc<RwLock<MetricsCollector>> {
+        let collector = MetricsCollector::new("sqlite::memory:").await.unwrap();
+        Arc::new(RwLock::new(collector))
+    }
+    
+    async fn add_test_data(collector: &MetricsCollector) {
+        // Add some test operations
+        for i in 0..5 {
+            let result = OperationResult {
+                agent_type: AgentType::Admin,
+                agent_id: crate::agents::AgentId::new(AgentType::Admin, "test".to_string()),
+                config_hash: "test_hash".to_string(),
+                operation_type: "test_op".to_string(),
+                success: true,
+                response_time: Duration::from_millis(100),
+                tokens_used: Some(50),
+                error_message: None,
+                json_parse_success: true,
+                had_syntax_errors: false,
+                validation_passed: true,
+            };
+            collector.record_operation(result).await.unwrap();
+        }
     }
     
     #[tokio::test]
-    async fn test_get_metrics_by_type() {
-        let admin_metrics = get_agent_metrics_by_type("Admin".to_string()).await.unwrap();
-        assert_eq!(admin_metrics.agent_type, "Admin");
+    async fn test_metrics_database_integration() {
+        let collector = create_test_collector().await;
         
-        let invalid = get_agent_metrics_by_type("Invalid".to_string()).await;
-        assert!(invalid.is_err());
-    }
-    
-    #[tokio::test]
-    async fn test_get_metrics_summary() {
-        let summary = get_metrics_summary().await.unwrap();
-        assert!(summary.total_tasks > 0);
-        assert_eq!(summary.agents.len(), 3);
-        assert!(summary.overall_success_rate > 0.0 && summary.overall_success_rate <= 1.0);
-    }
-    
-    #[tokio::test]
-    async fn test_export_metrics_json() {
-        let json = export_metrics_json().await.unwrap();
-        assert!(json.contains("total_tasks"));
-        assert!(json.contains("agents"));
+        // Add test data
+        {
+            let c = collector.read().await;
+            add_test_data(&c).await;
+        }
         
-        // Verify valid JSON
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(parsed["total_tasks"].is_number());
+        // Verify count
+        let count = {
+            let c = collector.read().await;
+            c.count_operations(AgentType::Admin).await.unwrap()
+        };
+        assert_eq!(count, 5);
+    }
+    
+    #[tokio::test]
+    async fn test_aggregation_calculations() {
+        let collector = create_test_collector().await;
+        
+        // Add test data
+        {
+            let c = collector.read().await;
+            add_test_data(&c).await;
+        }
+        
+        // Get aggregate metrics
+        let metrics = {
+            let c = collector.read().await;
+            c.get_aggregate(AgentType::Admin).await.unwrap()
+        };
+        
+        assert_eq!(metrics.total_operations, 5);
+        assert_eq!(metrics.success_rate, 1.0); // All succeeded
     }
 }

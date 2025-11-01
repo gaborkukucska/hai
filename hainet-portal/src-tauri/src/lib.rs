@@ -20,12 +20,16 @@ use tts_handler::{TTSHandler, SynthesisRequest, SynthesisResponse};
 use vision_handler::VisionState;
 use settings_handler::SystemInfo;
 use sysinfo::System;
+use hainet_persona::agents::metrics::MetricsCollector;
 
 /// Global Admin AI Bridge state
 struct AppState {
     admin_bridge: Arc<RwLock<AdminBridge>>,
     tts_handler: Arc<RwLock<TTSHandler>>,
 }
+
+/// Metrics collector state
+type MetricsState = Arc<RwLock<MetricsCollector>>;
 
 /// State for managing video streaming servers
 struct VideoStreamingState(pub Arc<Mutex<HashMap<u16, Arc<Server>>>>);
@@ -113,10 +117,29 @@ pub fn run() {
   let runtime = tokio::runtime::Runtime::new()
       .expect("Failed to create Tokio runtime");
   
-  let admin_bridge = runtime.block_on(async {
-      AdminBridge::new().await
-          .expect("Failed to initialize Admin AI Bridge")
+  let (admin_bridge, metrics_collector) = runtime.block_on(async {
+      let admin_bridge = AdminBridge::new().await
+          .expect("Failed to initialize Admin AI Bridge");
+      
+      // Initialize MetricsCollector with database path
+      let data_dir = dirs::data_dir()
+          .expect("Failed to get data directory")
+          .join("hainet-portal");
+      std::fs::create_dir_all(&data_dir)
+          .expect("Failed to create data directory");
+      
+      let metrics_db_path = data_dir.join("metrics.db");
+      let metrics_collector = MetricsCollector::new(
+          &format!("sqlite://{}?mode=rwc", metrics_db_path.display())
+      )
+      .await
+      .expect("Failed to initialize MetricsCollector");
+      
+      (admin_bridge, metrics_collector)
   });
+  
+  // Wrap MetricsCollector in Arc<RwLock<>> for shared state
+  let metrics_state: MetricsState = Arc::new(RwLock::new(metrics_collector));
   
   // Initialize TTS handler
   let tts_handler = TTSHandler::new();
@@ -141,8 +164,14 @@ pub fn run() {
       
       log::info!("HAI-Net Portal initialized successfully");
       
+      // Get metrics collector from managed state for broadcast service
+      let metrics_for_broadcast = app.state::<MetricsState>().inner().clone();
+      
       // Start metrics broadcast service for real-time updates
-      metrics_handler::start_metrics_broadcast(app.handle().clone());
+      metrics_handler::start_metrics_broadcast(
+          app.handle().clone(),
+          metrics_for_broadcast
+      );
       log::info!("Metrics broadcast service started");
       
       Ok(())
@@ -151,6 +180,7 @@ pub fn run() {
         admin_bridge: Arc::new(RwLock::new(admin_bridge)),
         tts_handler: Arc::new(RwLock::new(tts_handler)),
     })
+    .manage(metrics_state)
     .manage(VisionState(Mutex::new(None)))
     .manage(video_streaming_state)
     .manage(system_info_state)
