@@ -8,6 +8,7 @@ mod video_handler;
 mod settings_handler;
 mod settings_storage;
 mod metrics_handler;
+mod metrics_storage;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -21,6 +22,7 @@ use tts_handler::{TTSHandler, SynthesisRequest, SynthesisResponse};
 use vision_handler::VisionState;
 use settings_handler::SystemInfo;
 use settings_storage::SettingsStorage;
+use metrics_storage::MetricsStorage;
 use sysinfo::System;
 use hainet_persona::agents::metrics::MetricsCollector;
 
@@ -32,6 +34,9 @@ struct AppState {
 
 /// Metrics collector state
 type MetricsState = Arc<RwLock<MetricsCollector>>;
+
+/// Metrics storage state
+type MetricsStorageState = Arc<RwLock<MetricsStorage>>;
 
 /// Settings storage state
 type SettingsState = Arc<RwLock<SettingsStorage>>;
@@ -122,7 +127,7 @@ pub fn run() {
   let runtime = tokio::runtime::Runtime::new()
       .expect("Failed to create Tokio runtime");
   
-  let (admin_bridge, metrics_collector, settings_storage) = runtime.block_on(async {
+  let (admin_bridge, metrics_collector, metrics_storage, settings_storage) = runtime.block_on(async {
       let admin_bridge = AdminBridge::new().await
           .expect("Failed to initialize Admin AI Bridge");
       
@@ -141,6 +146,12 @@ pub fn run() {
       .await
       .expect("Failed to initialize MetricsCollector");
       
+      // Initialize MetricsStorage with database path
+      let metrics_storage_path = data_dir.join("metrics_history.db");
+      let metrics_storage = MetricsStorage::new(metrics_storage_path)
+          .await
+          .expect("Failed to initialize MetricsStorage");
+      
       // Initialize SettingsStorage with database path
       let settings_db_path = data_dir.join("settings.db");
       let settings_storage = SettingsStorage::new(
@@ -149,11 +160,14 @@ pub fn run() {
       .await
       .expect("Failed to initialize SettingsStorage");
       
-      (admin_bridge, metrics_collector, settings_storage)
+      (admin_bridge, metrics_collector, metrics_storage, settings_storage)
   });
   
   // Wrap MetricsCollector in Arc<RwLock<>> for shared state
   let metrics_state: MetricsState = Arc::new(RwLock::new(metrics_collector));
+  
+  // Wrap MetricsStorage in Arc<RwLock<>> for shared state
+  let metrics_storage_state: MetricsStorageState = Arc::new(RwLock::new(metrics_storage));
   
   // Wrap SettingsStorage in Arc<RwLock<>> for shared state
   let settings_state: SettingsState = Arc::new(RwLock::new(settings_storage));
@@ -181,8 +195,10 @@ pub fn run() {
       
       log::info!("HAI-Net Portal initialized successfully");
       
-      // Get metrics collector from managed state for broadcast service
+      // Get metrics collector and storage from managed state
       let metrics_for_broadcast = app.state::<MetricsState>().inner().clone();
+      let metrics_for_snapshot = app.state::<MetricsState>().inner().clone();
+      let storage_for_snapshot = app.state::<MetricsStorageState>().inner().clone();
       
       // Start metrics broadcast service for real-time updates
       metrics_handler::start_metrics_broadcast(
@@ -191,6 +207,13 @@ pub fn run() {
       );
       log::info!("Metrics broadcast service started");
       
+      // Start metrics snapshot recording task for historical analytics
+      metrics_handler::start_metrics_snapshot_task(
+          metrics_for_snapshot,
+          storage_for_snapshot
+      );
+      log::info!("Metrics snapshot recording service started");
+      
       Ok(())
     })
     .manage(AppState {
@@ -198,6 +221,7 @@ pub fn run() {
         tts_handler: Arc::new(RwLock::new(tts_handler)),
     })
     .manage(metrics_state)
+    .manage(metrics_storage_state)
     .manage(settings_state)
     .manage(VisionState(Mutex::new(None)))
     .manage(video_streaming_state)
@@ -228,6 +252,9 @@ pub fn run() {
         metrics_handler::get_agent_metrics_by_type,
         metrics_handler::get_metrics_summary,
         metrics_handler::export_metrics_json,
+        metrics_handler::export_metrics_csv,
+        metrics_handler::get_historical_metrics,
+        metrics_handler::get_metrics_trend,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

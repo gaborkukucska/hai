@@ -10,6 +10,7 @@ use anyhow::Result;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 use hainet_persona::agents::{AgentType, metrics::MetricsCollector};
+use crate::metrics_storage::{MetricsStorage, TimeRange, TrendInterval, TrendDataPoint, MetricsSnapshot};
 
 /// Frontend-compatible agent metrics structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,9 +213,10 @@ pub async fn get_metrics_summary(
     })
 }
 
-/// Export full metrics report as JSON string
+/// Export full metrics report as JSON string with optional time range
 #[tauri::command]
 pub async fn export_metrics_json(
+    _time_range: Option<TimeRange>,
     metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
 ) -> Result<String, String> {
     tracing::info!("Exporting metrics as JSON from database...");
@@ -222,8 +224,136 @@ pub async fn export_metrics_json(
     let collector = metrics_collector.read().await;
     
     // Use MetricsCollector's built-in export functionality
+    // TODO: Integrate time_range filtering when MetricsCollector supports it
     collector.export_json().await
         .map_err(|e| format!("Failed to export metrics: {}", e))
+}
+
+/// Export metrics as CSV format
+#[tauri::command]
+pub async fn export_metrics_csv(
+    time_range: Option<TimeRange>,
+    metrics_storage: State<'_, Arc<RwLock<MetricsStorage>>>,
+) -> Result<String, String> {
+    tracing::info!("Exporting metrics as CSV...");
+    
+    let storage = metrics_storage.read().await;
+    let time_range = time_range.unwrap_or_default();
+    
+    // Get historical metrics
+    let snapshots = storage.get_historical_metrics(None, time_range).await?;
+    
+    // Build CSV
+    let mut csv = String::from("Timestamp,Agent Type,Success Rate,Avg Latency (ms),Total Operations,Successful,Failed,Tokens,Cost (USD)\n");
+    
+    let snapshot_count = snapshots.len();
+    
+    for snapshot in snapshots {
+        csv.push_str(&format!(
+            "{},{},{:.4},{:.2},{},{},{},{},{:.6}\n",
+            snapshot.timestamp,
+            snapshot.agent_type,
+            snapshot.success_rate,
+            snapshot.avg_latency_ms,
+            snapshot.total_operations,
+            snapshot.successful_operations,
+            snapshot.failed_operations,
+            snapshot.tokens_used,
+            snapshot.estimated_cost_usd
+        ));
+    }
+    
+    tracing::debug!("Exported {} CSV rows", snapshot_count);
+    Ok(csv)
+}
+
+/// Get historical metrics snapshots within a time range
+#[tauri::command]
+pub async fn get_historical_metrics(
+    agent_type: Option<String>,
+    time_range: Option<TimeRange>,
+    metrics_storage: State<'_, Arc<RwLock<MetricsStorage>>>,
+) -> Result<Vec<MetricsSnapshot>, String> {
+    tracing::info!("Fetching historical metrics...");
+    
+    let storage = metrics_storage.read().await;
+    let time_range = time_range.unwrap_or_default();
+    
+    storage.get_historical_metrics(agent_type, time_range).await
+}
+
+/// Get trend analysis for a specific agent type
+#[tauri::command]
+pub async fn get_metrics_trend(
+    agent_type: String,
+    interval: String,
+    time_range: Option<TimeRange>,
+    metrics_storage: State<'_, Arc<RwLock<MetricsStorage>>>,
+) -> Result<Vec<TrendDataPoint>, String> {
+    tracing::info!("Computing metrics trend for agent_type={}, interval={}", agent_type, interval);
+    
+    // Parse interval
+    let interval_enum = match interval.as_str() {
+        "hourly" => TrendInterval::Hourly,
+        "daily" => TrendInterval::Daily,
+        "weekly" => TrendInterval::Weekly,
+        _ => return Err(format!("Invalid interval: {}. Must be 'hourly', 'daily', or 'weekly'", interval)),
+    };
+    
+    let storage = metrics_storage.read().await;
+    let time_range = time_range.unwrap_or_default();
+    
+    storage.compute_trend(agent_type, interval_enum, time_range).await
+}
+
+/// Start background task to record periodic metrics snapshots
+pub fn start_metrics_snapshot_task(
+    metrics_collector: Arc<RwLock<MetricsCollector>>,
+    metrics_storage: Arc<RwLock<MetricsStorage>>,
+) {
+    tracing::info!("Starting metrics snapshot recording task...");
+    
+    tauri::async_runtime::spawn(async move {
+        loop {
+            // Record snapshots every 5 minutes
+            tokio::time::sleep(Duration::from_secs(300)).await;
+            
+            tracing::debug!("Recording periodic metrics snapshot...");
+            
+            // Get current metrics for all agent types
+            let collector = metrics_collector.read().await;
+            
+            for agent_type in [AgentType::Admin, AgentType::PM, AgentType::Worker, AgentType::Guardian] {
+                // Check if agent has operations
+                if let Ok(count) = collector.count_operations(agent_type).await {
+                    if count > 0 {
+                        // Get aggregate metrics
+                        if let Ok(metrics) = collector.get_aggregate(agent_type).await {
+                            let snapshot = MetricsSnapshot {
+                                agent_type: agent_type.to_string(),
+                                timestamp: chrono::Utc::now().timestamp(),
+                                success_rate: metrics.success_rate as f64,
+                                avg_latency_ms: metrics.avg_response_time_ms as f64,
+                                total_operations: metrics.total_operations as u32,
+                                successful_operations: (metrics.total_operations as f32 * metrics.success_rate) as u32,
+                                failed_operations: (metrics.total_operations as f32 * (1.0 - metrics.success_rate)) as u32,
+                                tokens_used: (metrics.avg_tokens_used * metrics.total_operations as f32) as u64,
+                                estimated_cost_usd: ((metrics.avg_tokens_used * metrics.total_operations as f32) as f64 / 1000.0) * 0.002,
+                            };
+                            
+                            // Record to storage
+                            let storage = metrics_storage.read().await;
+                            if let Err(e) = storage.record_snapshot(snapshot).await {
+                                tracing::warn!("Failed to record metrics snapshot for {:?}: {}", agent_type, e);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            tracing::debug!("Metrics snapshot recorded successfully");
+        }
+    });
 }
 
 /// Start background task to broadcast metrics updates via Tauri events
