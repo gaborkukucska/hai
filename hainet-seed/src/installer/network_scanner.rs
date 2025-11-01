@@ -93,7 +93,8 @@ impl NetworkScanner {
     /// 2. Derive the subnet range (e.g., 192.168.1.0/24)
     /// 3. Run nmap to scan for devices with port 22 open
     /// 4. Parse the nmap output
-    /// 5. Return discovered devices
+    /// 5. Filter out the local machine
+    /// 6. Return discovered devices
     /// 
     /// # Errors
     /// Returns an error if:
@@ -107,7 +108,8 @@ impl NetworkScanner {
         let local_ip = Self::get_local_ip()
             .context("Failed to determine local IP address")?;
         
-        println!("Local IP: {}", local_ip);
+        let local_ip_str = local_ip.to_string();
+        println!("Local IP: {}", local_ip_str);
         
         // Step 2: Derive subnet
         let subnet = Self::derive_subnet(local_ip)
@@ -134,7 +136,10 @@ impl NetworkScanner {
         
         // Step 4: Parse nmap output
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let devices = Self::parse_nmap_output(&stdout)?;
+        let mut devices = Self::parse_nmap_output(&stdout)?;
+        
+        // Step 5: Filter out the local machine
+        devices.retain(|device| device.ip != local_ip_str);
         
         println!("Discovered {} devices with SSH enabled", devices.len());
         

@@ -386,54 +386,215 @@ impl Installer {
     async fn assess_device_capabilities(&self, devices: &[DeviceCandidate]) -> Result<Vec<DeviceCapabilities>> {
         use std::io::{self, Write};
         
-        info!("\n📋 Please provide SSH credentials for device assessment");
-        
-        print!("Username (default: current user): ");
-        io::stdout().flush()?;
-        let mut username = String::new();
-        io::stdin().read_line(&mut username)?;
-        let username = username.trim();
-        let username = if username.is_empty() {
-            std::env::var("USER").unwrap_or_else(|_| "root".to_string())
-        } else {
-            username.to_string()
-        };
-        
-        print!("Password: ");
-        io::stdout().flush()?;
-        let mut password = String::new();
-        io::stdin().read_line(&mut password)?;
-        let password = password.trim().to_string();
-        
-        let credentials = SSHCredentials { username, password };
-        
         let mut capabilities = Vec::new();
         
+        // First, assess localhost capabilities (no SSH needed)
+        info!("\n💻 Assessing localhost capabilities...");
+        match self.assess_localhost_capabilities().await {
+            Ok(localhost_caps) => {
+                info!("✓ Localhost assessed: {} cores, {:.1}GB RAM, score: {:.1}", 
+                      localhost_caps.cpu_cores, localhost_caps.ram_gb, localhost_caps.score);
+                capabilities.push(localhost_caps);
+            }
+            Err(e) => {
+                info!("⚠️  Failed to assess localhost: {}", e);
+            }
+        }
+        
+        // Then assess remote devices
         for device in devices {
             info!("\n🔍 Assessing device: {}", device.ip);
             
-            let client = SSHClient::new(device.ip.clone(), credentials.clone());
-            
-            // Test connection
-            match client.test_connection() {
-                Ok(_) => {
-                    info!("✓ Connection successful");
-                    
-                    // Assess capabilities
-                    match client.assess_capabilities() {
-                        Ok(caps) => {
-                            capabilities.push(caps);
-                        }
-                        Err(e) => {
-                            info!("⚠️  Failed to assess capabilities: {}", e);
+            // Retry loop for authentication
+            loop {
+                // Prompt for credentials per device (they might differ)
+                print!("Username for {} (default: current user): ", device.ip);
+                io::stdout().flush()?;
+                let mut username = String::new();
+                io::stdin().read_line(&mut username)?;
+                let username = username.trim();
+                let username = if username.is_empty() {
+                    std::env::var("USER").unwrap_or_else(|_| "root".to_string())
+                } else {
+                    username.to_string()
+                };
+                
+                print!("Password for {}@{}: ", username, device.ip);
+                io::stdout().flush()?;
+                let mut password = String::new();
+                io::stdin().read_line(&mut password)?;
+                let password = password.trim().to_string();
+                
+                let credentials = SSHCredentials { 
+                    username: username.clone(), 
+                    password: password.clone() 
+                };
+                
+                // Create client and connect
+                let mut client = SSHClient::new(device.ip.clone(), credentials);
+                
+                // Attempt to connect and authenticate
+                let mut success = false;
+                match client.connect() {
+                    Ok(_) => {
+                        // Authenticate with password
+                        match client.authenticate_password() {
+                            Ok(_) => {
+                                info!("✓ Connected and authenticated successfully");
+                                
+                                // Now assess capabilities
+                                match client.assess_capabilities() {
+                                    Ok(caps) => {
+                                        capabilities.push(caps);
+                                        success = true;
+                                    }
+                                    Err(e) => {
+                                        info!("⚠️  Failed to assess capabilities: {}", e);
+                                    }
+                                }
+                                
+                                // Disconnect
+                                let _ = client.disconnect();
+                            }
+                            Err(e) => {
+                                info!("⚠️  Authentication failed: {}", e);
+                                
+                                // Prompt: retry or skip?
+                                print!("\nRetry with different credentials? (Y/n/s to skip): ");
+                                io::stdout().flush()?;
+                                let mut response = String::new();
+                                io::stdin().read_line(&mut response)?;
+                                let response = response.trim().to_lowercase();
+                                
+                                if response == "s" || response == "skip" {
+                                    info!("⏭️  Skipping device {}", device.ip);
+                                    break; // Skip this device
+                                } else if response == "n" || response == "no" {
+                                    info!("⏭️  Skipping device {}", device.ip);
+                                    break; // Skip this device
+                                }
+                                // Otherwise loop to retry
+                                continue;
+                            }
                         }
                     }
+                    Err(e) => {
+                        info!("⚠️  Connection failed: {}", e);
+                        
+                        // Prompt: retry or skip?
+                        print!("\nRetry connection? (Y/n/s to skip): ");
+                        io::stdout().flush()?;
+                        let mut response = String::new();
+                        io::stdin().read_line(&mut response)?;
+                        let response = response.trim().to_lowercase();
+                        
+                        if response == "s" || response == "skip" {
+                            info!("⏭️  Skipping device {}", device.ip);
+                            break; // Skip this device
+                        } else if response == "n" || response == "no" {
+                            info!("⏭️  Skipping device {}", device.ip);
+                            break; // Skip this device
+                        }
+                        // Otherwise loop to retry
+                        continue;
+                    }
                 }
-                Err(e) => {
-                    info!("⚠️  Connection failed: {}", e);
+                
+                // If successful, break out of retry loop
+                if success {
+                    break;
                 }
             }
         }
+        
+        Ok(capabilities)
+    }
+    
+    /// Assess localhost capabilities without SSH
+    async fn assess_localhost_capabilities(&self) -> Result<DeviceCapabilities> {
+        use std::process::Command;
+        use local_ip_address::local_ip;
+        
+        // Get local IP
+        let local_ip = local_ip()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|_| "localhost".to_string());
+        
+        // Get hostname
+        let hostname = Command::new("hostname")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "localhost".to_string());
+        
+        // Get CPU cores
+        let cpu_cores = num_cpus::get();
+        
+        // Get RAM in GB
+        let ram_gb = SystemTier::get_total_ram_gb()? as f64;
+        
+        // Get GPU info (if available)
+        let gpu = Command::new("lspci")
+            .output()
+            .ok()
+            .and_then(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                stdout.lines()
+                    .find(|line| line.to_lowercase().contains("vga") || 
+                                 line.to_lowercase().contains("3d") ||
+                                 line.to_lowercase().contains("display"))
+                    .map(|s| s.to_string())
+            });
+        
+        // Get available disk space in GB
+        let disk_gb = Command::new("df")
+            .args(&["-BG", "/"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                stdout.lines()
+                    .nth(1)
+                    .and_then(|line| {
+                        line.split_whitespace()
+                            .nth(3)
+                            .and_then(|s| s.trim_end_matches('G').parse::<f64>().ok())
+                    })
+            })
+            .unwrap_or(100.0);
+        
+        // Get OS
+        let os = Command::new("uname")
+            .arg("-s")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        
+        // Get architecture
+        let arch = Command::new("uname")
+            .arg("-m")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        
+        let mut capabilities = DeviceCapabilities {
+            ip: local_ip,
+            hostname,
+            cpu_cores,
+            ram_gb,
+            gpu,
+            disk_gb,
+            os,
+            arch,
+            score: 0.0,
+        };
+        
+        capabilities.calculate_score();
         
         Ok(capabilities)
     }

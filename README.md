@@ -44,51 +44,187 @@ The secondary aim of the wider network is to turn the current socially alienatin
 
 ## 📦 Installation & Quick Start
 
-The easiest way to get started with HAI-Net is to use the `hainet-seed` smart installer. It will check your system, install necessary dependencies like `ollama`, and download the appropriate AI models for your hardware.
+The easiest way to get started with HAI-Net is to use the `hainet-seed` smart installer. It automatically detects your system, installs dependencies (Ollama, Whisper, Piper), downloads appropriate AI models, and can even discover other devices on your network for multi-device mesh deployment.
 
-### 1. Prerequisites
+### Prerequisites
 
+**Minimum Requirements:**
 - **Rust 1.70+**: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- **System Build Tools**:
-  - **Debian/Ubuntu**: `sudo apt update && sudo apt install -y build-essential`
-  - **macOS**: Install Xcode Command Line Tools.
+- **System RAM**: 4GB+ (8GB+ recommended)
+- **Disk Space**: 20GB+ free
 
-### 2. Run the Smart Installer
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt update
+sudo apt install -y build-essential pkg-config libssl-dev \
+    libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+    librsvg2-dev nmap openssh-server
+```
 
-Clone the repository and run the `hainet-seed` installer:
+**macOS:**
+```bash
+xcode-select --install
+brew install nmap
+```
+
+---
+
+## 🚀 Single-Device Installation (Quick Start)
+
+Perfect for testing HAI-Net on one computer:
 
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/gaborkukucska/hai.git
 cd hai
 
-# Run the smart installer
-cargo run --package hainet-seed
+# 2. Run the smart installer
+cargo run --package hainet-seed --bin hainet-seed install
+
+# Follow prompts:
+# - Platform detection ✅ automatic
+# - Ollama installation ✅ automatic
+# - Model download ✅ automatic (based on your RAM)
+# - Whisper STT installation ✅ automatic
+# - Piper TTS installation ✅ automatic
+# - Multi-device mesh? → Answer 'n' for single device
 ```
 
-The installer will guide you through the following steps:
-1.  **Platform Detection**: Identifies your OS and architecture.
-2.  **Dependency Check**: Verifies that `git`, `curl`, and other essential tools are present.
-3.  **Ollama Installation**: If `ollama` is not found, it will be downloaded and installed automatically.
-4.  **Model Download**: Downloads a recommended LLM based on your system's RAM.
-5.  **Configuration**: Sets up the initial configuration for your HAI-Net node.
+The installer will:
+- Detect your platform and hardware (RAM, CPU, GPU)
+- Install Ollama for local AI inference
+- Download appropriate model (gemma2:2b for 4GB RAM, gemma3:12b for 16GB+)
+- Install Whisper.cpp for speech-to-text
+- Install Piper for text-to-speech
+- Configure the system for optimal performance
 
-### 3. Start the HAI-Net Portal (UI)
-
-Once the seed installer completes, you can start the main user interface.
-
+**Verify Installation:**
 ```bash
-# Navigate to the portal directory
+ollama list       # Should show downloaded model
+which whisper     # Should show ~/.local/bin/whisper
+which piper       # Should show ~/.local/bin/piper
+```
+
+**Start the Portal:**
+```bash
 cd hainet-portal
-
-# Install frontend dependencies
 npm install
-
-# Start the portal in development mode
 npm run tauri dev
 ```
 
-This will launch the HAI-Net Portal, where you can interact with your local AI assistant.
+---
+
+## 🌐 Multi-Device Mesh Installation
+
+Set up HAI-Net across multiple devices (desktops, laptops, mobile) to create a distributed computing mesh.
+
+### What You'll Get
+
+```
+Your HAI-Net Mesh:
+├─ 👑 Master Node (e.g., Desktop with RTX3060)
+│  └─ Coordinates mesh, runs primary AI, hosts UI
+├─ ⚙️  Slave Nodes (e.g., MacBooks, Laptops)  
+│  └─ Secondary inference, distributed storage
+└─ 📱 Mobile Nodes (e.g., Android phones)
+   └─ UI-only access (connects to master)
+```
+
+### Prerequisites for Mesh
+
+**On ALL devices:**
+- Same local network (Wi-Fi or Ethernet)
+- SSH server enabled (port 22)
+- User account with sudo privileges
+
+**Enable SSH:**
+```bash
+# Linux
+sudo apt install openssh-server
+sudo systemctl enable --now ssh
+
+# macOS
+sudo systemsetup -setremotelogin on
+
+# Termux (Android)
+pkg install openssh && sshd
+```
+
+### Automated Mesh Setup
+
+```bash
+# Run installer on your most powerful device
+cd hai
+cargo run --package hainet-seed --bin hainet-seed install
+
+# When prompted "Set up multi-device mesh?", answer 'Y'
+# The installer will:
+# 1. Scan local network for SSH-enabled devices
+# 2. Assess each device's capabilities (CPU, RAM, GPU)
+# 3. Recommend master node (highest capability score)
+# 4. Assign roles (Master, Slave, UI-Only for mobile)
+# 5. Generate SSH keys for secure deployment
+# 6. Display deployment plan
+```
+
+**Capability Scoring:**
+- Highest score = Master (coordination, primary AI)
+- ≥2GB RAM = Slave (compute, storage)
+- <2GB RAM = UI-Only (mobile access point)
+
+### Current Mesh Deployment Status
+
+**✅ Fully Working:**
+- Network scanning (nmap-based device discovery)
+- SSH authentication (password + key-based)
+- Device capability assessment (CPU, RAM, GPU, disk)
+- Automatic role assignment (Master/Slave/UI-Only)
+- SSH key generation (Ed25519)
+
+**⚠️ Coming in Phase 7:**
+- Automatic binary deployment to remote devices
+- Service configuration (systemd/launchd)
+- Remote mesh initialization
+
+**Current Workaround:**
+Manually install HAI-Net on each device following single-device instructions, then configure `hainet.toml`:
+
+```toml
+[network]
+role = "master"  # Or "slave"
+master_ip = "192.168.1.10"  # IP of master node (slaves only)
+```
+
+**📖 Detailed Instructions:**  
+See [docs/INSTALLATION_GUIDE.md](docs/INSTALLATION_GUIDE.md) for comprehensive mesh setup, troubleshooting, and advanced configuration.
+
+---
+
+## ⚙️ Configuration
+
+Edit `hainet.toml` in the project root:
+
+```toml
+[ai]
+provider = "ollama"
+endpoint = "http://localhost:11434"
+
+[ai.admin]
+model_size = "4B"
+temperature = 0.7
+
+[ai.guardian]
+model_size = "7B"  # Larger model for ethical oversight
+temperature = 0.2
+
+[network]
+role = "standalone"  # Or "master", "slave"
+port = 8080
+
+[storage]
+base_path = "~/.hainet/storage"
+max_cache_gb = 10
+```
 
 ---
 

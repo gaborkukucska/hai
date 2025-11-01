@@ -46,15 +46,27 @@ pub async fn ensure_nmap_installed(platform: &Platform) -> Result<()> {
 
 /// Check if nmap is installed and accessible.
 fn is_nmap_installed() -> bool {
-    // Try running 'nmap --version'
-    let result = Command::new("nmap")
-        .arg("--version")
-        .output();
+    // Try multiple common locations for nmap
+    let nmap_locations = vec![
+        "nmap",                    // In PATH
+        "/usr/bin/nmap",           // Standard Linux location
+        "/usr/local/bin/nmap",     // macOS/manual install
+        "/opt/homebrew/bin/nmap",  // Homebrew on M1 Macs
+    ];
     
-    match result {
-        Ok(output) => output.status.success(),
-        Err(_) => false,
+    for location in nmap_locations {
+        let result = Command::new(location)
+            .arg("--version")
+            .output();
+        
+        if let Ok(output) = result {
+            if output.status.success() {
+                return true;
+            }
+        }
     }
+    
+    false
 }
 
 #[cfg(test)]

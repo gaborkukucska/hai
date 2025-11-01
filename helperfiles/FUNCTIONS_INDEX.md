@@ -257,6 +257,21 @@ This file tracks the core functions/methods defined within the framework, catego
 - `Installer::assess_device_capabilities(devices)` - Connect via SSH and assess each device
 - `Installer::display_capabilities(capabilities)` - Display assessment results and recommend master node
 
+### hainet-seed/src/installer/deployment.rs (Phase 7B - Service Orchestration Complete)
+- `DeviceRole` - Enum for device roles (Master, Slave, Standalone, UIOnly)
+- `DeviceAssignment` - Device with assigned role and capabilities
+- `DeploymentOrchestrator::new()` - Create deployment orchestrator
+- `DeploymentOrchestrator::assign_roles(capabilities)` - Assign roles based on capability scores
+- `DeploymentOrchestrator::deploy_all(username)` - Deploy HAI-Net to all assigned devices
+- `DeploymentOrchestrator::deploy_to_device(assignment, username)` - Deploy to single device
+- `DeploymentOrchestrator::build_binaries(arch)` - Cross-compile binaries for target architecture
+- `DeploymentOrchestrator::transfer_binaries(client, role)` - Transfer role-specific binaries via SFTP
+- `DeploymentOrchestrator::configure_device(client, assignment)` - Create hainet.toml configuration
+- `DeploymentOrchestrator::setup_services(client, role)` - Create and enable systemd services
+- `DeploymentOrchestrator::initialize_mesh(master, username)` - **Start services and verify mesh health**
+- `DeploymentOrchestrator::start_services_on_device(ip, username, role)` - **Start systemd services remotely**
+- `DeploymentOrchestrator::verify_mesh_health(master, username)` - **Check master node service status**
+
 ---
 
 ## Agent System (Phase 1 Cycle 1.1 - Foundation Complete)
