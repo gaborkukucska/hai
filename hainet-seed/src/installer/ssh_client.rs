@@ -608,4 +608,130 @@ mod tests {
         // Should not be connected initially
         assert!(!client.is_connected());
     }
+
+    // A mock SSH client for testing the deployment orchestrator.
+    #[derive(Clone)]
+    pub struct MockSSHClient {
+        pub ip: String,
+        connected: bool,
+        commands: std::collections::HashMap<String, String>,
+        mock_capabilities: Option<DeviceCapabilities>,
+    }
+
+    impl MockSSHClient {
+        pub fn new(ip: String) -> Self {
+            Self {
+                ip,
+                connected: false,
+                commands: std::collections::HashMap::new(),
+                mock_capabilities: None,
+            }
+        }
+
+        #[allow(dead_code)]
+        pub fn expect_command(&mut self, command: &str, output: &str) {
+            self.commands.insert(command.to_string(), output.to_string());
+        }
+
+        #[allow(dead_code)]
+        pub fn set_capabilities(&mut self, caps: DeviceCapabilities) {
+            self.mock_capabilities = Some(caps);
+        }
+    }
+
+    impl SSHClientTrait for MockSSHClient {
+        fn connect(&mut self) -> Result<()> {
+            self.connected = true;
+            Ok(())
+        }
+
+        fn authenticate_password(&mut self) -> Result<()> {
+            if !self.connected {
+                bail!("Not connected");
+            }
+            Ok(())
+        }
+
+        fn authenticate_pubkey(&mut self, _private_key_path: &Path, _passphrase: Option<&str>) -> Result<()> {
+            if !self.connected {
+                bail!("Not connected");
+            }
+            Ok(())
+        }
+
+        fn disconnect(&mut self) -> Result<()> {
+            self.connected = false;
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            self.connected
+        }
+
+        fn assess_capabilities(&self) -> Result<DeviceCapabilities> {
+            if !self.connected {
+                bail!("Not connected");
+            }
+            self.mock_capabilities.clone().context("Mock capabilities not set")
+        }
+
+        fn execute_command(&self, command: &str) -> Result<String> {
+            if !self.connected {
+                bail!("Not connected");
+            }
+            self.commands.get(command).cloned().context(format!("Unexpected command: {}", command))
+        }
+
+        fn upload_file(&self, _local_path: &Path, _remote_path: &str) -> Result<()> {
+            if !self.connected {
+                bail!("Not connected");
+            }
+            Ok(())
+        }
+
+        fn create_remote_directory(&self, _path: &str) -> Result<()> {
+            if !self.connected {
+                bail!("Not connected");
+            }
+            Ok(())
+        }
+
+        fn set_permissions(&self, _path: &str, _mode: u32) -> Result<()> {
+            if !self.connected {
+                bail!("Not connected");
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_mock_ssh_client() {
+        let mut mock_client = MockSSHClient::new("127.0.0.1".to_string());
+        assert!(!mock_client.is_connected());
+
+        mock_client.connect().unwrap();
+        assert!(mock_client.is_connected());
+
+        mock_client.expect_command("hostname", "mock-device");
+        let hostname = mock_client.execute_command("hostname").unwrap();
+        assert_eq!(hostname, "mock-device");
+
+        let caps = DeviceCapabilities {
+            ip: "127.0.0.1".to_string(),
+            hostname: "mock-device".to_string(),
+            cpu_cores: 4,
+            ram_gb: 8.0,
+            gpu: None,
+            disk_gb: 100.0,
+            os: "Linux".to_string(),
+            arch: "x86_64".to_string(),
+            score: 61.0,
+        };
+        mock_client.set_capabilities(caps.clone());
+        let assessed_caps = mock_client.assess_capabilities().unwrap();
+        assert_eq!(assessed_caps.hostname, caps.hostname);
+
+        mock_client.disconnect().unwrap();
+        assert!(!mock_client.is_connected());
+    }
 }

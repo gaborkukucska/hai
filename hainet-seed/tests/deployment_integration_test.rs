@@ -71,7 +71,7 @@ impl SSHClientTrait for MockSSHClient {
     }
 
     fn set_permissions(&self, path: &str, mode: u32) -> Result<()> {
-        self.commands.lock().unwrap().push(format!("chmod {} {}", mode, path));
+        self.commands.lock().unwrap().push(format!("chmod {:o} {}", mode, path));
         Ok(())
     }
 }
@@ -130,14 +130,6 @@ async fn test_deployment_all() {
         }
     };
 
-    // Create dummy binary files for the test
-    let target_dir = Path::new("target/release");
-    std::fs::create_dir_all(target_dir).unwrap();
-    std::fs::write(target_dir.join("hainet-core"), "dummy content").unwrap();
-    std::fs::write(target_dir.join("hainet-chain"), "dummy content").unwrap();
-    std::fs::write(target_dir.join("hainet-bridge"), "dummy content").unwrap();
-    std::fs::write(target_dir.join("hainet-portal"), "dummy content").unwrap();
-
     let timeout = time::Duration::from_millis(300000);
     let result = tokio::time::timeout(timeout, orchestrator.deploy_all("testuser", client_factory)).await;
     assert!(result.is_ok());
@@ -150,7 +142,4 @@ async fn test_deployment_all() {
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo mv /tmp/hainet.toml /etc/hainet/hainet.toml")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo systemctl enable hainet-core.service")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo systemctl start hainet-core.service")));
-
-    // Clean up dummy files
-    std::fs::remove_dir_all(target_dir).unwrap();
 }
