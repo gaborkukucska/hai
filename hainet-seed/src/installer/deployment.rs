@@ -6,7 +6,6 @@ use anyhow::{Result, bail, Context};
 use crate::installer::ssh_client::{DeviceCapabilities, SSHCredentials, SSHClientTrait};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::fs;
 
 /// Device role in the HAI-Net mesh
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -573,8 +572,6 @@ impl DeploymentOrchestrator {
     /// Transfer binaries to remote device based on role
     #[cfg(not(test))]
     fn transfer_binaries<C: SSHClientTrait>(&self, client: &C, role: &DeviceRole) -> Result<()> {
-        use std::path::PathBuf;
-        
         // Determine which binaries to transfer based on role
         let binaries = match role {
             DeviceRole::Master => vec![

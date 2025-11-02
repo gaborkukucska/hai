@@ -8,7 +8,7 @@ use std::fs;
 use std::process::Command;
 use std::net::TcpStream;
 use ssh2::Session;
-use std::io::{Read, Write};
+use std::io::Read;
 
 /// SSH key pair manager
 pub struct SSHKeyManager {
