@@ -57,7 +57,7 @@ pub use crate::prompts::AgentType;
 #[async_trait::async_trait]
 pub trait Agent: Send + Sync {
     /// Get agent's unique identifier
-    fn id(&self) -> &AgentId;
+    fn id(&self) -> &crate::messaging::AgentId;
     
     /// Process incoming message
     async fn process_message(&mut self, message: crate::messaging::Message) -> Result<()>;

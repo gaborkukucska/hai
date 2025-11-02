@@ -91,7 +91,7 @@ impl PMAgent {
     /// Start PM agent lifecycle
     /// 
     /// Startup → Idle → Planning → Managing
-    pub async fn start(&mut self) -> Result<()> {
+    pub async fn initialize_and_plan(&mut self) -> Result<()> {
         // Transition from Startup to Idle (PM agents must go through Idle first)
         self.state_machine.transition(
             AgentState::Idle,
@@ -536,6 +536,33 @@ impl PMAgent {
     /// Get reference to task graph (for testing)
     pub fn task_graph(&self) -> Option<&TaskGraph> {
         self.task_graph.as_ref()
+    }
+}
+
+#[async_trait::async_trait]
+impl super::Agent for PMAgent {
+    fn id(&self) -> &AgentId {
+        &self.id
+    }
+
+    async fn start(&mut self) -> Result<()> {
+        // This is now the official start method
+        // The existing `start` method will be renamed to `initialize_and_plan`
+        // and called from here.
+        self.initialize_and_plan().await
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        tracing::info!("PM agent {} stopping.", self.id.name);
+        // Add any cleanup logic here
+        Ok(())
+    }
+
+    async fn process_message(&mut self, message: crate::messaging::Message) -> Result<()> {
+        // PM agents can receive messages from Admin or Workers
+        // This is a placeholder for more complex message handling
+        tracing::info!("PM agent {} received message: {:?}", self.id.name, message.content);
+        Ok(())
     }
 }
 
