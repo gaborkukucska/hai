@@ -106,6 +106,8 @@ impl AgentStateMachine {
             // From Startup
             (Startup, Idle) => true,
             (Startup, Conversation) => true, // Admin AI
+            (Startup, Planning) => true, // Admin or PM AI
+            (Startup, Monitoring) => true, // Admin AI
             (Startup, Error) => true,
             
             // From Idle (Worker agents)

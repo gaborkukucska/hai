@@ -318,6 +318,20 @@ This file tracks the core functions/methods defined within the framework, catego
 - `Agent::start()` - Start agent main loop
 - `Agent::stop()` - Stop agent gracefully
 
+### hainet-persona/src/agents/pm.rs
+- `PMAgent::new(id, context)` - Create a new PM agent
+
+### hainet-persona/src/agents/worker.rs
+- `WorkerAgent::new(id, context)` - Create a new Worker agent
+
+### hainet-persona/src/agents/templates.rs
+- `WorkerTemplate::file_worker()` - Create a FileWorker template
+- `WorkerTemplate::code_worker()` - Create a CodeWorker template
+- `WorkerTemplate::network_worker()` - Create a NetworkWorker template
+- `WorkerTemplate::research_worker()` - Create a ResearchWorker template
+- `WorkerTemplate::all_templates()` - Get all available worker templates
+- `WorkerTemplate::select_for_task(task_description)` - Select the most appropriate worker template for a task description
+
 ### hainet-persona/src/agents/mod.rs
 - `AgentContext::new(message_bus, prompt_manager, mcp_client, guardian)` - Create shared context
 

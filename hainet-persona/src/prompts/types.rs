@@ -72,23 +72,7 @@ pub enum WorkerType {
     Monitor,
 }
 
-/// Agent identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct AgentId {
-    pub agent_type: AgentType,
-    pub name: String,
-    pub instance_id: Uuid,
-}
-
-impl AgentId {
-    pub fn new(agent_type: AgentType, name: String) -> Self {
-        Self {
-            agent_type,
-            name,
-            instance_id: Uuid::new_v4(),
-        }
-    }
-}
+pub use crate::messaging::AgentId;
 
 /// Prompt template loaded from TOML
 #[derive(Debug, Clone, Deserialize)]

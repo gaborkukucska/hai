@@ -1608,13 +1608,35 @@ key_features = [
 test_status = "Existing tests pass"
 phase_completion = "Phase 7: 100% complete"
 
+# Completed cycles
+[[completed_cycles]]
+id = "1.2"
+name = "Enhanced Agent State Machines"
+completion_date = "2025-11-01"
+loc = 200 # Approximate LOC change
+tests = 0 # No new tests
+goal = "Add new states (Conversation, Monitoring, Planning, Managing) and PM/Worker agent types"
+files_created = [
+    "hainet-persona/src/agents/pm.rs",
+    "hainet-persona/src/agents/worker.rs",
+]
+files_modified = [
+    "hainet-persona/src/agents/state.rs",
+]
+key_features = [
+    "Added new states to the agent state machine.",
+    "Created placeholder structs for PM and Worker agents.",
+    "Created default worker templates.",
+]
+test_status = "Existing tests pass"
+
 # Detailed phase/cycle implementation plans
 
 # Phase 1.2: Enhanced Agent State Machines (NEXT UP)
 [phase_details.phase_1_2]
 id = "1.2"
 name = "Enhanced Agent State Machines"
-status = "ready_to_start"
+status = "complete"
 goal = "Add new states (Conversation, Monitoring, Planning, Managing) and PM/Worker agent types"
 estimated_tokens = 40000
 estimated_loc = 1200

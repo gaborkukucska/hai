@@ -352,14 +352,8 @@ impl AdminAgent {
         prompt_context.variables.insert("intent_type".to_string(), serde_json::json!(format!("{:?}", intent.intent_type)));
         prompt_context.variables.insert("entities".to_string(), serde_json::json!(format!("{:?}", intent.entities)));
         
-        // Create prompts::types::AgentId from messaging::types::AgentId
-        let prompt_agent_id = crate::prompts::types::AgentId::new(
-            self.id.agent_type,
-            self.id.name.clone()
-        );
-        
         let system_prompt = prompt_manager.get_prompt(
-            &prompt_agent_id,
+            &self.id,
             AgentState::Planning,
             &prompt_context
         ).await?;
@@ -610,7 +604,7 @@ impl AdminAgent {
         }
         
         // Start PM agent (transitions to Planning → Managing)
-        pm_agent.start().await?;
+        pm_agent.initialize_and_plan().await?;
         
         // In a real implementation, PM agent would run in a separate task
         // For now, we'll store the PM agent reference (simplified)
@@ -635,14 +629,8 @@ impl AdminAgent {
         let mut prompt_context = PromptContext::default();
         prompt_context.current_request = Some(user_input.to_string());
         
-        // Create prompts::types::AgentId from messaging::types::AgentId
-        let prompt_agent_id = crate::prompts::types::AgentId::new(
-            self.id.agent_type,
-            self.id.name.clone()
-        );
-        
         let system_prompt = prompt_manager.get_prompt(
-            &prompt_agent_id,
+            &self.id,
             AgentState::Conversation,
             &prompt_context
         ).await?;
@@ -722,7 +710,7 @@ struct ProjectPlan {
 
 #[async_trait::async_trait]
 impl Agent for AdminAgent {
-    fn id(&self) -> &AgentId {
+    fn id(&self) -> &crate::messaging::AgentId {
         &self.id
     }
     
