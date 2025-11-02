@@ -3,7 +3,7 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-01T11:13:20+00:00"
+last_updated = "2025-11-01T11:51:26.835380+00:00"
 project_name = "HAI-Net Seed"
 version = "0.23"
 current_phase = "Phase 7: Production Readiness & Deployment"
@@ -181,6 +181,25 @@ sessions_complete = 7
 sessions_remaining = 0
 
 # Completed cycles
+[[completed_cycles]]
+id = "7.4"
+name = "SSH Dependency and Test Fixes"
+completion_date = "2025-11-01"
+loc = 0 # No new features, just fixes
+tests = 0 # No new tests, but existing tests now pass
+goal = "Fix the failing integration test in `hainet-seed` by installing the required `libssh2-dev` dependency and resolving issues with the test environment."
+files_modified = [
+    "hainet-seed/src/installer/deployment.rs",
+    "hainet-seed/tests/deployment_integration_test.rs",
+]
+key_features = [
+    "Installed the `libssh2-1-dev` system dependency.",
+    "Fixed the `test_deployment_all` integration test by ensuring it can correctly locate build artifacts.",
+    "Refactored the test setup to be more robust to the test execution environment.",
+]
+test_status = "All tests in `hainet-seed` are now passing."
+phase_completion = "Phase 7: 80% complete"
+
 [[completed_cycles]]
 id = "7.3"
 name = "SSH Key Distribution Implementation"

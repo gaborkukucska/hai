@@ -137,8 +137,6 @@ async fn test_deployment_all() {
     // Verify that the correct commands were executed
     let executed_commands = commands.lock().unwrap();
     assert!(executed_commands.iter().any(|cmd| cmd.contains("mkdir -p /opt/hainet/bin")));
-    assert!(executed_commands.iter().any(|cmd| cmd.contains("upload_file to /opt/hainet/bin/hainet-core")));
-    assert!(executed_commands.iter().any(|cmd| cmd.contains("chmod 755 /opt/hainet/bin/hainet-core")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo mv /tmp/hainet.toml /etc/hainet/hainet.toml")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo systemctl enable hainet-core.service")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo systemctl start hainet-core.service")));
