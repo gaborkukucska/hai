@@ -5,6 +5,8 @@
 use anyhow::{Result, bail, Context};
 use crate::installer::ssh_client::{DeviceCapabilities, SSHCredentials, SSHClientTrait};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::fs;
 
 /// Device role in the HAI-Net mesh
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -534,21 +536,23 @@ impl DeploymentOrchestrator {
         use std::process::Command;
         
         // Map architecture to Rust target triple
-        let target = match arch {
-            "x86_64" => "x86_64-unknown-linux-gnu",
-            "aarch64" => "aarch64-unknown-linux-gnu",
-            "armv7l" => "armv7-unknown-linux-gnueabihf",
-            _ => {
-                println!("⚠️  Unknown architecture {}, using host architecture", arch);
-                return Ok(()); // Build for host architecture
-            }
-        };
+        let target = get_target_triple(arch);
+
+        if target.is_none() {
+            println!("⚠️  Unknown architecture {}, using host architecture", arch);
+            return Ok(()); // Build for host architecture
+        }
+        let target = target.unwrap();
         
         println!("📦 Building HAI-Net for target: {}", target);
+
+        // Find workspace root
+        let workspace_root = find_workspace_root().context("Failed to find workspace root")?;
         
         // Build all required packages in release mode
         let status = Command::new("cargo")
-            .args(&["build", "--release", "--target", target])
+            .current_dir(&workspace_root)
+            .args(&["build", "--release", "--target", target, "--workspace"])
             .status()
             .context("Failed to execute cargo build")?;
         
@@ -593,10 +597,12 @@ impl DeploymentOrchestrator {
         };
         
         // Get target directory (TODO: use actual target architecture)
-        let target_dir = PathBuf::from("target/release");
+        let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
+        let target_dir = workspace_root.join("target/release");
         
         for binary_name in binaries {
             let local_path = target_dir.join(binary_name);
+            println!("[TRANSFER] Looking for binary at: {:?}", local_path);
             
             if !local_path.exists() {
                 println!("⚠️  Binary {} not found, skipping", binary_name);
@@ -754,6 +760,33 @@ pub struct DeploymentSummary {
     pub master_count: usize,
     pub slave_count: usize,
     pub standalone_count: usize,
+}
+
+/// Find workspace root from current directory
+pub fn find_workspace_root() -> Result<PathBuf> {
+    let mut current_dir = std::env::current_dir()?;
+    loop {
+        let cargo_toml_path = current_dir.join("Cargo.toml");
+        if cargo_toml_path.exists() {
+            let content = fs::read_to_string(&cargo_toml_path)?;
+            if content.contains("[workspace]") {
+                return Ok(current_dir);
+            }
+        }
+        if !current_dir.pop() {
+            bail!("Could not find workspace root");
+        }
+    }
+}
+
+/// Map architecture to Rust target triple
+fn get_target_triple(arch: &str) -> Option<&'static str> {
+    match arch {
+        "x86_64" => Some("x86_64-unknown-linux-gnu"),
+        "aarch64" => Some("aarch64-unknown-linux-gnu"),
+        "armv7l" => Some("armv7-unknown-linux-gnueabihf"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
