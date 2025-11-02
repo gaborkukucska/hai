@@ -116,6 +116,18 @@ fn test_role_assignment() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_deployment_all() {
+    // Create a dummy binary file for the test to find
+    let workspace_root = hainet_seed::installer::deployment::find_workspace_root().unwrap();
+    let target_dir = workspace_root.join("target/release");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    let dummy_binaries = ["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"];
+    for binary in &dummy_binaries {
+        let path = target_dir.join(binary);
+        if !path.exists() {
+            std::fs::File::create(&path).unwrap();
+        }
+    }
+
     let mut orchestrator = DeploymentOrchestrator::new();
     let capabilities = create_mock_capabilities(2);
     orchestrator.assign_roles(capabilities).unwrap();
@@ -131,12 +143,13 @@ async fn test_deployment_all() {
     };
 
     let timeout = time::Duration::from_millis(300000);
-    let result = tokio::time::timeout(timeout, orchestrator.deploy_all("testuser", client_factory)).await;
+    let result = tokio::time::timeout(timeout, orchestrator.deploy_all("testuser", client_factory)).await.unwrap();
     assert!(result.is_ok());
 
     // Verify that the correct commands were executed
     let executed_commands = commands.lock().unwrap();
-    assert!(executed_commands.iter().any(|cmd| cmd.contains("mkdir -p /opt/hainet/bin")));
+    assert!(executed_commands.iter().any(|cmd| cmd == "mkdir -p /opt/hainet/bin"));
+    assert!(executed_commands.iter().any(|cmd| cmd.starts_with("upload_file to /opt/hainet/bin/hainet-core")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo mv /tmp/hainet.toml /etc/hainet/hainet.toml")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo systemctl enable hainet-core.service")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo systemctl start hainet-core.service")));

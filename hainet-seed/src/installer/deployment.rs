@@ -764,19 +764,20 @@ pub struct DeploymentSummary {
 
 /// Find workspace root from current directory
 pub fn find_workspace_root() -> Result<PathBuf> {
-    let mut current_dir = std::env::current_dir()?;
-    loop {
-        let cargo_toml_path = current_dir.join("Cargo.toml");
-        if cargo_toml_path.exists() {
-            let content = fs::read_to_string(&cargo_toml_path)?;
-            if content.contains("[workspace]") {
-                return Ok(current_dir);
-            }
-        }
-        if !current_dir.pop() {
-            bail!("Could not find workspace root");
-        }
+    let output = std::process::Command::new("cargo")
+        .arg("locate-project")
+        .arg("--workspace")
+        .arg("--message-format=plain")
+        .output()
+        .context("Failed to run `cargo locate-project`")?;
+
+    if !output.status.success() {
+        bail!("`cargo locate-project` failed: {}", String::from_utf8_lossy(&output.stderr));
     }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let root_path = PathBuf::from(stdout.trim()).parent().unwrap().to_path_buf();
+    Ok(root_path)
 }
 
 /// Map architecture to Rust target triple
