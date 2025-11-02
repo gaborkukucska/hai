@@ -268,6 +268,8 @@ This file tracks the core functions/methods defined within the framework, catego
 - `DeploymentOrchestrator::initialize_mesh(master, username, client_factory)` - **Start services and verify mesh health**
 - `DeploymentOrchestrator::start_services_on_device(ip, username, role, client_factory)` - **Start systemd services remotely**
 - `DeploymentOrchestrator::verify_mesh_health(master, username, client_factory)` - **Check master node service status**
+- `get_target_triple(arch)` - Maps architecture name to Rust target triple
+- `find_workspace_root()` - Finds the workspace root from the current directory
 
 ---
 
