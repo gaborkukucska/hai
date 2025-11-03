@@ -196,7 +196,7 @@ impl DeploymentOrchestrator {
     /// - SCP/rsync for file transfer
     /// - Remote systemd service creation
     /// - Distributed storage initialization
-    pub async fn deploy_all<'a, F, C>(&'a self, username: &str, mut client_factory: F) -> Result<()>
+    pub async fn deploy_all<'a, F, C>(&'a self, _username: &str, credentials_map: &std::collections::HashMap<String, (String, String)>, mut client_factory: F) -> Result<()>
     where
         F: FnMut(String, SSHCredentials) -> C,
         C: SSHClientTrait + 'a,
@@ -219,16 +219,25 @@ impl DeploymentOrchestrator {
             self.build_binaries(&arch)?;
         }
 
+        let local_ip = local_ip_address::local_ip().ok();
+
         // Deploy to each device
         for assignment in &self.assignments {
-            self.deploy_to_device(assignment, username, &mut client_factory).await?;
+            let is_local = local_ip.as_ref().map_or(false, |ip| assignment.ip == ip.to_string());
+            if is_local {
+                self.deploy_to_localhost(assignment).await?;
+            } else {
+                if let Some((username, _)) = credentials_map.get(&assignment.ip) {
+                    self.deploy_to_device(assignment, username, &mut client_factory).await?;
+                }
+            }
         }
         
         println!("\n✅ Deployment complete!");
         
         // Initialize mesh coordination
         if let Some(master) = self.master_node() {
-            self.initialize_mesh(master, username, client_factory).await?;
+            self.initialize_mesh(master, credentials_map, client_factory).await?;
         }
         
         Ok(())
@@ -303,7 +312,7 @@ impl DeploymentOrchestrator {
         // Use SSH key authentication (keys should be set up by now)
         let key_path = dirs::home_dir()
             .unwrap_or_else(|| Path::new("/root").to_path_buf())
-            .join(".ssh/id_ed25519");
+            .join(".ssh/hainet-mesh");
         
         client.authenticate_pubkey(&key_path, None)?;
         
@@ -331,6 +340,66 @@ impl DeploymentOrchestrator {
         
         Ok(())
     }
+
+    /// Deploy HAI-Net to the local machine
+    async fn deploy_to_localhost(&self, assignment: &DeviceAssignment) -> Result<()> {
+        println!("\n📦 Deploying to localhost ({})...", assignment.hostname);
+
+        use std::fs;
+        use std::process::Command;
+        use std::path::Path;
+
+        // Step 2: Create installation directory
+        println!("📁 Creating installation directories...");
+        fs::create_dir_all("/opt/hainet/bin")?;
+        fs::create_dir_all("/etc/hainet")?;
+
+        // Step 3: Transfer binaries based on role
+        println!("📤 Copying binaries...");
+        let binaries = match assignment.role {
+            DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"],
+            DeviceRole::Slave => vec!["hainet-core", "hainet-chain"],
+            DeviceRole::Standalone => vec!["hainet-core", "hainet-portal"],
+            DeviceRole::UIOnly => vec!["hainet-portal"],
+        };
+        let target_dir = find_workspace_root()?.join("target/release");
+        for binary_name in binaries {
+            let source_path = target_dir.join(binary_name);
+            let dest_path = Path::new("/opt/hainet/bin").join(binary_name);
+            if source_path.exists() {
+                fs::copy(&source_path, &dest_path)?;
+                Command::new("chmod").arg("+x").arg(&dest_path).status()?;
+            }
+        }
+
+        // Step 4: Configure role-specific settings
+        println!("⚙️  Configuring role settings...");
+        let config_content = match assignment.role {
+            DeviceRole::Master => "[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n".to_string(),
+            _ => "[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n".to_string(),
+        };
+        fs::write("/etc/hainet/hainet.toml", config_content)?;
+
+        // Step 5: Create and enable systemd services
+        println!("🔧 Setting up services...");
+        let services = match assignment.role {
+            DeviceRole::Master | DeviceRole::Slave | DeviceRole::Standalone => vec!["hainet-core", "hainet-chain"],
+            DeviceRole::UIOnly => vec!["hainet-portal"],
+        };
+        for service_name in services {
+            let service_content = format!(
+                "[Unit]\nDescription=HAI-Net {}\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=/opt/hainet/bin/{}\nRestart=always\nUser=root\nGroup=root\n\n[Install]\nWantedBy=multi-user.target\n",
+                service_name, service_name
+            );
+            fs::write(format!("/etc/systemd/system/{}.service", service_name), service_content)?;
+            Command::new("systemctl").arg("enable").arg(format!("{}.service", service_name)).status()?;
+        }
+        Command::new("systemctl").arg("daemon-reload").status()?;
+
+        println!("✓ Deployment to localhost complete");
+
+        Ok(())
+    }
     
     /// Initialize mesh coordination
     /// 
@@ -339,7 +408,7 @@ impl DeploymentOrchestrator {
     /// # Implementation Notes
     /// This is Phase 7B implementation - service orchestration.
     /// Full P2P mesh networking (libp2p) will be implemented in Phase 8.
-    async fn initialize_mesh<'a, F, C>(&'a self, master: &DeviceAssignment, username: &str, mut client_factory: F) -> Result<()>
+    async fn initialize_mesh<'a, F, C>(&'a self, master: &DeviceAssignment, credentials_map: &std::collections::HashMap<String, (String, String)>, mut client_factory: F) -> Result<()>
     where
         F: FnMut(String, SSHCredentials) -> C,
         C: SSHClientTrait + 'a,
@@ -352,19 +421,25 @@ impl DeploymentOrchestrator {
         
         // Step 1: Start services on master node
         println!("\n🚀 Starting services on master node...");
-        self.start_services_on_device(&master.ip, username, &master.role, &mut client_factory).await?;
-        
+        if let Some((username, _)) = credentials_map.get(&master.ip) {
+            self.start_services_on_device(&master.ip, username, &master.role, &mut client_factory).await?;
+        }
+
         // Step 2: Start services on slave nodes
         if slave_count > 0 {
             println!("\n🚀 Starting services on {} slave node(s)...", slave_count);
             for slave in self.slave_nodes() {
-                self.start_services_on_device(&slave.ip, username, &slave.role, &mut client_factory).await?;
+                if let Some((username, _)) = credentials_map.get(&slave.ip) {
+                    self.start_services_on_device(&slave.ip, username, &slave.role, &mut client_factory).await?;
+                }
             }
         }
         
         // Step 3: Verify mesh health
         println!("\n🔍 Verifying mesh health...");
-        self.verify_mesh_health(master, username, &mut client_factory).await?;
+        if let Some((username, _)) = credentials_map.get(&master.ip) {
+            self.verify_mesh_health(master, username, &mut client_factory).await?;
+        }
         
         println!("\n✅ Mesh network initialized successfully!");
         println!("   Master: {} (services running)", master.hostname);

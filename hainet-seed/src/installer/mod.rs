@@ -276,7 +276,19 @@ impl Installer {
         
         // Step 4: Assess device capabilities (if user wants to proceed)
         if self.prompt_assess_devices()? {
-            let (capabilities, credentials_map) = self.assess_device_capabilities(&devices).await?;
+            let local_ip = local_ip_address::local_ip().ok();
+            let (local_devices, remote_devices): (Vec<_>, Vec<_>) = devices.clone().into_iter().partition(|d| {
+                local_ip.map_or(false, |ip| d.ip == ip.to_string())
+            });
+
+            let (mut capabilities, credentials_map) = self.assess_device_capabilities(&remote_devices).await?;
+
+            if !local_devices.is_empty() {
+                if let Ok(localhost_caps) = self.assess_localhost_capabilities().await {
+                    capabilities.push(localhost_caps);
+                }
+            }
+
             self.display_capabilities(&capabilities);
             
             // Step 5: Set up SSH keys and deploy (if user wants to proceed)
@@ -351,7 +363,7 @@ impl Installer {
             let client_factory = |ip: String, credentials: SSHCredentials| {
                 SSHClient::new(ip, credentials)
             };
-            orchestrator.deploy_all(&username, client_factory).await?;
+            orchestrator.deploy_all(&username, &credentials_map, client_factory).await?;
             
             let summary = orchestrator.summary();
             info!("\n📊 Deployment Summary:");
