@@ -15,8 +15,8 @@ async fn test_uninstallation_flow() -> Result<()> {
     let home_dir = dirs::home_dir().unwrap();
     let ssh_dir = home_dir.join(".ssh");
     fs::create_dir_all(&ssh_dir)?;
-    let pub_key_path = ssh_dir.join("id_ed25519.pub");
-    let pub_key_content = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGCq/d1E/N/dE/dE/dE/dE/dE/dE/dE/dE/dE hainet-test";
+    let pub_key_path = ssh_dir.join("hainet-mesh.pub");
+    let pub_key_content = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGCq/d1E/N/dE/dE/dE/dE/dE/dE/dE/dE hainet-test";
     fs::write(&pub_key_path, pub_key_content)?;
 
     let uninstaller = Uninstaller::new()?;

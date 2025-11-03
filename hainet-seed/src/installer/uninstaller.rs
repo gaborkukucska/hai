@@ -75,7 +75,7 @@ impl Uninstaller {
 
         let key_path = dirs::home_dir()
             .unwrap_or_else(|| Path::new("/root").to_path_buf())
-            .join(".ssh/id_ed25519");
+            .join(".ssh/hainet-mesh");
 
         client.authenticate_pubkey(&key_path, None)?;
 
@@ -90,29 +90,29 @@ impl Uninstaller {
         let services = ["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"];
         for service in &services {
             info!("Stopping and disabling {}...", service);
-            let _ = client.execute_command(&format!("sudo systemctl stop {}.service", service));
-            let _ = client.execute_command(&format!("sudo systemctl disable {}.service", service));
-            let _ = client.execute_command(&format!("sudo rm /etc/systemd/system/{}.service", service));
+            client.execute_command(&format!("sudo systemctl stop {}.service", service))?;
+            client.execute_command(&format!("sudo systemctl disable {}.service", service))?;
+            client.execute_command(&format!("sudo rm /etc/systemd/system/{}.service", service))?;
         }
 
         info!("Reloading systemd...");
-        let _ = client.execute_command("sudo systemctl daemon-reload");
+        client.execute_command("sudo systemctl daemon-reload")?;
 
         info!("Removing directories...");
-        let _ = client.execute_command("sudo rm -rf /opt/hainet");
-        let _ = client.execute_command("sudo rm -rf /etc/hainet");
+        client.execute_command("sudo rm -rf /opt/hainet")?;
+        client.execute_command("sudo rm -rf /etc/hainet")?;
 
         info!("Removing user and group...");
-        let _ = client.execute_command("sudo userdel hainet");
-        let _ = client.execute_command("sudo groupdel hainet");
+        client.execute_command("sudo userdel hainet")?;
+        client.execute_command("sudo groupdel hainet")?;
 
         info!("Cleaning up authorized_keys...");
         let pub_key_path = dirs::home_dir()
             .unwrap_or_else(|| Path::new("/root").to_path_buf())
-            .join(".ssh/id_ed25519.pub");
+            .join(".ssh/hainet-mesh.pub");
         let public_key = std::fs::read_to_string(pub_key_path)?;
         let command = format!("grep -v '{}' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp && mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys", public_key.trim());
-        let _ = client.execute_command(&command);
+        client.execute_command(&command)?;
 
         Ok(())
     }
