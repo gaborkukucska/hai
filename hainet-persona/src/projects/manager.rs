@@ -237,6 +237,17 @@ impl ProjectManager {
         }
     }
 
+    /// Start a task (transition to InProgress)
+    pub async fn start_task(&self, task_id: &TaskId) -> Result<()> {
+        if let Some(mut task) = self.storage.get_task(task_id).await? {
+            task.start()?;
+            self.storage.update_task(&task).await?;
+            Ok(())
+        } else {
+            anyhow::bail!("Task not found: {}", task_id)
+        }
+    }
+
     /// Complete a task
     pub async fn complete_task(&self, task_id: &TaskId, deliverables: Vec<String>) -> Result<()> {
         if let Some(mut task) = self.storage.get_task(task_id).await? {
@@ -274,6 +285,17 @@ impl ProjectManager {
     pub async fn request_revision(&self, task_id: &TaskId, feedback: String) -> Result<()> {
         if let Some(mut task) = self.storage.get_task(task_id).await? {
             task.request_revision(feedback)?;
+            self.storage.update_task(&task).await?;
+            Ok(())
+        } else {
+            anyhow::bail!("Task not found: {}", task_id)
+        }
+    }
+
+    /// Reset task for revision (transition back to InProgress)
+    pub async fn reset_task_for_revision(&self, task_id: &TaskId) -> Result<()> {
+        if let Some(mut task) = self.storage.get_task(task_id).await? {
+            task.reset_for_revision()?;
             self.storage.update_task(&task).await?;
             Ok(())
         } else {
