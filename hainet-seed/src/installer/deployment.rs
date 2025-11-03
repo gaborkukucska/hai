@@ -312,7 +312,7 @@ impl DeploymentOrchestrator {
         // Use SSH key authentication (keys should be set up by now)
         let key_path = dirs::home_dir()
             .unwrap_or_else(|| Path::new("/root").to_path_buf())
-            .join(".ssh/hainet-mesh");
+            .join(".ssh/id_ed25519");
         
         client.authenticate_pubkey(&key_path, None)?;
         
