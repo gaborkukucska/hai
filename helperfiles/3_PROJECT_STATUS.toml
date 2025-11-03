@@ -1349,6 +1349,22 @@ estimated_tokens = 15000
 # Recent completions (last 10)
 [[recent_completions]]
 date = "2025-11-03"
+event = "Deployment Bug Fix - Remote Directory Creation"
+details = "Fixed a critical bug in the deployment process where remote directory creation would fail due to insufficient permissions. The `create_remote_directory` function in `hainet-seed/src/installer/ssh_client.rs` was updated to use `sudo mkdir -p` and the `upload_file` function was updated to handle file uploads to privileged locations. This resolves the '[SFTP(2)] no such file' error encountered during deployment."
+tokens_used = 20000
+files_modified = [
+    "hainet-seed/src/installer/ssh_client.rs"
+]
+compilation_status = "Success"
+test_status = "N/A"
+bug_fixed = "Remote directory creation failure due to permissions error"
+features_verified = [
+    "Remote directory creation with sudo",
+    "File upload to privileged locations"
+]
+
+[[recent_completions]]
+date = "2025-11-03"
 event = "Session 26 Complete - Phase 8A Session 4: E2E Integration & Optimization - PHASE 8A COMPLETE! 🎉✨"
 details = "Completed Phase 8A with comprehensive end-to-end integration test suite. Created phase_8a_e2e_integration_test.rs (660 LOC) with 10 advanced test scenarios validating complete workflow from user input through gemma3-powered agent intelligence to task completion. Tests cover: complete workflow with gemma3 models, PM task decomposition (gemma3:9b), Worker execution (gemma3:7b), PM-Worker validation loop framework, JSON parsing resilience (>80% success rate target), parallel projects with independent PMs, performance benchmarking (<5s response time target), error recovery and graceful degradation, state persistence and recovery. All tests compile cleanly and run with appropriate Ollama availability checks. Created comprehensive session documentation (SESSION_26_PHASE_8A_SESSION_4_COMPLETION.md, 400+ lines). Updated PROJECT_STATUS.toml to mark Phase 8A as 100% complete."
 tokens_used = 150000
