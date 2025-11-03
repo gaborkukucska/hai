@@ -345,14 +345,23 @@ impl DeploymentOrchestrator {
     async fn deploy_to_localhost(&self, assignment: &DeviceAssignment) -> Result<()> {
         println!("\n📦 Deploying to localhost ({})...", assignment.hostname);
 
-        use std::fs;
         use std::process::Command;
         use std::path::Path;
+        use std::io::Write;
+
+        fn run_sudo_command(command: &mut Command) -> Result<()> {
+            let status = command.status().context("Failed to execute command")?;
+            if !status.success() {
+                bail!("Command failed with status: {}", status);
+            }
+            Ok(())
+        }
 
         // Step 2: Create installation directory
         println!("📁 Creating installation directories...");
-        fs::create_dir_all("/opt/hainet/bin")?;
-        fs::create_dir_all("/etc/hainet")?;
+        run_sudo_command(Command::new("sudo").args(&["mkdir", "-p", "/opt/hainet/bin"]))?;
+        run_sudo_command(Command::new("sudo").args(&["mkdir", "-p", "/etc/hainet"]))?;
+        run_sudo_command(Command::new("sudo").args(&["mkdir", "-p", "/var/lib/hainet"]))?;
 
         // Step 3: Transfer binaries based on role
         println!("📤 Copying binaries...");
@@ -367,8 +376,8 @@ impl DeploymentOrchestrator {
             let source_path = target_dir.join(binary_name);
             let dest_path = Path::new("/opt/hainet/bin").join(binary_name);
             if source_path.exists() {
-                fs::copy(&source_path, &dest_path)?;
-                Command::new("chmod").arg("+x").arg(&dest_path).status()?;
+                run_sudo_command(Command::new("sudo").args(&["cp", &source_path.to_string_lossy(), &dest_path.to_string_lossy()]))?;
+                run_sudo_command(Command::new("sudo").args(&["chmod", "+x", &dest_path.to_string_lossy()]))?;
             }
         }
 
@@ -378,7 +387,21 @@ impl DeploymentOrchestrator {
             DeviceRole::Master => "[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n".to_string(),
             _ => "[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n".to_string(),
         };
-        fs::write("/etc/hainet/hainet.toml", config_content)?;
+
+        let mut child = Command::new("sudo")
+            .arg("tee")
+            .arg("/etc/hainet/hainet.toml")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(config_content.as_bytes())?;
+        }
+        let status = child.wait().context("Failed to wait for sudo tee process")?;
+        if !status.success() {
+            bail!("sudo tee command for config file failed with status {}", status);
+        }
 
         // Step 5: Create and enable systemd services
         println!("🔧 Setting up services...");
@@ -391,10 +414,25 @@ impl DeploymentOrchestrator {
                 "[Unit]\nDescription=HAI-Net {}\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=/opt/hainet/bin/{}\nRestart=always\nUser=root\nGroup=root\n\n[Install]\nWantedBy=multi-user.target\n",
                 service_name, service_name
             );
-            fs::write(format!("/etc/systemd/system/{}.service", service_name), service_content)?;
-            Command::new("systemctl").arg("enable").arg(format!("{}.service", service_name)).status()?;
+            let service_path = format!("/etc/systemd/system/{}.service", service_name);
+            let mut child = Command::new("sudo")
+                .arg("tee")
+                .arg(&service_path)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .spawn()?;
+
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(service_content.as_bytes())?;
+            }
+            let status = child.wait().context("Failed to wait for sudo tee process for service file")?;
+            if !status.success() {
+                bail!("sudo tee command for service file failed with status {}", status);
+            }
+
+            run_sudo_command(Command::new("sudo").args(&["systemctl", "enable", &format!("{}.service", service_name)]))?;
         }
-        Command::new("systemctl").arg("daemon-reload").status()?;
+        run_sudo_command(Command::new("sudo").args(&["systemctl", "daemon-reload"]))?;
 
         println!("✓ Deployment to localhost complete");
 
