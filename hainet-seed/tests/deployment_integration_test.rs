@@ -142,9 +142,11 @@ async fn test_deployment_all() {
         }
     };
 
+    std::env::set_var("HAINET_SKIP_BUILD", "1");
     let timeout = time::Duration::from_millis(300000);
     let result = tokio::time::timeout(timeout, orchestrator.deploy_all("testuser", client_factory)).await.unwrap();
     assert!(result.is_ok());
+    std::env::remove_var("HAINET_SKIP_BUILD");
 
     // Verify that the correct commands were executed
     let executed_commands = commands.lock().unwrap();

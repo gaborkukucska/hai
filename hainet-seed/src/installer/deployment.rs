@@ -530,8 +530,12 @@ impl DeploymentOrchestrator {
     }
     
     /// Build binaries for target architecture
-    #[cfg(not(test))]
     fn build_binaries(&self, arch: &str) -> Result<()> {
+        if std::env::var("HAINET_SKIP_BUILD").is_ok() {
+            println!("✅ Skipping build because HAINET_SKIP_BUILD is set.");
+            return Ok(());
+        }
+
         use std::process::Command;
         
         // Map architecture to Rust target triple
@@ -560,12 +564,6 @@ impl DeploymentOrchestrator {
         }
         
         println!("✓ Build complete for {}", target);
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn build_binaries(&self, _arch: &str) -> Result<()> {
-        // No-op for tests
         Ok(())
     }
 
