@@ -507,9 +507,9 @@ impl SSHClientTrait for SSHClient {
     /// # Errors
     /// Returns an error if directory creation fails
     fn create_remote_directory(&self, path: &str) -> Result<()> {
-        // Use mkdir -p to create parent directories recursively
+        // Use sudo mkdir -p to create parent directories recursively
         // Redirect errors to /dev/null and always succeed (directory might already exist)
-        self.execute_command(&format!("mkdir -p {} 2>/dev/null || true", path))?;
+        self.execute_command(&format!("sudo mkdir -p {} 2>/dev/null || true", path))?;
         Ok(())
     }
     
