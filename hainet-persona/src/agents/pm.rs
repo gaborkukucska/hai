@@ -17,6 +17,7 @@ use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOpt
 use crate::test_utils::JSONValidator;
 use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
+use super::llm_config::AgentLLMConfig;
 
 /// Project Manager Agent
 /// 
@@ -48,6 +49,9 @@ pub struct PMAgent {
     /// Ollama client for LLM-powered task decomposition
     ollama_client: OllamaClient,
     
+    /// LLM configuration for this PM agent
+    llm_config: AgentLLMConfig,
+    
     /// Spawned worker agents (task_id -> worker_agent_id)
     workers: HashMap<TaskId, AgentId>,
     
@@ -73,6 +77,7 @@ impl PMAgent {
             prompt_manager,
             project_manager,
             ollama_client: OllamaClient::localhost(),
+            llm_config: AgentLLMConfig::for_pm(),
             workers: HashMap::new(),
             task_graph: None,
         }
@@ -251,8 +256,11 @@ impl PMAgent {
             ..Default::default()
         };
         
+        // Use gemma3:7b for fast validation (prefer gemma3 over llama3.2)
+        let model = self.select_model_for_validation();
+        
         let response = self.ollama_client.generate(
-            "llama3.2:latest",
+            &model,
             &prompt,
             options
         ).await.context("Failed to validate task with LLM")?;
@@ -369,7 +377,7 @@ impl PMAgent {
         Ok(())
     }
     
-    /// Generate detailed plan using LLM
+    /// Generate detailed plan using LLM with enhanced prompting for gemma3
     async fn generate_detailed_plan(
         &self,
         project: &crate::projects::Project,
@@ -395,29 +403,51 @@ impl PMAgent {
         
         drop(prompt_manager);
         
+        // Enhanced planning prompt optimized for gemma3's structured reasoning
         let planning_prompt = format!(
-            "Project: {}\nOverview: {}\n\nExisting Tasks:\n{}\n\n\
-             Break down these tasks into detailed, executable subtasks.\n\n\
-             For each subtask:\n\
-             1. Provide a clear title (max 60 chars)\n\
-             2. Detailed description of what needs to be done\n\
-             3. Identify worker type needed (FileWorker, CodeWorker, NetworkWorker, or ResearchWorker)\n\
-             4. List any dependencies (task indices that must complete first)\n\n\
-             Return JSON format:\n\
+            "You are a Project Manager breaking down a software project into executable tasks.\n\n\
+             PROJECT DETAILS:\n\
+             Title: {}\n\
+             Overview: {}\n\n\
+             HIGH-LEVEL TASKS (from Admin AI):\n{}\n\n\
+             YOUR JOB:\n\
+             Transform these high-level tasks into detailed, executable subtasks that Worker agents can complete.\n\n\
+             WORKER TYPES AVAILABLE:\n\
+             - FileWorker: Create/edit/delete files, manage directories\n\
+             - CodeWorker: Write code, refactor, implement features\n\
+             - NetworkWorker: API calls, web scraping, external data\n\
+             - ResearchWorker: Documentation, analysis, planning\n\n\
+             REQUIREMENTS:\n\
+             1. Each subtask must be specific and actionable\n\
+             2. Task titles: max 60 chars, clear and descriptive\n\
+             3. Descriptions: detailed enough for Worker to execute without clarification\n\
+             4. Dependencies: list task indices (0-based) that must complete first\n\
+             5. Break complex tasks into 3-5 smaller steps\n\
+             6. Logical execution order (setup → implementation → testing)\n\n\
+             OUTPUT FORMAT (JSON only, no markdown):\n\
              {{\n\
                \"tasks\": [\n\
-                 {{\"title\": \"Task 1\", \"description\": \"...\", \"worker_type\": \"CodeWorker\"}},\n\
-                 {{\"title\": \"Task 2\", \"description\": \"...\", \"worker_type\": \"FileWorker\"}}\n\
+                 {{\n\
+                   \"title\": \"Create project structure\",\n\
+                   \"description\": \"Create index.html, style.css, script.js files in root directory\",\n\
+                   \"worker_type\": \"FileWorker\"\n\
+                 }},\n\
+                 {{\n\
+                   \"title\": \"Implement game logic\",\n\
+                   \"description\": \"Write JavaScript code for snake movement, collision detection, and score tracking\",\n\
+                   \"worker_type\": \"CodeWorker\"\n\
+                 }}\n\
                ],\n\
                \"dependencies\": [\n\
                  {{\"task_index\": 1, \"depends_on\": [0]}}\n\
                ]\n\
              }}\n\n\
-             Your response (JSON only):",
+             Generate your task breakdown now (JSON only):",
             project.title,
             project.overview,
             existing_tasks.iter()
-                .map(|t| format!("- {}", t.description))
+                .enumerate()
+                .map(|(i, t)| format!("{}. {}", i + 1, t.description))
                 .collect::<Vec<_>>()
                 .join("\n")
         );
@@ -429,8 +459,11 @@ impl PMAgent {
             ..Default::default()
         };
         
+        // Use gemma3:9b for complex task decomposition (PM's primary intelligence task)
+        let model = self.select_model_for_planning();
+        
         let response = self.ollama_client.generate(
-            "llama3.2:latest",
+            &model,
             &planning_prompt,
             options
         ).await.context("Failed to generate detailed plan with LLM")?;
@@ -537,6 +570,27 @@ impl PMAgent {
     pub fn task_graph(&self) -> Option<&TaskGraph> {
         self.task_graph.as_ref()
     }
+    
+    /// Select model for task planning (complex decomposition)
+    /// Prefers gemma3:9b for better structured reasoning
+    fn select_model_for_planning(&self) -> String {
+        // Prefer gemma3 based on model size from config
+        match self.llm_config.model_size_preference {
+            super::llm_config::ModelSize::SevenB | super::llm_config::ModelSize::FourteenBPlus => {
+                "gemma3:9b".to_string()
+            },
+            _ => {
+                // Fall back to 7b for smaller configurations
+                "gemma3:7b".to_string()
+            }
+        }
+    }
+    
+    /// Select model for task validation (faster checks)
+    /// Uses gemma3:7b for speed while maintaining quality
+    fn select_model_for_validation(&self) -> String {
+        "gemma3:7b".to_string()
+    }
 }
 
 #[async_trait::async_trait]
@@ -581,11 +635,11 @@ struct TaskDetail {
     worker_type: String,
 }
 
-/// Task dependency
+/// Task dependency (public for testing)
 #[derive(Debug, Clone)]
-struct TaskDependency {
-    task_index: usize,
-    depends_on: Vec<usize>,
+pub struct TaskDependency {
+    pub task_index: usize,
+    pub depends_on: Vec<usize>,
 }
 
 /// Validation response from LLM
@@ -700,6 +754,7 @@ impl TaskGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::Agent;
     
     async fn create_test_pm() -> PMAgent {
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));

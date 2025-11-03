@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::messaging::{MessageBus, AgentId};
-use crate::prompts::{PromptManager, AgentType, AgentState, WorkerType, PromptContext};
+use crate::prompts::{PromptManager, AgentType, AgentState, WorkerType};
 use crate::projects::{ProjectManager, TaskId};
 use crate::tools::mcp::MCPClientManager;
 use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
@@ -354,77 +354,217 @@ impl WorkerAgent {
         Err(anyhow::anyhow!("Task not found: {}", task_id))
     }
     
-    /// Plan task execution using LLM
+    /// Plan task execution using LLM (enhanced with better prompting)
     async fn plan_task_execution(&self, task_description: &str) -> Result<ExecutionPlan> {
-        // Use template's system prompt directly
-        let system_prompt = self.template.system_prompt.clone();
-        
-        let planning_prompt = format!(
-            "Task: {}\\n\\nYou are a {} worker agent.\\n\\n\
-             Your capabilities: {:?}\\n\
-             Available MCP servers: {:?}\\n\\n\
-             Break this task into specific tool execution steps.\\n\\n\
-             Return JSON format:\\n\
-             {{\\n\
-               \\\"steps\\\": [\\n\
-                 {{\\\"tool\\\": \\\"server::tool_name\\\", \\\"params\\\": {{...}}, \\\"description\\\": \\\"what this does\\\"}}\\n\
-               ]\\n\
-             }}\\n\\n\
-             Your response (JSON only):",
-            task_description,
-            self.template.name,
-            self.template.capabilities,
-            self.template.mcp_servers
-        );
+        let planning_prompt = self.generate_planning_prompt(task_description);
         
         let options = GenerationOptions {
-            temperature: Some(0.3), // Lower temperature for more deterministic planning
-            max_tokens: Some(1024),
-            system: Some(system_prompt),
+            temperature: Some(0.1), // More deterministic for execution planning
+            max_tokens: Some(2048),
+            system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
         
+        // Use gemma3:7b for worker task planning (as per Session 1)
         let response = self.ollama_client.generate(
-            "llama3.2:latest",
+            "gemma3:7b",
             &planning_prompt,
             options
-        ).await.context("Failed to generate execution plan")?;
+        ).await.context("Failed to generate execution plan with LLM")?;
         
         self.parse_execution_plan(&response.text)
     }
     
-    /// Parse LLM response into ExecutionPlan
-    fn parse_execution_plan(&self, llm_response: &str) -> Result<ExecutionPlan> {
-        let json_str = if let Some(start) = llm_response.find('{') {
-            if let Some(end) = llm_response.rfind('}') {
-                &llm_response[start..=end]
-            } else {
-                llm_response
+    /// Generate structured planning prompt for LLM
+    fn generate_planning_prompt(&self, task_description: &str) -> String {
+        format!(
+            r#"You are a Worker AI agent executing a task. Analyze this task and create a structured execution plan.
+
+TASK: {}
+YOUR ROLE: {}
+YOUR CAPABILITIES: {:?}
+
+AVAILABLE MCP TOOLS:
+{}
+
+INSTRUCTIONS:
+1. Break the task into concrete, executable steps
+2. Each step must use ONE MCP tool with specific parameters
+3. Steps can have dependencies on previous steps
+4. Be specific with file paths, parameters, and expected outputs
+
+RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
+{{
+  "steps": [
+    {{
+      "step_number": 1,
+      "tool": "hainet-files::file_read",
+      "params": {{ "path": "/path/to/file" }},
+      "description": "Read configuration file",
+      "depends_on": []
+    }},
+    {{
+      "step_number": 2,
+      "tool": "hainet-files::file_write",
+      "params": {{ "path": "/output/file", "content": "result" }},
+      "description": "Write processed output",
+      "depends_on": [1]
+    }}
+  ]
+}}
+
+CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no explanations.
+"#,
+            task_description,
+            self.template.name,
+            self.template.capabilities,
+            self.format_available_tools()
+        )
+    }
+    
+    /// Format available MCP tools for prompt
+    fn format_available_tools(&self) -> String {
+        let mut tools_desc = String::new();
+        
+        for server in &self.template.mcp_servers {
+            tools_desc.push_str(&format!("\n{} server:\n", server));
+            
+            match server.as_str() {
+                "hainet-files" => {
+                    tools_desc.push_str("  - file_read(path) - Read file contents\n");
+                    tools_desc.push_str("  - file_write(path, content) - Write to file\n");
+                    tools_desc.push_str("  - file_list(path) - List directory contents\n");
+                    tools_desc.push_str("  - file_metadata(path) - Get file metadata\n");
+                }
+                "hainet-system" => {
+                    tools_desc.push_str("  - system_status() - Get CPU, RAM, disk usage\n");
+                    tools_desc.push_str("  - list_services() - List running services\n");
+                    tools_desc.push_str("  - check_health() - Run health checks\n");
+                }
+                "hainet-dev" => {
+                    tools_desc.push_str("  - git_status(repo_path) - Get git status\n");
+                    tools_desc.push_str("  - git_diff(repo_path, file_path) - View changes\n");
+                    tools_desc.push_str("  - cargo_build(package, release) - Build Rust project\n");
+                    tools_desc.push_str("  - cargo_test(package, filter) - Run tests\n");
+                    tools_desc.push_str("  - code_search(pattern, path) - Search codebase\n");
+                }
+                _ => {}
             }
-        } else {
-            llm_response
+        }
+        
+        tools_desc
+    }
+    
+    /// Parse LLM response into ExecutionPlan (enhanced with multi-strategy parsing)
+    fn parse_execution_plan(&self, llm_response: &str) -> Result<ExecutionPlan> {
+        // Strategy 1: Direct JSON extraction (simple case)
+        let json_str = self.extract_json_from_response(llm_response);
+        
+        // Strategy 2: Try direct parse
+        let parsed = match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(value) => value,
+            Err(_) => {
+                // Strategy 3: Try markdown extraction
+                if let Ok(value) = self.extract_from_markdown(llm_response) {
+                    value
+                } else {
+                    // Strategy 4: Try repair (braces/brackets)
+                    self.repair_and_parse(&json_str)?
+                }
+            }
         };
         
-        let parsed: serde_json::Value = serde_json::from_str(json_str)
-            .context(format!("Failed to parse execution plan JSON: {}", json_str))?;
-        
         let steps: Vec<ExecutionStep> = parsed["steps"].as_array()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'steps' array"))?
+            .ok_or_else(|| anyhow::anyhow!("Missing 'steps' array in execution plan"))?
             .iter()
-            .filter_map(|s| {
+            .enumerate()
+            .filter_map(|(idx, s)| {
+                let _step_number = s["step_number"].as_u64().unwrap_or((idx + 1) as u64) as usize;
+                let tool = s["tool"].as_str()?.to_string();
+                let params = s["params"].clone();
+                let description = s["description"].as_str().unwrap_or("").to_string();
+                
+                // Validate tool format (server::tool_name)
+                if !tool.contains("::") {
+                    tracing::warn!("Invalid tool format (missing ::): {}", tool);
+                    return None;
+                }
+                
                 Some(ExecutionStep {
-                    tool: s["tool"].as_str()?.to_string(),
-                    params: s["params"].clone(),
-                    description: s["description"].as_str().unwrap_or("").to_string(),
+                    tool,
+                    params,
+                    description,
                 })
             })
             .collect();
         
         if steps.is_empty() {
-            return Err(anyhow::anyhow!("No valid execution steps found in plan"));
+            return Err(anyhow::anyhow!(
+                "No valid execution steps found in plan. Response: {}",
+                &llm_response[..llm_response.len().min(200)]
+            ));
         }
         
+        tracing::debug!("Parsed {} execution steps from LLM response", steps.len());
         Ok(ExecutionPlan { steps })
+    }
+    
+    /// Extract JSON from LLM response (handles braces)
+    fn extract_json_from_response(&self, response: &str) -> String {
+        if let Some(start) = response.find('{') {
+            if let Some(end) = response.rfind('}') {
+                return response[start..=end].to_string();
+            }
+        }
+        response.to_string()
+    }
+    
+    /// Extract JSON from markdown code blocks
+    fn extract_from_markdown(&self, text: &str) -> Result<serde_json::Value> {
+        let markers = ["```json\n", "```\n", "```"];
+        
+        for marker in markers.iter() {
+            if let Some(start_idx) = text.find(marker) {
+                let json_start = start_idx + marker.len();
+                
+                if let Some(end_idx) = text[json_start..].find("```") {
+                    let json_text = &text[json_start..json_start + end_idx];
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_text.trim()) {
+                        return Ok(value);
+                    }
+                }
+            }
+        }
+        
+        Err(anyhow::anyhow!("No valid JSON found in markdown blocks"))
+    }
+    
+    /// Repair common JSON issues (missing braces/brackets)
+    fn repair_and_parse(&self, text: &str) -> Result<serde_json::Value> {
+        let mut repaired = text.trim().to_string();
+        
+        // Count braces and brackets
+        let open_braces = repaired.matches('{').count();
+        let close_braces = repaired.matches('}').count();
+        let open_brackets = repaired.matches('[').count();
+        let close_brackets = repaired.matches(']').count();
+        
+        // Add missing closing braces
+        if open_braces > close_braces {
+            for _ in 0..(open_braces - close_braces) {
+                repaired.push('}');
+            }
+        }
+        
+        // Add missing closing brackets
+        if open_brackets > close_brackets {
+            for _ in 0..(open_brackets - close_brackets) {
+                repaired.push(']');
+            }
+        }
+        
+        serde_json::from_str::<serde_json::Value>(&repaired)
+            .context("Failed to parse after JSON repair")
     }
     
     /// Execute plan with retry logic

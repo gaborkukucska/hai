@@ -28,7 +28,7 @@ pub use guardian::{
 pub use intent::IntentParser;
 pub use planner::TaskPlanner;
 pub use state::AgentStateMachine;
-pub use pm::PMAgent;
+pub use pm::{PMAgent, TaskGraph, TaskDependency};
 pub use worker::WorkerAgent;
 pub use templates::WorkerTemplate;
 
