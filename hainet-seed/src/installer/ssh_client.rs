@@ -468,34 +468,45 @@ impl SSHClientTrait for SSHClient {
         if !self.is_connected() {
             bail!("Not connected to device. Call connect() and authenticate first.");
         }
-        
+
         println!("Uploading {} to {}:{}...", local_path.display(), self.ip, remote_path);
-        
+
         let session = self.session.as_ref().unwrap();
-        let sftp = session.sftp()
-            .context("Failed to create SFTP session")?;
-        
-        // Read local file
-        let local_content = std::fs::read(local_path)
-            .context(format!("Failed to read local file: {}", local_path.display()))?;
-        
-        // Create parent directory if needed
+        let sftp = session.sftp().context("Failed to create SFTP session")?;
+
+        let local_content =
+            std::fs::read(local_path).context(format!("Failed to read local file: {}", local_path.display()))?;
+
+        let remote_filename = Path::new(remote_path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .context("Could not get remote filename")?;
+        let temp_remote_path = format!("/tmp/{}", remote_filename);
+
+        // Write to temp remote file
+        let mut remote_file = sftp
+            .create(Path::new(&temp_remote_path))
+            .context(format!("Failed to create temporary remote file: {}", temp_remote_path))?;
+
+        std::io::copy(&mut local_content.as_slice(), &mut remote_file)
+            .context("Failed to write file content to temp file")?;
+        drop(remote_file);
+
+        // Ensure parent directory exists on remote
         if let Some(parent) = Path::new(remote_path).parent() {
-            let parent_str = parent.to_str().unwrap_or("");
-            if !parent_str.is_empty() {
-                self.create_remote_directory(parent_str)?;
+            if let Some(parent_str) = parent.to_str() {
+                if !parent_str.is_empty() {
+                    self.create_remote_directory(parent_str)?;
+                }
             }
         }
         
-        // Write to remote file
-        let mut remote_file = sftp.create(Path::new(remote_path))
-            .context(format!("Failed to create remote file: {}", remote_path))?;
-        
-        std::io::copy(&mut local_content.as_slice(), &mut remote_file)
-            .context("Failed to write file content")?;
-        
+        // Move the file to the destination and change ownership
+        self.execute_command(&format!("sudo mv {} {}", temp_remote_path, remote_path))?;
+        self.execute_command(&format!("sudo chown root:root {}", remote_path))?;
+
         println!("✓ Uploaded {} ({} bytes)", remote_path, local_content.len());
-        
+
         Ok(())
     }
         
@@ -508,8 +519,7 @@ impl SSHClientTrait for SSHClient {
     /// Returns an error if directory creation fails
     fn create_remote_directory(&self, path: &str) -> Result<()> {
         // Use sudo mkdir -p to create parent directories recursively
-        // Redirect errors to /dev/null and always succeed (directory might already exist)
-        self.execute_command(&format!("sudo mkdir -p {} 2>/dev/null || true", path))?;
+        self.execute_command(&format!("sudo mkdir -p {}", path))?;
         Ok(())
     }
     
@@ -523,7 +533,7 @@ impl SSHClientTrait for SSHClient {
     /// Returns an error if chmod fails
     fn set_permissions(&self, path: &str, mode: u32) -> Result<()> {
         let mode_octal = format!("{:o}", mode);
-        self.execute_command(&format!("chmod {} {}", mode_octal, path))?;
+        self.execute_command(&format!("sudo chmod {} {}", mode_octal, path))?;
         println!("✓ Set permissions {} on {}", mode_octal, path);
         Ok(())
     }

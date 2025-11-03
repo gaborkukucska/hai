@@ -238,10 +238,10 @@ This file tracks the core functions/methods defined within the framework, catego
 - `SSHClientTrait::execute_command(command)` - Execute remote command via SSH channel
 - `SSHClient::execute_command_with_timeout(command, timeout)` - Execute command with timeout
 - `SSHClientTrait::assess_capabilities()` - **Real SSH-based device assessment** (CPU, RAM, GPU, disk, OS, arch)
-- `SSHClientTrait::upload_file(local_path, remote_path)` - Upload file via SFTP
+- `SSHClientTrait::upload_file(local_path, remote_path)` - Upload file via SFTP to a temporary location and then move it to the final destination using sudo.
 - `SSHClient::download_file(remote_path, local_path)` - Download file via SFTP
-- `SSHClientTrait::create_remote_directory(path)` - Create directory on remote device
-- `SSHClientTrait::set_permissions(path, mode)` - Set file permissions via chmod
+- `SSHClientTrait::create_remote_directory(path)` - Create directory on remote device using sudo mkdir -p.
+- `SSHClientTrait::set_permissions(path, mode)` - Set file permissions via sudo chmod.
 - `SSHClient::remote_file_exists(path)` - Check if file exists on remote device
 - `MockSSHClient::new(ip)` - Create a new mock SSH client for testing
 - `MockSSHClient::expect_command(command, output)` - Set an expected command and its output
