@@ -323,7 +323,7 @@ impl DeploymentOrchestrator {
         
         // Step 3: Transfer binaries based on role
         println!("📤 Transferring binaries...");
-        self.transfer_binaries(&client, &assignment.role)?;
+        self.transfer_binaries(&client, &assignment.role, &assignment.capabilities.arch)?;
         
         // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
@@ -682,7 +682,7 @@ impl DeploymentOrchestrator {
 
     /// Transfer binaries to remote device based on role
     #[cfg(not(test))]
-    fn transfer_binaries<C: SSHClientTrait>(&self, client: &C, role: &DeviceRole) -> Result<()> {
+    fn transfer_binaries<C: SSHClientTrait>(&self, client: &C, role: &DeviceRole, arch: &str) -> Result<()> {
         // Determine which binaries to transfer based on role
         let binaries = match role {
             DeviceRole::Master => vec![
@@ -706,7 +706,8 @@ impl DeploymentOrchestrator {
         
         // Get target directory (TODO: use actual target architecture)
         let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
-        let target_dir = workspace_root.join("target/release");
+        let target_triple = get_target_triple(arch).unwrap_or("release");
+        let target_dir = workspace_root.join("target").join(target_triple).join("release");
         
         for binary_name in binaries {
             let local_path = target_dir.join(binary_name);
@@ -728,7 +729,7 @@ impl DeploymentOrchestrator {
     }
 
     #[cfg(test)]
-    fn transfer_binaries<C: SSHClientTrait>(&self, _client: &C, _role: &DeviceRole) -> Result<()> {
+    fn transfer_binaries<C: SSHClientTrait>(&self, _client: &C, _role: &DeviceRole, _arch: &str) -> Result<()> {
         // No-op for tests
         Ok(())
     }
@@ -770,15 +771,13 @@ impl DeploymentOrchestrator {
             },
         };
         
-        // Write config to remote file
-        let config_path = "/tmp/hainet.toml";
-        let write_cmd = format!("cat > {} << 'EOF'\n{}EOF", config_path, config);
-        client.execute_command(&write_cmd)?;
-        
-        // Move to /etc/hainet/
-        client.execute_command(&format!("sudo mv {} /etc/hainet/hainet.toml", config_path))?;
-        client.execute_command("sudo chown root:root /etc/hainet/hainet.toml")?;
-        client.set_permissions("/etc/hainet/hainet.toml", 0o644)?;
+        // Write config to remote file using sudo tee
+        let remote_path = "/etc/hainet/hainet.toml";
+        let command = format!("echo '{}' | sudo tee {}", config, remote_path);
+        client.execute_command(&command)?;
+
+        client.execute_command(&format!("sudo chown root:root {}", remote_path))?;
+        client.set_permissions(remote_path, 0o644)?;
         
         println!("✓ Configuration written to /etc/hainet/hainet.toml");
         
@@ -813,16 +812,10 @@ impl DeploymentOrchestrator {
                 service_name, service_name
             );
             
-            // Write service file
-            let service_path = format!("/tmp/{}.service", service_name);
-            let write_cmd = format!("cat > {} << 'EOF'\n{}EOF", service_path, service_content);
-            client.execute_command(&write_cmd)?;
-            
-            // Move to systemd directory
-            client.execute_command(&format!(
-                "sudo mv {} /etc/systemd/system/{}.service",
-                service_path, service_name
-            ))?;
+            // Write service file using sudo tee
+            let remote_path = format!("/etc/systemd/system/{}.service", service_name);
+            let command = format!("echo '{}' | sudo tee {}", service_content, remote_path);
+            client.execute_command(&command)?;
             
             // Enable service
             client.execute_command(&format!("sudo systemctl enable {}.service", service_name))?;

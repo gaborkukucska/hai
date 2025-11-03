@@ -50,9 +50,9 @@ fn test_role_assignment() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_deployment_all() {
-    // Create a dummy binary file for the test to find
+    // Create dummy binary files for the test to find
     let workspace_root = hainet_seed::installer::deployment::find_workspace_root().unwrap();
-    let target_dir = workspace_root.join("target/release");
+    let target_dir = workspace_root.join("target/x86_64-unknown-linux-gnu/release");
     std::fs::create_dir_all(&target_dir).unwrap();
     let dummy_binaries = ["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"];
     for binary in &dummy_binaries {
@@ -90,6 +90,6 @@ async fn test_deployment_all() {
     let executed_commands = commands.lock().unwrap();
     assert!(executed_commands.iter().any(|cmd| cmd == "mkdir -p /opt/hainet/bin"));
     assert!(executed_commands.iter().any(|cmd| cmd.starts_with("upload_file to /opt/hainet/bin/hainet-core")));
-    assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo mv /tmp/hainet.toml /etc/hainet/hainet.toml")));
+    assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo tee /etc/hainet/hainet.toml")));
     assert!(executed_commands.iter().any(|cmd| cmd.contains("sudo systemctl enable hainet-core.service")));
 }
