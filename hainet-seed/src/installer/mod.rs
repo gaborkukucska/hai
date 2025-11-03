@@ -17,6 +17,7 @@ pub mod uninstaller;
 
 use anyhow::Result;
 use tracing::info;
+use std::io::{self, Write};
 
 use crate::installer::platform::{Platform, SystemTier};
 use crate::installer::ollama::OllamaInstaller;
@@ -275,12 +276,12 @@ impl Installer {
         
         // Step 4: Assess device capabilities (if user wants to proceed)
         if self.prompt_assess_devices()? {
-            let capabilities = self.assess_device_capabilities(&devices).await?;
+            let (capabilities, credentials_map) = self.assess_device_capabilities(&devices).await?;
             self.display_capabilities(&capabilities);
             
             // Step 5: Set up SSH keys and deploy (if user wants to proceed)
             if self.prompt_deploy_mesh()? {
-                self.setup_and_deploy_mesh(&capabilities).await?;
+                self.setup_and_deploy_mesh(&capabilities, credentials_map).await?;
             } else {
                 info!("\n⚠️  Skipping mesh deployment");
                 info!("📋 You can deploy later using the hainet-seed CLI");
@@ -308,25 +309,25 @@ impl Installer {
     }
     
     /// Set up SSH keys and deploy to mesh
-    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities]) -> Result<()> {
+    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities], credentials_map: std::collections::HashMap<String, (String, String)>) -> Result<()> {
         info!("\n🔐 Setting up SSH keys and deploying to mesh...");
         
         // Step 1: Generate SSH key pair
         let key_manager = SSHKeyManager::new()?;
         key_manager.generate_key_pair("hainet-mesh")?;
+
+        // Step 2: Distribute SSH key to all devices
+        info!("\n🔐 Distributing SSH keys for passwordless access...");
+        for (ip, (username, password)) in &credentials_map {
+            match key_manager.copy_to_remote(ip, username, password) {
+                Ok(_) => info!("✓ SSH key distributed successfully to {}", ip),
+                Err(e) => info!("⚠️  Failed to distribute SSH key to {}: {}", ip, e),
+            }
+        }
         
-        // Step 2: Get username for SSH
-        use std::io::{self, Write};
-        print!("\nSSH Username (default: current user): ");
-        io::stdout().flush()?;
-        let mut username = String::new();
-        io::stdin().read_line(&mut username)?;
-        let username = username.trim();
-        let username = if username.is_empty() {
-            std::env::var("USER").unwrap_or_else(|_| "root".to_string())
-        } else {
-            username.to_string()
-        };
+        // The username is now collected per-device, so this generic prompt is no longer needed.
+        // We will extract the username from the credentials_map when calling deploy_all.
+        let username = credentials_map.values().next().map(|(u, _)| u.clone()).unwrap_or_else(|| "root".to_string());
         
         // Step 3: Display manual key setup instructions (now automated)
         info!("\n📋 SSH Key Setup:");
@@ -382,10 +383,12 @@ impl Installer {
     }
     
     /// Assess capabilities of discovered devices
-    async fn assess_device_capabilities(&self, devices: &[DeviceCandidate]) -> Result<Vec<DeviceCapabilities>> {
+    async fn assess_device_capabilities(&self, devices: &[DeviceCandidate]) -> Result<(Vec<DeviceCapabilities>, std::collections::HashMap<String, (String, String)>)> {
         use std::io::{self, Write};
-        
+        use std::collections::HashMap;
+
         let mut capabilities = Vec::new();
+        let mut credentials_map = HashMap::new();
         
         // First, assess localhost capabilities (no SSH needed)
         info!("\n💻 Assessing localhost capabilities...");
@@ -441,18 +444,7 @@ impl Installer {
                             Ok(_) => {
                                 info!("✓ Connected and authenticated successfully");
 
-                                // Automatically copy SSH key after successful password auth
-                                info!("✓ Distributing SSH key for passwordless access...");
-                                let key_manager = SSHKeyManager::new()?;
-                                match key_manager.copy_to_remote(&device.ip, &username, &password) {
-                                    Ok(_) => {
-                                        info!("✓ SSH key distributed successfully to {}", device.ip);
-                                    }
-                                    Err(e) => {
-                                        info!("⚠️  Failed to distribute SSH key to {}: {}. Manual setup may be required.", device.ip, e);
-                                        // We can still proceed, but deployment will likely fail.
-                                    }
-                                }
+                                credentials_map.insert(device.ip.clone(), (username, password));
                                 
                                 // Now assess capabilities
                                 match client.assess_capabilities() {
@@ -519,7 +511,7 @@ impl Installer {
             }
         }
         
-        Ok(capabilities)
+        Ok((capabilities, credentials_map))
     }
     
     /// Assess localhost capabilities without SSH
