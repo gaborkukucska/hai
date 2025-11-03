@@ -13,6 +13,7 @@ pub mod nmap_installer;
 pub mod ssh_client;
 pub mod ssh_keys;
 pub mod deployment;
+pub mod uninstaller;
 
 use anyhow::Result;
 use tracing::info;
@@ -327,16 +328,11 @@ impl Installer {
             username.to_string()
         };
         
-        // Step 3: Display manual key setup instructions
+        // Step 3: Display manual key setup instructions (now automated)
         info!("\n📋 SSH Key Setup:");
         info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         info!("Public key location: {}", key_manager.public_key_path().display());
-        info!("\nFor automatic deployment, copy the key to each device:");
-        for caps in capabilities {
-            info!("\n  Device: {} ({})", caps.hostname, caps.ip);
-            info!("  $ ssh-copy-id {}@{}", username, caps.ip);
-        }
-        info!("\nOr manually append the key to ~/.ssh/authorized_keys on each device");
+        info!("NOTE: Public key will be automatically distributed.");
         info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         
         // Step 4: Assign roles and deploy
@@ -444,6 +440,19 @@ impl Installer {
                         match client.authenticate_password() {
                             Ok(_) => {
                                 info!("✓ Connected and authenticated successfully");
+
+                                // Automatically copy SSH key after successful password auth
+                                info!("✓ Distributing SSH key for passwordless access...");
+                                let key_manager = SSHKeyManager::new()?;
+                                match key_manager.copy_to_remote(&device.ip, &username, &password) {
+                                    Ok(_) => {
+                                        info!("✓ SSH key distributed successfully to {}", device.ip);
+                                    }
+                                    Err(e) => {
+                                        info!("⚠️  Failed to distribute SSH key to {}: {}. Manual setup may be required.", device.ip, e);
+                                        // We can still proceed, but deployment will likely fail.
+                                    }
+                                }
                                 
                                 // Now assess capabilities
                                 match client.assess_capabilities() {

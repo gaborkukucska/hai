@@ -19,6 +19,8 @@ struct Cli {
 enum Commands {
     /// Install HAI-Net with AI-guided setup
     Install,
+    /// Uninstall HAI-Net from deployed devices
+    Uninstall,
     /// Check system requirements
     Check,
     /// Generate new identity keypair
@@ -45,9 +47,11 @@ async fn main() -> Result<()> {
             service.install().await?;
             
             info!("✅ HAI-Net installation completed successfully!");
-            info!("🎯 Next steps:");
-            info!("   1. Verify Ollama is running: ollama list");
-            info!("   2. Start HAI-Net persona: cargo run --package hainet-persona");
+        }
+        Commands::Uninstall => {
+            info!("🗑️ Starting uninstallation process...");
+            let uninstaller = hainet_seed::installer::uninstaller::Uninstaller::new()?;
+            uninstaller.uninstall().await?;
         }
         Commands::Check => {
             info!("🔍 Checking system requirements...");
