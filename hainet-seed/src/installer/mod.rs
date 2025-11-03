@@ -13,6 +13,7 @@ pub mod nmap_installer;
 pub mod ssh_client;
 pub mod ssh_keys;
 pub mod deployment;
+pub mod uninstaller;
 
 use anyhow::Result;
 use tracing::info;
