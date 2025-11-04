@@ -316,10 +316,12 @@ impl DeploymentOrchestrator {
         
         client.authenticate_pubkey(&key_path, None)?;
         
-        // Step 2: Create installation directory
+        // Step 2: Create installation directories (user-owned)
         println!("📁 Creating installation directories...");
-        client.create_remote_directory("/opt/hainet/bin")?;
-        client.create_remote_directory("/etc/hainet")?;
+        client.create_remote_directory(".local/bin")?;
+        client.create_remote_directory(".config/hainet")?;
+        client.create_remote_directory(".local/share/hainet")?;
+        client.create_remote_directory(".config/systemd/user")?;
         
         // Step 3: Transfer binaries based on role
         println!("📤 Transferring binaries...");
@@ -346,24 +348,16 @@ impl DeploymentOrchestrator {
         println!("\n📦 Deploying to localhost ({})...", assignment.hostname);
 
         use std::process::Command;
-        use std::path::Path;
-        use std::io::Write;
 
-        fn run_sudo_command(command: &mut Command) -> Result<()> {
-            let status = command.status().context("Failed to execute command")?;
-            if !status.success() {
-                bail!("Command failed with status: {}", status);
-            }
-            Ok(())
-        }
-
-        // Step 2: Create installation directory
+        // Step 2: Create installation directories (user-owned)
         println!("📁 Creating installation directories...");
-        run_sudo_command(Command::new("sudo").args(&["mkdir", "-p", "/opt/hainet/bin"]))?;
-        run_sudo_command(Command::new("sudo").args(&["mkdir", "-p", "/etc/hainet"]))?;
-        run_sudo_command(Command::new("sudo").args(&["mkdir", "-p", "/var/lib/hainet"]))?;
+        let home_dir = dirs::home_dir().context("Failed to get home directory")?;
+        std::fs::create_dir_all(home_dir.join(".local/bin"))?;
+        std::fs::create_dir_all(home_dir.join(".config/hainet"))?;
+        std::fs::create_dir_all(home_dir.join(".local/share/hainet"))?;
+        std::fs::create_dir_all(home_dir.join(".config/systemd/user"))?;
 
-        // Step 3: Transfer binaries based on role
+        // Step 3: Copy binaries to user directories
         println!("📤 Copying binaries...");
         let binaries = match assignment.role {
             DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"],
@@ -374,36 +368,31 @@ impl DeploymentOrchestrator {
         let target_dir = find_workspace_root()?.join("target/release");
         for binary_name in binaries {
             let source_path = target_dir.join(binary_name);
-            let dest_path = Path::new("/opt/hainet/bin").join(binary_name);
+            let dest_path = home_dir.join(".local/bin").join(binary_name);
             if source_path.exists() {
-                run_sudo_command(Command::new("sudo").args(&["cp", &source_path.to_string_lossy(), &dest_path.to_string_lossy()]))?;
-                run_sudo_command(Command::new("sudo").args(&["chmod", "+x", &dest_path.to_string_lossy()]))?;
+                std::fs::copy(&source_path, &dest_path)?;
+                // Make executable (chmod +x)
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = std::fs::metadata(&dest_path)?.permissions();
+                    perms.set_mode(0o755);
+                    std::fs::set_permissions(&dest_path, perms)?;
+                }
             }
         }
 
         // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
         let config_content = match assignment.role {
-            DeviceRole::Master => "[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n".to_string(),
-            _ => "[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n".to_string(),
+            DeviceRole::Master => format!("[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"{}/.local/share/hainet\"\n", home_dir.display()),
+            _ => format!("[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"{}/.local/share/hainet\"\n", home_dir.display()),
         };
 
-        let mut child = Command::new("sudo")
-            .arg("tee")
-            .arg("/etc/hainet/hainet.toml")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .spawn()?;
+        let config_path = home_dir.join(".config/hainet/hainet.toml");
+        std::fs::write(&config_path, config_content)?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(config_content.as_bytes())?;
-        }
-        let status = child.wait().context("Failed to wait for sudo tee process")?;
-        if !status.success() {
-            bail!("sudo tee command for config file failed with status {}", status);
-        }
-
-        // Step 5: Create and enable systemd services
+        // Step 5: Create and enable systemd user services
         println!("🔧 Setting up services...");
         let services = match assignment.role {
             DeviceRole::Master | DeviceRole::Slave | DeviceRole::Standalone => vec!["hainet-core", "hainet-chain"],
@@ -411,28 +400,19 @@ impl DeploymentOrchestrator {
         };
         for service_name in services {
             let service_content = format!(
-                "[Unit]\nDescription=HAI-Net {}\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=/opt/hainet/bin/{}\nRestart=always\nUser=root\nGroup=root\n\n[Install]\nWantedBy=multi-user.target\n",
+                "[Unit]\nDescription=HAI-Net {}\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=%h/.local/bin/{}\nRestart=always\nEnvironment=RUST_LOG=info\n\n[Install]\nWantedBy=default.target\n",
                 service_name, service_name
             );
-            let service_path = format!("/etc/systemd/system/{}.service", service_name);
-            let mut child = Command::new("sudo")
-                .arg("tee")
-                .arg(&service_path)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::null())
-                .spawn()?;
+            let service_path = home_dir.join(format!(".config/systemd/user/{}.service", service_name));
+            std::fs::write(&service_path, service_content)?;
 
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(service_content.as_bytes())?;
-            }
-            let status = child.wait().context("Failed to wait for sudo tee process for service file")?;
-            if !status.success() {
-                bail!("sudo tee command for service file failed with status {}", status);
-            }
-
-            run_sudo_command(Command::new("sudo").args(&["systemctl", "enable", &format!("{}.service", service_name)]))?;
+            Command::new("systemctl")
+                .args(&["--user", "enable", &format!("{}.service", service_name)])
+                .status()?;
         }
-        run_sudo_command(Command::new("sudo").args(&["systemctl", "daemon-reload"]))?;
+        Command::new("systemctl")
+            .args(&["--user", "daemon-reload"])
+            .status()?;
 
         println!("✓ Deployment to localhost complete");
 
@@ -486,8 +466,8 @@ impl DeploymentOrchestrator {
         // Display next steps
         println!("\n📋 Next Steps:");
         println!("   • Access UI at: http://{}:3000", master.ip);
-        println!("   • Check logs: sudo journalctl -u hainet-core -f");
-        println!("   • View status: sudo systemctl status hainet-core");
+        println!("   • Check logs: journalctl --user -u hainet-core -f");
+        println!("   • View status: systemctl --user status hainet-core");
         println!("\n💡 Note: Full P2P mesh networking will be enabled in Phase 8");
         
         Ok(())
@@ -537,8 +517,8 @@ impl DeploymentOrchestrator {
         for service in services {
             println!("   Starting {} on {}...", service, ip);
             
-            // Start service
-            let start_cmd = format!("sudo systemctl start {}.service", service);
+            // Start user service
+            let start_cmd = format!("systemctl --user start {}.service", service);
             match client.execute_command(&start_cmd) {
                 Ok(_) => {},
                 Err(e) => {
@@ -551,7 +531,7 @@ impl DeploymentOrchestrator {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             
             // Check if service started successfully
-            let status_cmd = format!("sudo systemctl is-active {}.service", service);
+            let status_cmd = format!("systemctl --user is-active {}.service", service);
             match client.execute_command(&status_cmd) {
                 Ok(output) => {
                     if output.trim() == "active" {
@@ -596,7 +576,7 @@ impl DeploymentOrchestrator {
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         
         // Check hainet-core status
-        match client.execute_command("sudo systemctl status hainet-core.service | head -n 3") {
+        match client.execute_command("systemctl --user status hainet-core.service | head -n 3") {
             Ok(core_status) => {
                 println!("🔧 hainet-core:");
                 for line in core_status.lines().take(3) {
@@ -609,10 +589,10 @@ impl DeploymentOrchestrator {
         }
         
         // Check if configuration was loaded
-        match client.execute_command("test -f /etc/hainet/hainet.toml && echo 'exists' || echo 'missing'") {
+        match client.execute_command("test -f ~/.config/hainet/hainet.toml && echo 'exists' || echo 'missing'") {
             Ok(config_check) => {
                 if config_check.trim() == "exists" {
-                    println!("✓ Configuration file present at /etc/hainet/hainet.toml");
+                    println!("✓ Configuration file present at ~/.config/hainet/hainet.toml");
                 } else {
                     println!("⚠️  Configuration file missing");
                 }
@@ -623,7 +603,7 @@ impl DeploymentOrchestrator {
         }
         
         // Check listening ports (if hainet-core binds to 8080)
-        match client.execute_command("sudo ss -tuln | grep ':8080' || echo 'not_listening'") {
+        match client.execute_command("ss -tuln | grep ':8080' || echo 'not_listening'") {
             Ok(port_check) => {
                 if !port_check.contains("not_listening") {
                     println!("✓ Network port 8080 listening");
@@ -704,7 +684,7 @@ impl DeploymentOrchestrator {
             ],
         };
         
-        // Get target directory (TODO: use actual target architecture)
+        // Get target directory
         let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
         let target_triple = get_target_triple(arch).unwrap_or("release");
         let target_dir = workspace_root.join("target").join(target_triple).join("release");
@@ -718,7 +698,8 @@ impl DeploymentOrchestrator {
                 continue;
             }
             
-            let remote_path = format!("/opt/hainet/bin/{}", binary_name);
+            // Upload to user's .local/bin directory
+            let remote_path = format!(".local/bin/{}", binary_name);
             client.upload_file(&local_path, &remote_path)?;
             
             // Make binary executable
@@ -736,11 +717,11 @@ impl DeploymentOrchestrator {
     
     /// Configure device with role-specific settings
     fn configure_device<C: SSHClientTrait>(&self, client: &C, assignment: &DeviceAssignment) -> Result<()> {
-        // Create hainet.toml configuration
+        // Create hainet.toml configuration with user directories
         let config = match assignment.role {
             DeviceRole::Master => {
                 format!(
-                    "[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n"
+                    "[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"~/.local/share/hainet\"\n"
                 )
             },
             DeviceRole::Slave => {
@@ -750,13 +731,13 @@ impl DeploymentOrchestrator {
                     .unwrap_or("10.0.0.10");
                 
                 format!(
-                    "[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n",
+                    "[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"~/.local/share/hainet\"\n",
                     master_ip
                 )
             },
             DeviceRole::Standalone => {
                 format!(
-                    "[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet\"\n"
+                    "[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"~/.local/share/hainet\"\n"
                 )
             },
             DeviceRole::UIOnly => {
@@ -771,20 +752,17 @@ impl DeploymentOrchestrator {
             },
         };
         
-        // Write config to remote file using sudo tee
-        let remote_path = "/etc/hainet/hainet.toml";
-        let command = format!("echo '{}' | sudo tee {}", config, remote_path);
+        // Write config to user's .config directory (no sudo needed)
+        let remote_path = ".config/hainet/hainet.toml";
+        let command = format!("cat > {} << 'EOF'\n{}EOF", remote_path, config);
         client.execute_command(&command)?;
-
-        client.execute_command(&format!("sudo chown root:root {}", remote_path))?;
-        client.set_permissions(remote_path, 0o644)?;
         
-        println!("✓ Configuration written to /etc/hainet/hainet.toml");
+        println!("✓ Configuration written to ~/.config/hainet/hainet.toml");
         
         Ok(())
     }
     
-    /// Set up systemd services for the device role
+    /// Set up systemd user services for the device role
     fn setup_services<C: SSHClientTrait>(&self, client: &C, role: &DeviceRole) -> Result<()> {
         let services = match role {
             DeviceRole::Master | DeviceRole::Slave | DeviceRole::Standalone => {
@@ -796,35 +774,34 @@ impl DeploymentOrchestrator {
         };
         
         for service_name in services {
-            // Create systemd service file
+            // Create systemd user service file
             let service_content = format!(
                 "[Unit]\n\
                  Description=HAI-Net {}\n\
                  After=network.target\n\n\
                  [Service]\n\
                  Type=simple\n\
-                 ExecStart=/opt/hainet/bin/{}\n\
+                 ExecStart=%h/.local/bin/{}\n\
                  Restart=always\n\
-                 User=hainet\n\
-                 Group=hainet\n\n\
+                 Environment=RUST_LOG=info\n\n\
                  [Install]\n\
-                 WantedBy=multi-user.target\n",
+                 WantedBy=default.target\n",
                 service_name, service_name
             );
             
-            // Write service file using sudo tee
-            let remote_path = format!("/etc/systemd/system/{}.service", service_name);
-            let command = format!("echo '{}' | sudo tee {}", service_content, remote_path);
+            // Write service file to user's systemd directory (no sudo needed)
+            let remote_path = format!(".config/systemd/user/{}.service", service_name);
+            let command = format!("cat > {} << 'EOF'\n{}EOF", remote_path, service_content);
             client.execute_command(&command)?;
             
-            // Enable service
-            client.execute_command(&format!("sudo systemctl enable {}.service", service_name))?;
+            // Enable user service
+            client.execute_command(&format!("systemctl --user enable {}.service", service_name))?;
             
             println!("✓ Service {} configured and enabled", service_name);
         }
         
-        // Reload systemd
-        client.execute_command("sudo systemctl daemon-reload")?;
+        // Reload systemd user daemon
+        client.execute_command("systemctl --user daemon-reload")?;
         
         Ok(())
     }

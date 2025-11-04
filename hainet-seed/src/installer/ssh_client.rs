@@ -501,9 +501,8 @@ impl SSHClientTrait for SSHClient {
             }
         }
         
-        // Move the file to the destination and change ownership
-        self.execute_command(&format!("sudo mv {} {}", temp_remote_path, remote_path))?;
-        self.execute_command(&format!("sudo chown root:root {}", remote_path))?;
+        // Move the file to the destination (no sudo needed for user-owned files)
+        self.execute_command(&format!("mv {} {}", temp_remote_path, remote_path))?;
 
         println!("✓ Uploaded {} ({} bytes)", remote_path, local_content.len());
 
@@ -518,8 +517,8 @@ impl SSHClientTrait for SSHClient {
     /// # Errors
     /// Returns an error if directory creation fails
     fn create_remote_directory(&self, path: &str) -> Result<()> {
-        // Use sudo mkdir -p to create parent directories recursively
-        self.execute_command(&format!("sudo mkdir -p {}", path))?;
+        // Create user-owned directories without sudo
+        self.execute_command(&format!("mkdir -p {}", path))?;
         Ok(())
     }
     
@@ -533,7 +532,8 @@ impl SSHClientTrait for SSHClient {
     /// Returns an error if chmod fails
     fn set_permissions(&self, path: &str, mode: u32) -> Result<()> {
         let mode_octal = format!("{:o}", mode);
-        self.execute_command(&format!("sudo chmod {} {}", mode_octal, path))?;
+        // User-owned files don't need sudo for chmod
+        self.execute_command(&format!("chmod {} {}", mode_octal, path))?;
         println!("✓ Set permissions {} on {}", mode_octal, path);
         Ok(())
     }

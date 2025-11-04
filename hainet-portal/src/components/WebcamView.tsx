@@ -1,6 +1,6 @@
 // hainet-portal/src/components/WebcamView.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../lib/tauri';
 import { PrivacyMode, FrameAnalysisResult } from '../types'; // Assuming types are defined
 
 interface WebcamViewProps {
