@@ -477,11 +477,16 @@ impl SSHClientTrait for SSHClient {
         let local_content =
             std::fs::read(local_path).context(format!("Failed to read local file: {}", local_path.display()))?;
 
+        // Generate unique temp path using timestamp to avoid collisions
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
         let remote_filename = Path::new(remote_path)
             .file_name()
             .and_then(|s| s.to_str())
             .context("Could not get remote filename")?;
-        let temp_remote_path = format!("/tmp/{}", remote_filename);
+        let temp_remote_path = format!("/tmp/hainet-sftp-{}-{}", timestamp, remote_filename);
 
         // Write to temp remote file
         let mut remote_file = sftp

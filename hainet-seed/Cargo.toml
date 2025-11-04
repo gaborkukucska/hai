@@ -46,6 +46,9 @@ regex = "1.10"
 # SSH client for remote deployment
 ssh2 = "0.9"
 
+# Base64 encoding for binary transfer
+base64 = "0.22"
+
 # System info
 num_cpus = "1.16"
 
