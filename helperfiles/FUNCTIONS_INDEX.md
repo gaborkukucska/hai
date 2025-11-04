@@ -474,6 +474,7 @@ This file tracks the core functions/methods defined within the framework, catego
 - `VisionSystem::analyze_frame_mock()` - Analyze frame with mock model
 
 ### hainet-portal/src-tauri/src/vision_handler.rs
+- **Configuration Change (2025-11-03):** Fixed a UI startup issue by adding `devUrl` to `tauri.conf.json` and moving `@tauri-apps/api` to `dependencies` in `package.json`.
 - `list_webcam_devices()` - Tauri command to list webcam devices
 - `start_webcam(config)` - Tauri command to start webcam
 - `stop_webcam()` - Tauri command to stop webcam
