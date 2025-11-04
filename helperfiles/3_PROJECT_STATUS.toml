@@ -1349,6 +1349,23 @@ estimated_tokens = 15000
 # Recent completions (last 10)
 [[recent_completions]]
 date = "2025-11-03"
+event = "UI Startup Fix"
+details = "Fixed a critical bug that prevented the HAI-Net Portal UI from loading correctly. The issue was caused by a missing `devUrl` in `tauri.conf.json` and an incorrect dependency declaration in `package.json`. The `devUrl` was added to point to the Vite dev server, and the `@tauri-apps/api` dependency was moved from `devDependencies` to `dependencies`."
+tokens_used = 0
+files_modified = [
+    "hainet-portal/src-tauri/tauri.conf.json",
+    "hainet-portal/package.json"
+]
+compilation_status = "Success"
+test_status = "N/A"
+bug_fixed = "HAI-Net Portal UI loads a blank screen and shows 'Not running in Tauri' errors in the browser console."
+features_verified = [
+    "Tauri development window now correctly loads the Vite dev server.",
+    "Frontend dependencies are correctly resolved by Vite."
+]
+
+[[recent_completions]]
+date = "2025-11-03"
 event = "Deployment Bug Fix - Remote Directory Creation"
 details = "Fixed a critical bug in the deployment process where remote directory creation would fail due to insufficient permissions. The `create_remote_directory` function in `hainet-seed/src/installer/ssh_client.rs` was updated to use `sudo mkdir -p` and the `upload_file` function was updated to handle file uploads to privileged locations. This resolves the '[SFTP(2)] no such file' error encountered during deployment."
 tokens_used = 20000
