@@ -3,7 +3,7 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-03T10:53:00+00:00"
+last_updated = "2025-11-04T00:51:00+00:00"
 project_name = "HAI-Net Seed"
 version = "0.26"
 current_phase = "Phase 8A: Agent Intelligence Enhancement - COMPLETE!"
@@ -1347,6 +1347,22 @@ estimated_tokens = 15000
 # No active blockers! All systems operational. Phase 4.5a complete - Multi-device mesh deployment framework ready!
 
 # Recent completions (last 10)
+[[recent_completions]]
+date = "2025-11-04"
+event = "Vite External Dependency Fix"
+details = "Fixed a Vite build configuration issue that caused import resolution failures for the `@tauri-apps/api` package. The `vite.config.ts` file incorrectly listed `@tauri-apps/api/tauri` and `@tauri-apps/api/core` as external dependencies, preventing Vite from properly resolving subpath imports like `@tauri-apps/api/dialog`. Removing these entries from the `rollupOptions.external` array resolved the issue."
+tokens_used = 0
+files_modified = [
+    "hainet-portal/vite.config.ts"
+]
+compilation_status = "Success"
+test_status = "N/A"
+bug_fixed = "Vite fails to resolve subpath imports from `@tauri-apps/api` due to incorrect external configuration."
+features_verified = [
+    "The application now builds successfully with Vite.",
+    "All Tauri API calls are correctly resolved without the need for a wrapper module."
+]
+
 [[recent_completions]]
 date = "2025-11-03"
 event = "Vite Import Resolution Fix"
