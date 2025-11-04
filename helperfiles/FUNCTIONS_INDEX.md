@@ -473,8 +473,13 @@ This file tracks the core functions/methods defined within the framework, catego
 - `VisionSystem::capture_frame()` - Capture a single frame
 - `VisionSystem::analyze_frame_mock()` - Analyze frame with mock model
 
+### hainet-portal/src/components/ChatInterface.tsx
+- `ChatInterface()` - Renders the chat UI, handles user input, and displays message history. Imports Tauri functions from the `tauri.ts` wrapper.
+
+### hainet-portal/src/lib/tauri.ts
+- **Tauri API Wrapper:** This module re-exports functions from the `@tauri-apps/api` package to provide a single point of import for the rest of the application. This helps to work around potential module resolution issues with Vite.
+
 ### hainet-portal/src-tauri/src/vision_handler.rs
-- **Configuration Change (2025-11-03):** Fixed a UI startup issue by adding `devUrl` to `tauri.conf.json` and moving `@tauri-apps/api` to `dependencies` in `package.json`.
 - `list_webcam_devices()` - Tauri command to list webcam devices
 - `start_webcam(config)` - Tauri command to start webcam
 - `stop_webcam()` - Tauri command to stop webcam
@@ -514,9 +519,6 @@ This file tracks the core functions/methods defined within the framework, catego
 - `update_settings(settings)` - Tauri command to update the settings.
 - `get_system_status()` - Tauri command to get the system status.
 
-### hainet-portal/src/components/Settings.tsx
-- `Settings()` - Main component for the settings panel.
-
 ### hainet-portal/src/components/SystemStatus.tsx
 - `SystemStatus()` - Component to display system status.
 
@@ -534,13 +536,13 @@ This file tracks the core functions/methods defined within the framework, catego
 - `export_metrics_csv(time_range)` - Export metrics as CSV with time filtering
 
 ### hainet-portal/src/hooks/useMetrics.ts
-- `useMetrics()` - React hook for fetching and managing real-time and historical metrics
+- `useMetrics()` - React hook for fetching and managing real-time and historical metrics. Imports Tauri functions from the `tauri.ts` wrapper.
 - `useMetrics()::refetch` - Manually refetch real-time metrics
 - `useMetrics()::getTrendData(interval)` - Fetch historical trend data
 - `useMetrics()::exportMetrics(format, time_range)` - Export metrics as CSV or JSON
 
 ### hainet-portal/src/components/MetricsDashboard.tsx
-- `MetricsDashboard()` - Main component for displaying the metrics dashboard, including real-time data, trend charts, and the metrics toolbar.
+- `MetricsDashboard()` - Main component for displaying the metrics dashboard, including real-time data, trend charts, and the metrics toolbar. Imports Tauri functions from the `tauri.ts` wrapper.
 
 ### hainet-portal/src/components/MetricsToolbar.tsx
 - `MetricsToolbar(onExport, onIntervalChange, selectedInterval, isExporting)` - Toolbar for metrics export and interval selection

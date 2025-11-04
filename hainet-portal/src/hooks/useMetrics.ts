@@ -1,9 +1,6 @@
 //! # START OF FILE hainet-portal/src/hooks/useMetrics.ts
 import { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { save } from '@tauri-apps/api/dialog';
-import { writeTextFile } from '@tauri-apps/api/fs';
+import { invoke, listen, UnlistenFn, save, writeTextFile } from '../lib/tauri';
 import { MetricsSummary, TrendDataPoint, TrendInterval, TimeRange } from '../types';
 
 interface UseMetricsResult {

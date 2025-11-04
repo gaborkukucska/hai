@@ -1,7 +1,7 @@
 //! # START OF FILE hainet-portal/src/pages/Settings.tsx
 import React, { useEffect, useState } from 'react';
 import { Shield, Moon, Database, Bell, Info } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../lib/tauri';
 import type { Settings as SettingsType } from '../types';
 
 export default function Settings() {
