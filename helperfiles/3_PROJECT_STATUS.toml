@@ -1349,6 +1349,30 @@ estimated_tokens = 15000
 # Recent completions (last 10)
 [[recent_completions]]
 date = "2025-11-03"
+event = "Vite Import Resolution Fix"
+details = "Fixed a recurring Vite import resolution error where subpath imports from `@tauri-apps/api` (e.g., `@tauri-apps/api/dialog`) would fail. Implemented a workaround by creating a centralized Tauri API wrapper at `hainet-portal/src/lib/tauri.ts`. This module consolidates all imports from `@tauri-apps/api` and re-exports them. All frontend components (`ChatInterface.tsx`, `useMetrics.ts`, `MetricsDashboard.tsx`, `Settings.tsx`) were then refactored to import from this local wrapper, resolving the build issue."
+tokens_used = 0
+files_created = [
+    "hainet-portal/src/lib/tauri.ts"
+]
+files_modified = [
+    "hainet-portal/src/hooks/useMetrics.ts",
+    "hainet-portal/src/pages/MetricsDashboard.tsx",
+    "hainet-portal/src/pages/Settings.tsx",
+    "hainet-portal/src/components/ChatInterface.tsx",
+    "hainet-portal/src/components/MetricsToolbar.tsx",
+    "helperfiles/FUNCTIONS_INDEX.md"
+]
+compilation_status = "Success"
+test_status = "N/A"
+bug_fixed = "Vite fails to resolve subpath imports from `@tauri-apps/api`."
+features_verified = [
+    "The application now builds successfully with Vite.",
+    "All Tauri API calls are correctly routed through the new wrapper module."
+]
+
+[[recent_completions]]
+date = "2025-11-03"
 event = "UI Startup Fix"
 details = "Fixed a critical bug that prevented the HAI-Net Portal UI from loading correctly. The issue was caused by a missing `devUrl` in `tauri.conf.json` and an incorrect dependency declaration in `package.json`. The `devUrl` was added to point to the Vite dev server, and the `@tauri-apps/api` dependency was moved from `devDependencies` to `dependencies`."
 tokens_used = 0

@@ -3,7 +3,7 @@
 // Captures audio, detects speech, sends to backend for transcription
 
 import React, { useState, useRef, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../lib/tauri';
 
 interface AudioData {
   data: string; // Base64-encoded audio

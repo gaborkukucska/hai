@@ -1,6 +1,6 @@
 //! # START OF FILE hainet-portal/src/components/ChatInterface.tsx
 import { useState, useEffect, useRef } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../lib/tauri';
 import { VoiceInput } from './VoiceInput'
 import WebcamView from './WebcamView'
 import VideoPlayer from './VideoPlayer'

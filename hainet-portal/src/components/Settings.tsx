@@ -1,6 +1,6 @@
 // <!-- # START OF FILE hainet-portal/src/components/Settings.tsx -->
 import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../lib/tauri';
 import SystemStatus from './SystemStatus';
 
 interface SettingsData {
