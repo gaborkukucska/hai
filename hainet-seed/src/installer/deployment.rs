@@ -422,7 +422,25 @@ impl DeploymentOrchestrator {
         };
         for service_name in &services {
             let service_content = format!(
-                "[Unit]\nDescription=HAI-Net {}\nAfter=network.target\n\n[Service]\nType=simple\nUser=hainet\nGroup=hainet\nExecStart=/usr/local/bin/{}\nRestart=always\nRestartSec=10\nEnvironment=RUST_LOG=info\nWorkingDirectory=/var/lib/hainet\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n",
+                "[Unit]
+Description=HAI-Net {}
+After=network.target
+
+[Service]
+Type=simple
+User=hainet
+Group=hainet
+ExecStart=/usr/local/bin/{}
+Restart=always
+RestartSec=10
+Environment=RUST_LOG=info
+WorkingDirectory=/var/lib/hainet
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+",
                 service_name, service_name
             );
             let service_path = format!("/tmp/{}.service", service_name);
@@ -441,6 +459,20 @@ impl DeploymentOrchestrator {
             Command::new("sudo")
                 .args(&["systemctl", "enable", &format!("{}.service", service_name)])
                 .status()?;
+        }
+
+        // Step 6: Start services immediately
+        println!("🚀 Starting services...");
+        for service_name in &services {
+            let status = Command::new("sudo")
+                .args(&["systemctl", "start", &format!("{}.service", service_name)])
+                .status()?;
+            
+            if status.success() {
+                println!("✓ {} started successfully", service_name);
+            } else {
+                println!("⚠️  Failed to start {}", service_name);
+            }
         }
 
         println!("✓ Deployment to localhost complete");
@@ -468,7 +500,13 @@ impl DeploymentOrchestrator {
         
         // Step 1: Start services on master node
         println!("\n🚀 Starting services on master node...");
-        if let Some((username, _)) = credentials_map.get(&master.ip) {
+        let local_ip = local_ip_address::local_ip().ok();
+        let master_is_local = local_ip.as_ref().map_or(false, |ip| master.ip == ip.to_string());
+        
+        if master_is_local {
+            // Master is localhost, services already started during deploy_to_localhost
+            println!("   ✓ Master services already running on localhost");
+        } else if let Some((username, _)) = credentials_map.get(&master.ip) {
             self.start_services_on_device(&master.ip, username, &master.role, &mut client_factory).await?;
         }
 
