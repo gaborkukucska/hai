@@ -21,3 +21,6 @@ pub mod mesh_message;
 pub mod rpc_client;
 pub mod rpc_server;
 pub mod multiplexer;
+
+// Phase 9A Session 5: Service Auto-Discovery & Integration
+pub mod service_detector;
