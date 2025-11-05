@@ -27,6 +27,10 @@ libp2p = { workspace = true, features = ["mdns", "tcp", "tokio", "ping", "noise"
 libp2p-swarm-derive = { workspace = true }
 hyper = { workspace = true }
 
+# Phase 9A Session 4: Mesh Communication
+reqwest = { version = "0.11", features = ["json"] }
+serde_bytes = "0.11"
+
 # Storage
 sled = { workspace = true }
 blake3 = "1.5"

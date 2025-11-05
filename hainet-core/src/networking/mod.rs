@@ -15,3 +15,9 @@ pub mod mesh_coordinator;
 pub mod service_manager;
 pub mod load_balancer;
 pub mod service_registry;
+
+// Phase 9A Session 4: Mesh Communication Protocol
+pub mod mesh_message;
+pub mod rpc_client;
+pub mod rpc_server;
+pub mod multiplexer;
