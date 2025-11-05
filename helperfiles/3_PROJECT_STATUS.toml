@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-05T00:27:00+00:00"
+last_updated = "2025-11-05T02:58:00+00:00"
 project_name = "HAI-Net Seed"
-version = "0.28"
+version = "0.29"
 current_phase = "Phase 9A: Local Hub Mesh Networking - IN PROGRESS"
-current_cycle = "9A.1 - Peer Discovery & Device Registry - COMPLETE"
+current_cycle = "9A.2 - Master-Slave Coordination & Role Assignment - COMPLETE"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -87,9 +87,9 @@ phase_6a_progress = 1.00  # 6/6 sessions complete - PHASE 6A COMPLETE! 🎉
 phase_6b_progress = 1.00  # 6/6 sessions complete - PHASE 6B COMPLETE! 🎉
 phase_7_progress = 1.00  # 8/8 cycles complete - PHASE 7 COMPLETE! 🎉 (7.7 Verification, 7.8 Binary Transfer Fix)
 phase_8a_progress = 1.00  # 4/4 sessions complete - PHASE 8A COMPLETE! 🎉
-phase_9a_progress = 0.20  # 1/5 sessions complete - Session 1: Peer Discovery & Device Registry
-total_loc_produced = 33094  # +1150 LOC (peer_discovery.rs, registry.rs, heartbeat.rs)
-total_tests_passing = 477  # +104 tests (all hainet-core tests passing)
+phase_9a_progress = 0.40  # 2/5 sessions complete - Session 2: Master-Slave Coordination & Role Assignment
+total_loc_produced = 33774  # +680 LOC (mesh_coordinator.rs)
+total_tests_passing = 487  # +10 tests (mesh coordinator tests)
 total_crates = 10
 mcp_integration_complete = true
 worker_mcp_integration_complete = true
@@ -185,11 +185,71 @@ sessions_remaining = 0
 
 # Completed cycles
 [[completed_cycles]]
+id = "9A.2"
+name = "Master-Slave Coordination & Role Assignment - Session 2 Complete"
+completion_date = "2025-11-05"
+loc = 680  # mesh_coordinator.rs
+tests = 10  # mesh_coordinator tests (all passing)
+goal = "Implement master election algorithm with capability-based scoring, intelligent role assignment with specialized roles, and mesh topology coordination with automatic failover"
+files_created = [
+    "hainet-core/src/networking/mesh_coordinator.rs (680 LOC) - Master election, role assignment, mesh topology coordinator"
+]
+files_modified = [
+    "hainet-core/src/networking/mod.rs - Added mesh_coordinator module export"
+]
+key_features = [
+    "Capability-based master election with deterministic tie-breaking (PeerId)",
+    "6-state mesh FSM (Initializing → Electing → Establishing → Operational → MasterFailure → Partitioned)",
+    "Intelligent role assignment with 5 specialized roles (LLMHost, STTTTSHost, MCPServerHost, StorageNode, ComputeWorker)",
+    "Role assignment criteria: LLMHost (GPU or RAM≥16GB), STTTTSHost (CPU≥4), StorageNode (Disk≥500GB)",
+    "Automatic master failover with re-election on PeerOffline events",
+    "Event-driven topology monitoring via DeviceRegistry integration",
+    "ElectionResult with runner-up tracking and score margins",
+    "RoleAssignment with timestamp and multi-role support",
+    "TopologyStats for mesh health monitoring",
+    "Thread-safe coordinator with Arc<RwLock<>> state management"
+]
+compilation_status = "Success - Clean build in 2.10s (8 cosmetic warnings, 0 errors)"
+test_status = "10/10 mesh coordinator tests passing (114/114 total hainet-core tests)"
+architecture_components = [
+    "MeshCoordinator - Central coordination with master election and role assignment",
+    "ElectionResult - Tracks election outcomes with runner-up and margins",
+    "RoleAssignment - Device roles with specialized role lists",
+    "SpecializedRole - 5 specialized roles for optimal mesh topology",
+    "MeshState - 6-state FSM for lifecycle management",
+    "TopologyStats - Real-time mesh health and role distribution"
+]
+technical_highlights = [
+    "Capability scoring: RAM 40%, GPU 30%, CPU 20%, Disk 10% (from Session 1)",
+    "Deterministic tie-breaking: PeerId comparison prevents split-brain",
+    "Role limits: Max 2 LLM hosts, 2 STT/TTS hosts, 3 storage nodes",
+    "Automatic re-election: Triggered by master PeerOffline event",
+    "Background monitoring: Subscribes to RegistryEvent stream",
+    "State transitions: Logged with tracing for visibility",
+    "Event-driven: Reactive topology management via registry events",
+    "Type safety: Compile-time verification of all state transitions"
+]
+test_breakdown = [
+    "test_coordinator_creation - Initialization and state verification",
+    "test_master_election_single_candidate - Unanimous election",
+    "test_master_election_multiple_candidates - Highest score wins",
+    "test_master_election_tie_breaking - Deterministic PeerId tiebreaker",
+    "test_role_assignment - Master and slave role distribution",
+    "test_specialized_role_assignment_llm_host - GPU detection",
+    "test_specialized_role_assignment_storage_node - Disk detection",
+    "test_get_role_assignment - Query individual assignments",
+    "test_topology_stats - Statistics calculation",
+    "test_is_master - Master detection logic"
+]
+next_step = "Session 3: Service Distribution & Load Balancing"
+phase_completion = "Phase 9A: 40% complete (2/5 sessions done)"
+
+[[completed_cycles]]
 id = "9A.1"
 name = "Peer Discovery & Device Registry - Session 1 Complete"
 completion_date = "2025-11-05"
 loc = 1150  # peer_discovery(320) + registry(450) + heartbeat(380)
-tests = 104  # All hainet-core library tests
+tests = 22  # Networking tests from Session 1
 goal = "Implement mDNS-based peer discovery, device registry with health tracking, and heartbeat system for mesh networking"
 files_created = [
     "hainet-core/src/networking/peer_discovery.rs (320 LOC) - Peer discovery manager with mDNS framework",
