@@ -8,6 +8,7 @@
 use anyhow::{Result, Context};
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
+use std::time::SystemTime;
 use tokio::sync::RwLock;
 
 use crate::messaging::{MessageBus, AgentId};
@@ -18,6 +19,10 @@ use crate::test_utils::JSONValidator;
 use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
 use super::llm_config::AgentLLMConfig;
+use super::pm_intelligence::{
+    HistoricalLearner, ProjectComplexity, DecompositionStrategy, 
+    ProjectOutcome
+};
 
 /// Project Manager Agent
 /// 
@@ -57,6 +62,18 @@ pub struct PMAgent {
     
     /// Task dependency graph
     task_graph: Option<TaskGraph>,
+    
+    /// Historical learner for strategy selection
+    learner: HistoricalLearner,
+    
+    /// Current project complexity (cached during planning)
+    project_complexity: Option<ProjectComplexity>,
+    
+    /// Selected decomposition strategy
+    selected_strategy: Option<DecompositionStrategy>,
+    
+    /// Project start time for duration tracking
+    project_start_time: Option<SystemTime>,
 }
 
 impl PMAgent {
@@ -80,6 +97,10 @@ impl PMAgent {
             llm_config: AgentLLMConfig::for_pm(),
             workers: HashMap::new(),
             task_graph: None,
+            learner: HistoricalLearner::new(),
+            project_complexity: None,
+            selected_strategy: None,
+            project_start_time: None,
         }
     }
     
@@ -97,6 +118,9 @@ impl PMAgent {
     /// 
     /// Startup → Idle → Planning → Managing
     pub async fn initialize_and_plan(&mut self) -> Result<()> {
+        // Record project start time
+        self.project_start_time = Some(SystemTime::now());
+        
         // Transition from Startup to Idle (PM agents must go through Idle first)
         self.state_machine.transition(
             AgentState::Idle,
@@ -133,8 +157,40 @@ impl PMAgent {
         let existing_tasks = project_manager.get_project_tasks(&self.project_id).await?;
         drop(project_manager);
         
-        // Use LLM to decompose tasks into detailed subtasks
-        let detailed_plan = self.generate_detailed_plan(&project, &existing_tasks).await?;
+        // Analyze project complexity
+        let task_descriptions: Vec<String> = existing_tasks.iter()
+            .map(|t| t.description.clone())
+            .collect();
+        
+        let complexity = ProjectComplexity::analyze(&project.overview, &task_descriptions);
+        
+        tracing::info!(
+            "Project complexity: {} (score: {:.2}, tasks: {}, domains: {})",
+            complexity.category(),
+            complexity.score,
+            complexity.task_count,
+            complexity.domain_count
+        );
+        
+        // Get strategy recommendation from historical learning
+        let strategy = self.learner.recommend_strategy(&complexity);
+        
+        tracing::info!(
+            "Selected decomposition strategy: {:?} (learner has {} outcomes)",
+            strategy,
+            self.learner.outcome_count()
+        );
+        
+        // Store for later use
+        self.project_complexity = Some(complexity);
+        self.selected_strategy = Some(strategy);
+        
+        // Use LLM to decompose tasks into detailed subtasks with strategy guidance
+        let detailed_plan = self.generate_detailed_plan_with_strategy(
+            &project,
+            &existing_tasks,
+            strategy
+        ).await?;
         
         // Create detailed tasks in database
         for task_detail in &detailed_plan.tasks {
@@ -366,6 +422,43 @@ impl PMAgent {
     
     /// Complete project and transition to Idle
     async fn complete_project(&mut self) -> Result<()> {
+        // Record project outcome for learning
+        if let (Some(complexity), Some(strategy), Some(start_time)) = (
+            &self.project_complexity,
+            &self.selected_strategy,
+            &self.project_start_time,
+        ) {
+            let duration = start_time.elapsed()
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            
+            // Count total revisions across all tasks
+            let project_manager = self.project_manager.read().await;
+            let tasks = project_manager.get_project_tasks(&self.project_id).await?;
+            let revision_count: usize = tasks.iter()
+                .map(|t| t.revision_count as usize)
+                .sum();
+            
+            drop(project_manager);
+            
+            self.learner.record_outcome(ProjectOutcome {
+                project_id: self.project_id.to_string(),
+                strategy: *strategy,
+                complexity: complexity.clone(),
+                success: true,
+                duration_secs: duration,
+                revision_count,
+                timestamp: SystemTime::now(),
+            });
+            
+            tracing::info!(
+                "Recorded project outcome: strategy={:?}, duration={}s, revisions={}",
+                strategy,
+                duration,
+                revision_count
+            );
+        }
+        
         let project_manager = self.project_manager.write().await;
         project_manager.complete_project(&self.project_id).await?;
         
@@ -377,11 +470,12 @@ impl PMAgent {
         Ok(())
     }
     
-    /// Generate detailed plan using LLM with enhanced prompting for gemma3
-    async fn generate_detailed_plan(
+    /// Generate detailed plan using LLM with strategy-aware prompting (optimized for local LLMs)
+    async fn generate_detailed_plan_with_strategy(
         &self,
         project: &crate::projects::Project,
         existing_tasks: &[crate::projects::Task],
+        strategy: DecompositionStrategy,
     ) -> Result<DetailedPlan> {
         let mut prompt_manager = self.prompt_manager.write().await;
         let mut prompt_context = PromptContext::default();
@@ -403,53 +497,41 @@ impl PMAgent {
         
         drop(prompt_manager);
         
-        // Enhanced planning prompt optimized for gemma3's structured reasoning
+        // Compact, clear prompt optimized for local small-to-medium LLMs
+        let strategy_guidance = match strategy {
+            DecompositionStrategy::Sequential => 
+                "Tasks must complete in order. Each depends on previous.",
+            DecompositionStrategy::Parallel => 
+                "Tasks are independent. No dependencies.",
+            DecompositionStrategy::Hybrid => 
+                "Mix sequential and parallel. Some tasks can run together, others must wait.",
+        };
+        
         let planning_prompt = format!(
-            "You are a Project Manager breaking down a software project into executable tasks.\n\n\
-             PROJECT DETAILS:\n\
-             Title: {}\n\
-             Overview: {}\n\n\
-             HIGH-LEVEL TASKS (from Admin AI):\n{}\n\n\
-             YOUR JOB:\n\
-             Transform these high-level tasks into detailed, executable subtasks that Worker agents can complete.\n\n\
-             WORKER TYPES AVAILABLE:\n\
-             - FileWorker: Create/edit/delete files, manage directories\n\
-             - CodeWorker: Write code, refactor, implement features\n\
-             - NetworkWorker: API calls, web scraping, external data\n\
-             - ResearchWorker: Documentation, analysis, planning\n\n\
-             REQUIREMENTS:\n\
-             1. Each subtask must be specific and actionable\n\
-             2. Task titles: max 60 chars, clear and descriptive\n\
-             3. Descriptions: detailed enough for Worker to execute without clarification\n\
-             4. Dependencies: list task indices (0-based) that must complete first\n\
-             5. Break complex tasks into 3-5 smaller steps\n\
-             6. Logical execution order (setup → implementation → testing)\n\n\
-             OUTPUT FORMAT (JSON only, no markdown):\n\
+            "Break down project into executable tasks.\n\n\
+             PROJECT: {}\n\
+             OVERVIEW: {}\n\
+             INITIAL TASKS:\n{}\n\n\
+             STRATEGY: {}\n\n\
+             WORKERS: FileWorker (files), CodeWorker (code), NetworkWorker (APIs), ResearchWorker (docs)\n\n\
+             RULES:\n\
+             - Specific, actionable tasks\n\
+             - Clear titles (max 60 chars)\n\
+             - Detailed descriptions\n\
+             - List dependencies (0-based indices)\n\n\
+             OUTPUT (JSON only):\n\
              {{\n\
-               \"tasks\": [\n\
-                 {{\n\
-                   \"title\": \"Create project structure\",\n\
-                   \"description\": \"Create index.html, style.css, script.js files in root directory\",\n\
-                   \"worker_type\": \"FileWorker\"\n\
-                 }},\n\
-                 {{\n\
-                   \"title\": \"Implement game logic\",\n\
-                   \"description\": \"Write JavaScript code for snake movement, collision detection, and score tracking\",\n\
-                   \"worker_type\": \"CodeWorker\"\n\
-                 }}\n\
-               ],\n\
-               \"dependencies\": [\n\
-                 {{\"task_index\": 1, \"depends_on\": [0]}}\n\
-               ]\n\
-             }}\n\n\
-             Generate your task breakdown now (JSON only):",
+               \"tasks\": [{{\"title\": \"...\", \"description\": \"...\", \"worker_type\": \"...\"}}],\n\
+               \"dependencies\": [{{\"task_index\": 1, \"depends_on\": [0]}}]\n\
+             }}",
             project.title,
             project.overview,
             existing_tasks.iter()
                 .enumerate()
                 .map(|(i, t)| format!("{}. {}", i + 1, t.description))
                 .collect::<Vec<_>>()
-                .join("\n")
+                .join("\n"),
+            strategy_guidance
         );
         
         let options = GenerationOptions {
