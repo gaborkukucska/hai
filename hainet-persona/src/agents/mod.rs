@@ -13,6 +13,7 @@ pub mod intent;
 pub mod planner;
 pub mod state;
 pub mod pm;
+pub mod pm_intelligence;
 pub mod worker;
 pub mod templates;
 pub mod llm_config;
@@ -29,6 +30,10 @@ pub use intent::IntentParser;
 pub use planner::TaskPlanner;
 pub use state::AgentStateMachine;
 pub use pm::{PMAgent, TaskGraph, TaskDependency};
+pub use pm_intelligence::{
+    DecompositionStrategy, ProjectComplexity, ProjectOutcome,
+    HistoricalLearner, TaskComplexityAnalyzer, DynamicTaskAdjuster,
+};
 pub use worker::WorkerAgent;
 pub use templates::WorkerTemplate;
 
