@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-06T05:50:00+08:00"
+last_updated = "2025-11-06T19:23:00+08:00"
 project_name = "HAI-Net Seed"
-version = "0.33"
+version = "0.36"
 current_phase = "Phase 8B: Advanced Agent Capabilities - IN PROGRESS"
-current_cycle = "8B.1 - Enhanced PM Intelligence - COMPLETE"
+current_cycle = "8B.4 - Worker Intelligence Integration - COMPLETE"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -88,9 +88,9 @@ phase_6b_progress = 1.00  # 6/6 sessions complete - PHASE 6B COMPLETE! 🎉
 phase_7_progress = 1.00  # 8/8 cycles complete - PHASE 7 COMPLETE! 🎉 (7.7 Verification, 7.8 Binary Transfer Fix)
 phase_8a_progress = 1.00  # 4/4 sessions complete - PHASE 8A COMPLETE! 🎉
 phase_9a_progress = 1.00  # 5/5 sessions complete - PHASE 9A COMPLETE! 🎉
-phase_8b_progress = 0.20  # 1/5 sessions complete - Session 1: PM Intelligence COMPLETE
-total_loc_produced = 37064  # +350 LOC (pm_intelligence.rs)
-total_tests_passing = 557  # +7 tests (pm_intelligence tests)
+phase_8b_progress = 0.80  # 4/5 sessions complete - Session 4: Worker Intelligence Integration COMPLETE
+total_loc_produced = 38494  # +120 LOC (worker.rs modifications for intelligence integration)
+total_tests_passing = 573  # No new tests (existing tests pass with new intelligence features)
 total_crates = 10
 mcp_integration_complete = true
 worker_mcp_integration_complete = true
@@ -185,6 +185,225 @@ sessions_complete = 7
 sessions_remaining = 0
 
 # Completed cycles
+[[completed_cycles]]
+id = "8B.4"
+name = "Worker Intelligence Integration - Session 4 Complete"
+completion_date = "2025-11-06"
+loc = 120  # worker.rs integration modifications only (intelligence components created in Session 3)
+tests = 0  # No new tests - integration uses existing test framework
+goal = "Integrate worker intelligence components (WorkerLearner, ExecutionStrategy, ToolSelector) into WorkerAgent for learning-based task execution"
+files_created = [
+    "helperfiles/SESSION_35_PHASE_8B_SESSION_4_WORKER_INTELLIGENCE_INTEGRATION.md - Complete session documentation"
+]
+files_modified = [
+    "hainet-persona/src/agents/worker.rs (+120 LOC net) - Full intelligence integration with learning capabilities",
+    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 4 completion"
+]
+key_features = [
+    "WorkerLearner field added to WorkerAgent struct (historical outcome tracking)",
+    "ExecutionStrategy field for adaptive timeout/retry configuration",
+    "ToolSelector field for intelligent tool selection based on history",
+    "Enhanced execute_task() with learning-based execution",
+    "Intelligent planning with tool recommendations (plan_task_execution_with_learning)",
+    "Adaptive execution with self-correction (execute_with_learning)",
+    "Outcome recording methods (record_success_outcome, record_failure_outcome, record_step_failure)",
+    "Public accessor methods for monitoring (learner, execution_strategy, tool_selector)",
+    "Self-correction toggle (set_self_correction method)",
+    "Task title as proxy for task type (avoids Task struct changes)",
+    "Backward compatibility maintained (all original methods preserved)"
+]
+compilation_status = "Success - Clean build in 4.49s (0 errors, warnings from other modules only)"
+test_status = "Existing tests pass (11 worker tests from Session 3, integration deferred to Session 5)"
+architecture_components = [
+    "WorkerAgent with integrated intelligence (learner, strategy, selector)",
+    "execute_task() → adjust_for_task → plan_with_learning → execute_with_learning → record_outcomes",
+    "Intelligent planning: discover_tools → select_best_tool → generate_prompt → parse_plan",
+    "Adaptive execution: execute_step → classify_error → adaptive_retry → record_outcome",
+    "Learning loop: outcome → learner/selector → improved future execution"
+]
+technical_highlights = [
+    "Historical learning with 100 outcome capacity (FIFO)",
+    "Adaptive execution: 5s base timeout, 3 retries, 1.5x backoff",
+    "Intelligent tool selection: Recommends best tool per task type",
+    "Error classification: Transient (retry), Permanent (request PM help), Unknown (retry once)",
+    "Self-correction: Exponential backoff with adaptive delays",
+    "Outcome recording: Every step tracked for learning",
+    "Task title proxy: Uses title as task_type (avoids struct changes)",
+    "Backward compatible: All original methods preserved",
+    "Type-safe integration: WorkerLearner/ExecutionStrategy/ToolSelector from Session 3",
+    "State machine unchanged: Idle → Planning → Working → Reporting flow intact"
+]
+integration_methods = [
+    "execute_task() - Enhanced with strategy adjustment and outcome recording",
+    "plan_task_execution_with_learning() - Tool recommendation based on history",
+    "execute_with_learning() - Adaptive retry with error classification",
+    "record_success_outcome() - Updates tool selector with success metrics",
+    "record_failure_outcome() - Records failures with error categorization",
+    "record_step_failure() - Tracks individual step failures for learning"
+]
+learning_flow = [
+    "Task assigned → Adjust strategy based on history (execution_strategy.adjust_for_task)",
+    "Planning phase → Recommend tool (tool_selector.select_best_tool)",
+    "Execution phase → Execute with adaptive retry (error classification + backoff)",
+    "Success → Record outcome (learner + tool_selector)",
+    "Failure → Record outcome + error category",
+    "Next task → Improved strategy/tool selection based on accumulated learning"
+]
+accessor_methods = [
+    "learner() / learner_mut() - Access historical learning data",
+    "execution_strategy() - Monitor adaptive configuration",
+    "tool_selector() - Inspect tool selection metrics",
+    "set_self_correction(bool) - Enable/disable self-correction for testing"
+]
+next_step = "Session 5: End-to-End PM-Worker Intelligence Testing (multi-task learning, self-correction validation, performance testing)"
+phase_completion = "Phase 8B: 80% complete (4/5 sessions done)"
+
+[[completed_cycles]]
+id = "8B.3"
+name = "Worker Autonomy & Self-Improvement - Session 3 Complete"
+completion_date = "2025-11-06"
+loc = 880  # worker_intelligence.rs(330) + worker_autonomy_test.rs(280) + mod.rs(20) + FUNCTIONS_INDEX(250)
+tests = 11  # 3 unit tests (module) + 8 integration tests + 1 summary test = 11 total (100% passing)
+goal = "Implement worker learning system with historical outcome tracking, adaptive execution strategies, self-correction, and intelligent tool selection"
+files_created = [
+    "hainet-persona/src/agents/worker_intelligence.rs (330 LOC) - Worker learning module with autonomy features",
+    "hainet-persona/tests/worker_autonomy_test.rs (280 LOC) - Comprehensive integration test suite",
+    "helperfiles/SESSION_34_PHASE_8B_SESSION_3_WORKER_AUTONOMY.md - Complete session documentation"
+]
+files_modified = [
+    "hainet-persona/src/agents/mod.rs (+20 LOC) - Added worker_intelligence module export",
+    "helperfiles/FUNCTIONS_INDEX.md (+250 LOC) - Documented all worker intelligence functions",
+    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 3 completion"
+]
+key_features = [
+    "WorkerLearner with FIFO capacity management (default 100 outcomes)",
+    "TaskOutcome recording (task_type, tool_used, success, duration, retry_count, error_category)",
+    "SuccessMetrics calculation (success_rate, reliability checks)",
+    "Tool recommendation based on historical success rates",
+    "Task type metrics for performance analysis",
+    "ExecutionStrategy with adaptive timeout/retry adjustment",
+    "Exponential backoff retry delays (1.5x multiplier)",
+    "ErrorCategory classification (Transient, Permanent, Unknown)",
+    "ToolSelector with fallback order and learning-based selection",
+    "Self-correction framework for error handling",
+    "Learning convergence to optimal strategies over time"
+]
+compilation_status = "Success - Clean build in 5.39s (0 errors, 15 warnings from other modules)"
+test_status = "11/11 worker autonomy tests passing (100% success rate)"
+architecture_components = [
+    "WorkerLearner - Historical outcome tracking with capacity limits",
+    "SuccessMetrics - Tool/task type performance analysis",
+    "ExecutionStrategy - Adaptive timeout/retry configuration",
+    "ToolSelector - Intelligent tool selection with fallback",
+    "ErrorCategory - Self-correction decision framework",
+    "TaskOutcome - Comprehensive execution record"
+]
+technical_highlights = [
+    "FIFO capacity management prevents memory bloat (default 100 outcomes)",
+    "Cached metrics for performance (tool_metrics, task_type_metrics)",
+    "Similarity-based tool recommendation (best success rate for task type)",
+    "Adaptive strategy adjustment based on historical duration/retries",
+    "Error classification for intelligent retry decisions",
+    "Exponential backoff: 500ms, 750ms, 1125ms, ... (1.5^n)",
+    "Learning convergence validated (30 iterations → 90% success rate)",
+    "Type-safe enum-based error categorization",
+    "Thread-safe design ready for integration with WorkerAgent"
+]
+test_breakdown = [
+    "test_worker_learner_creation - Initialization and capacity",
+    "test_task_outcome_recording - FIFO capacity enforcement (10 → 5)",
+    "test_tool_success_rate_calculation - 80% success rate validation",
+    "test_tool_selection_with_history - Recommends best tool (80% vs 50%)",
+    "test_adaptive_execution_strategy - Timeout increases for slow tasks",
+    "test_self_correction_transient_errors - Retry on timeout",
+    "test_self_correction_permanent_errors - Request help on not found",
+    "test_learning_convergence - 30 iterations converge to best tool (90%)",
+    "test_execution_strategy_retry_delays - Exponential backoff validation",
+    "test_tool_selector_fallback_order - Falls back when no history",
+    "test_integration_summary - Comprehensive test summary output"
+]
+learning_metrics = [
+    "Historical capacity: 100 outcomes (configurable)",
+    "Success rate calculation: successes / total_attempts",
+    "Reliability threshold: >= 3 attempts, >= 0.8 success rate",
+    "Tool recommendation: Highest success rate for task type",
+    "Strategy adjustment: Duration-based timeout scaling (1.5x)",
+    "Learning convergence: 30 iterations → optimal tool selection",
+    "Performance tracking: Duration, retry count, error category"
+]
+self_correction_flow = [
+    "Task execution → Record outcome → Classify error category",
+    "Transient error → Retry with exponential backoff",
+    "Permanent error → Request help from PM (no retry)",
+    "Unknown error → Retry once, then request help",
+    "Success → Update learner → Improve future recommendations"
+]
+next_step = "Session 4: Worker Intelligence Integration (integrate with WorkerAgent, task execution loop, outcome recording)"
+phase_completion = "Phase 8B: 60% complete (3/5 sessions done)"
+
+[[completed_cycles]]
+id = "8B.2"
+name = "PM Intelligence Integration - Session 2 Complete"
+completion_date = "2025-11-06"
+loc = 430  # pm.rs(+200) + pm_intelligence_integration_test.rs(+230)
+tests = 5  # PM intelligence integration tests (all passing)
+goal = "Integrate pm_intelligence module with PMAgent for learning-based task decomposition with compact LLM prompts"
+files_created = [
+    "hainet-persona/tests/pm_intelligence_integration_test.rs (230 LOC) - Integration tests for PM intelligence",
+    "helperfiles/SESSION_33_PHASE_8B_SESSION_2_PM_INTELLIGENCE_INTEGRATION.md - Complete session documentation"
+]
+files_modified = [
+    "hainet-persona/src/agents/pm.rs (+200 LOC) - Full pm_intelligence integration",
+    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 2 completion"
+]
+key_features = [
+    "HistoricalLearner field added to PMAgent struct",
+    "Project start time tracking for duration measurement",
+    "Complexity analysis in analyze_and_plan() method",
+    "Strategy recommendation from historical learning",
+    "Strategy-aware LLM prompting with compact format (44% token reduction)",
+    "Project outcome recording on completion",
+    "Revision count tracking across all tasks",
+    "Type-safe integration with SystemTime",
+    "5 comprehensive integration tests (100% passing)",
+    "Clean compilation (0 errors, warnings from other modules only)"
+]
+prompt_optimization = [
+    "Reduced prompt length from ~320 to ~180 tokens (44% reduction)",
+    "Compact, clear instructions for local small-to-medium LLMs",
+    "Direct imperative style (removed verbose explanations)",
+    "Single-line strategy guidance",
+    "Minimal formatting, maximum clarity"
+]
+compilation_status = "Success - Clean build in 6.19s (0 errors, 2 warnings from other modules)"
+test_status = "12/12 PM intelligence tests passing (7 unit + 5 integration, 100% success rate)"
+architecture_components = [
+    "PMAgent with HistoricalLearner integration",
+    "Complexity analysis in planning phase",
+    "Strategy-based decomposition (Sequential/Parallel/Hybrid)",
+    "Outcome recording with learning feedback loop",
+    "Duration and revision tracking",
+    "Strategy-aware LLM prompt generation"
+]
+technical_highlights = [
+    "Compact prompts optimized for local LLMs (gemma3:7b, llama3.2:3b)",
+    "Learning feedback loop: Project → Complexity → Strategy → Execute → Record → Learn",
+    "Type-safe outcome recording with optional field checks",
+    "u32 → usize casting for revision count summing",
+    "Integration tests validate real-world scenarios",
+    "No TaskComplexityAnalyzer import (removed unused)",
+    "Thread-safe with existing Arc<RwLock<>> patterns"
+]
+test_breakdown = [
+    "test_complexity_analysis_integration - Real REST API project (5 tasks, multiple domains)",
+    "test_learner_integration - Multi-outcome learning with similarity-based recommendations",
+    "test_strategy_learning_convergence - Large dataset (10 projects) with 100% success rate",
+    "test_learner_capacity_limit - Capacity management (10 outcomes → 5 retained)",
+    "test_mixed_strategy_performance - Strategy comparison (Sequential 66% vs Parallel 100%)"
+]
+next_step = "Session 3: Worker Autonomy & Self-Improvement (adaptive task execution, tool selection optimization)"
+phase_completion = "Phase 8B: 40% complete (2/5 sessions done)"
+
 [[completed_cycles]]
 id = "8B.1"
 name = "Enhanced PM Intelligence - Session 1 Complete"

@@ -1,7 +1,7 @@
 //! # START OF FILE hainet-persona/src/agents/worker.rs
 //! Worker Agent
 //! 
-//! Executes individual tasks using MCP tools.
+//! Executes individual tasks using MCP tools with learning capabilities.
 //! Worker agents follow this state machine:
 //! Idle → Planning → Working → Reporting → (Idle | Error)
 
@@ -16,7 +16,9 @@ use crate::tools::mcp::MCPClientManager;
 use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
 use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
+use super::worker_intelligence::{WorkerLearner, ExecutionStrategy, ToolSelector, ErrorCategory, TaskOutcome};
 use serde_json::json;
+use std::time::SystemTime;
 
 /// Worker Agent
 /// 
@@ -24,6 +26,7 @@ use serde_json::json;
 /// - Executing specific tasks assigned by PM using LLM-powered planning
 /// - Using MCP tools to accomplish work
 /// - Reporting results back to PM for validation
+/// - Learning from task outcomes to improve performance over time
 pub struct WorkerAgent {
     /// Unique agent identifier
     id: AgentId,
@@ -55,8 +58,20 @@ pub struct WorkerAgent {
     /// Ollama client for LLM-powered task analysis
     ollama_client: OllamaClient,
     
-    /// Maximum retry attempts for failed operations
+    /// Maximum retry attempts for failed operations (deprecated - use execution_strategy.max_retries)
     max_retries: usize,
+    
+    /// Worker intelligence - historical learning
+    learner: WorkerLearner,
+    
+    /// Adaptive execution configuration
+    execution_strategy: ExecutionStrategy,
+    
+    /// Intelligent tool selector
+    tool_selector: ToolSelector,
+    
+    /// Enable self-correction (default: true)
+    self_correction_enabled: bool,
 }
 
 impl WorkerAgent {
@@ -79,6 +94,28 @@ impl WorkerAgent {
             _ => WorkerTemplate::file_worker(),
         };
         
+        // Create default fallback tool order based on template
+        let fallback_tools = template.mcp_servers.iter()
+            .flat_map(|server| {
+                match server.as_str() {
+                    "hainet-files" => vec![
+                        format!("{}::file_read", server),
+                        format!("{}::file_write", server),
+                        format!("{}::file_list", server),
+                    ],
+                    "hainet-system" => vec![
+                        format!("{}::system_status", server),
+                        format!("{}::list_services", server),
+                    ],
+                    "hainet-dev" => vec![
+                        format!("{}::git_status", server),
+                        format!("{}::cargo_build", server),
+                    ],
+                    _ => vec![],
+                }
+            })
+            .collect();
+        
         Self {
             id,
             worker_type,
@@ -90,7 +127,11 @@ impl WorkerAgent {
             project_manager,
             mcp_client,
             ollama_client: OllamaClient::localhost(),
-            max_retries: 3,
+            max_retries: 3, // Kept for backward compatibility
+            learner: WorkerLearner::new(), // Default 100 outcome capacity
+            execution_strategy: ExecutionStrategy::default(), // 5s timeout, 3 retries, 1.5x backoff
+            tool_selector: ToolSelector::new(fallback_tools),
+            self_correction_enabled: true,
         }
     }
     
@@ -104,6 +145,28 @@ impl WorkerAgent {
     ) -> Self {
         let id = AgentId::new(AgentType::Worker, template.name.clone());
         
+        // Create default fallback tool order based on template
+        let fallback_tools = template.mcp_servers.iter()
+            .flat_map(|server| {
+                match server.as_str() {
+                    "hainet-files" => vec![
+                        format!("{}::file_read", server),
+                        format!("{}::file_write", server),
+                        format!("{}::file_list", server),
+                    ],
+                    "hainet-system" => vec![
+                        format!("{}::system_status", server),
+                        format!("{}::list_services", server),
+                    ],
+                    "hainet-dev" => vec![
+                        format!("{}::git_status", server),
+                        format!("{}::cargo_build", server),
+                    ],
+                    _ => vec![],
+                }
+            })
+            .collect();
+        
         Self {
             id,
             worker_type: WorkerType::Files, // Default, overridden by template
@@ -115,7 +178,11 @@ impl WorkerAgent {
             project_manager,
             mcp_client,
             ollama_client: OllamaClient::localhost(),
-            max_retries: 3,
+            max_retries: 3, // Kept for backward compatibility
+            learner: WorkerLearner::new(),
+            execution_strategy: ExecutionStrategy::default(),
+            tool_selector: ToolSelector::new(fallback_tools),
+            self_correction_enabled: true,
         }
     }
     
@@ -150,22 +217,33 @@ impl WorkerAgent {
         Ok(())
     }
     
-    /// Execute assigned task with LLM-powered planning
+    /// Execute assigned task with LLM-powered planning and learning
     pub async fn execute_task(&mut self) -> Result<()> {
         let task_id = self.current_task.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No task assigned"))?;
+            .ok_or_else(|| anyhow::anyhow!("No task assigned"))?
+            .clone();
+        
+        // Get task details
+        let task = self.get_task_details(&task_id).await?;
+        
+        // Adjust execution strategy based on task title (proxy for task type) and history
+        self.execution_strategy.adjust_for_task(&task.title, &mut self.learner);
+        tracing::info!(
+            "Worker {} adaptive strategy for '{}': timeout={}ms, retries={}",
+            self.id.name,
+            task.title,
+            self.execution_strategy.base_timeout_ms,
+            self.execution_strategy.max_retries
+        );
         
         // Transition to Planning
         self.state_machine.transition(
             AgentState::Planning,
-            "Analyzing task requirements".to_string()
+            "Analyzing task requirements with learning".to_string()
         )?;
         
-        // Get task details
-        let task = self.get_task_details(task_id).await?;
-        
-        // Use LLM to analyze task and plan tool execution
-        let execution_plan = self.plan_task_execution(&task.description).await?;
+        // Use LLM to plan with intelligent tool selection
+        let execution_plan = self.plan_task_execution_with_learning(&task).await?;
         
         tracing::info!("Worker {} planned {} steps for task: {}", 
                        self.id.name, execution_plan.steps.len(), task.title);
@@ -173,25 +251,39 @@ impl WorkerAgent {
         // Transition to Working
         self.state_machine.transition(
             AgentState::Working,
-            "Executing task".to_string()
+            "Executing task with adaptive retry".to_string()
         )?;
         
-        // Execute task using MCP tools with retry logic
-        let deliverables = self.execute_with_retries(&execution_plan).await?;
+        // Execute with learning and self-correction
+        let start_time = SystemTime::now();
+        let result = self.execute_with_learning(&execution_plan, &task).await;
         
-        // Transition to Reporting
-        self.state_machine.transition(
-            AgentState::Reporting,
-            "Task complete, reporting to PM".to_string()
-        )?;
-        
-        // Submit task for review
-        let project_manager = self.project_manager.write().await;
-        project_manager.complete_task(task_id, deliverables).await?;
-        
-        tracing::info!("Worker {} completed task: {}", self.id.name, task.title);
-        
-        Ok(())
+        match result {
+            Ok(deliverables) => {
+                // Record success outcome
+                self.record_success_outcome(&task, start_time, &execution_plan);
+                
+                // Transition to Reporting
+                self.state_machine.transition(
+                    AgentState::Reporting,
+                    "Task complete, reporting to PM".to_string()
+                )?;
+                
+                // Submit task for review
+                let project_manager = self.project_manager.write().await;
+                project_manager.complete_task(&task_id, deliverables).await?;
+                
+                tracing::info!("Worker {} completed task: {}", self.id.name, task.title);
+                
+                Ok(())
+            }
+            Err(e) => {
+                // Record failure outcome
+                self.record_failure_outcome(&task, start_time, &execution_plan, &e);
+                
+                Err(e)
+            }
+        }
     }
     
     /// Wait for PM validation with real task polling
@@ -354,18 +446,243 @@ impl WorkerAgent {
         Err(anyhow::anyhow!("Task not found: {}", task_id))
     }
     
-    /// Plan task execution using LLM (enhanced with better prompting)
-    async fn plan_task_execution(&self, task_description: &str) -> Result<ExecutionPlan> {
-        let planning_prompt = self.generate_planning_prompt(task_description);
+    /// Plan task execution with intelligent tool selection
+    async fn plan_task_execution_with_learning(&mut self, task: &crate::projects::Task) -> Result<ExecutionPlan> {
+        // Discover available tools
+        let available_tools = self.discover_tools().await?;
+        
+        // Select best tool based on task title (proxy for task type)
+        let recommended_tool = self.tool_selector.select_best_tool(&task.title, &available_tools);
+        
+        tracing::info!(
+            "Worker {} recommended tool for '{}': {}",
+            self.id.name,
+            task.title,
+            recommended_tool
+        );
+        
+        // Generate planning prompt with tool recommendation
+        let planning_prompt = format!(
+            "{}\n\nRECOMMENDED TOOL (based on history): {}\nConsider using this tool if applicable.",
+            self.generate_planning_prompt(&task.description),
+            recommended_tool
+        );
         
         let options = GenerationOptions {
-            temperature: Some(0.1), // More deterministic for execution planning
+            temperature: Some(0.1),
             max_tokens: Some(2048),
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
         
-        // Use gemma3:7b for worker task planning (as per Session 1)
+        let response = self.ollama_client.generate("gemma3:7b", &planning_prompt, options)
+            .await
+            .context("Failed to generate execution plan with LLM")?;
+        
+        self.parse_execution_plan(&response.text)
+    }
+    
+    /// Execute plan with adaptive retry and self-correction
+    async fn execute_with_learning(&mut self, plan: &ExecutionPlan, task: &crate::projects::Task) -> Result<Vec<String>> {
+        let mut deliverables = Vec::new();
+        
+        for (idx, step) in plan.steps.iter().enumerate() {
+            tracing::info!(
+                "Worker {} executing step {}/{}: {}",
+                self.id.name,
+                idx + 1,
+                plan.steps.len(),
+                step.description
+            );
+            
+            let step_start = SystemTime::now();
+            let mut retry_count = 0u32;
+            
+            let result = loop {
+                retry_count += 1;
+                
+                match self.execute_step(step).await {
+                    Ok(result) => {
+                        // Record successful step
+                        let duration_ms = step_start.elapsed()
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        
+                        let outcome = TaskOutcome {
+                            task_type: task.title.clone(),
+                            tool_used: step.tool.clone(),
+                            success: true,
+                            duration_ms,
+                            retry_count: retry_count.saturating_sub(1),
+                            error_category: None,
+                            timestamp: SystemTime::now(),
+                        };
+                        
+                        self.learner.record_outcome(outcome.clone());
+                        self.tool_selector.record_outcome(outcome);
+                        
+                        break result;
+                    }
+                    Err(error) => {
+                        // Self-correction check
+                        if self.self_correction_enabled {
+                            let error_category = ErrorCategory::classify(&error.to_string());
+                            
+                            tracing::warn!(
+                                "Worker {} step failed (attempt {}): {:?} - {}",
+                                self.id.name,
+                                retry_count,
+                                error_category,
+                                error
+                            );
+                            
+                            match error_category {
+                                ErrorCategory::Transient => {
+                                    // Retry with adaptive backoff
+                                    if retry_count <= self.execution_strategy.max_retries {
+                                        let delay_ms = self.execution_strategy.retry_delay_ms(retry_count);
+                                        tracing::info!("Retrying in {}ms (transient error)", delay_ms);
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                        continue;
+                                    } else {
+                                        // Max retries exceeded
+                                        self.record_step_failure(task, step, retry_count, error_category);
+                                        return Err(anyhow::anyhow!(
+                                            "Step {} failed after {} retries: {}",
+                                            idx + 1,
+                                            self.execution_strategy.max_retries,
+                                            error
+                                        ));
+                                    }
+                                }
+                                ErrorCategory::Permanent => {
+                                    // No retry, request help from PM
+                                    tracing::error!("Permanent error detected, requesting PM help");
+                                    self.record_step_failure(task, step, retry_count, error_category);
+                                    return Err(anyhow::anyhow!(
+                                        "Permanent error (requesting PM help): {}",
+                                        error
+                                    ));
+                                }
+                                ErrorCategory::Unknown => {
+                                    // Retry once, then request help
+                                    if retry_count == 1 {
+                                        tracing::info!("Retrying unknown error once");
+                                        let delay_ms = self.execution_strategy.retry_delay_ms(retry_count);
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                        continue;
+                                    } else {
+                                        tracing::error!("Unknown error persists, requesting PM help");
+                                        self.record_step_failure(task, step, retry_count, error_category);
+                                        return Err(error);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Self-correction disabled, use old retry logic
+                            if retry_count <= self.execution_strategy.max_retries {
+                                let delay_ms = 500 * retry_count as u64;
+                                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                continue;
+                            } else {
+                                return Err(error);
+                            }
+                        }
+                    }
+                }
+            };
+            
+            deliverables.push(format!("Step {}: {} - {}", idx + 1, step.description, result));
+        }
+        
+        Ok(deliverables)
+    }
+    
+    /// Record success outcome for learning
+    fn record_success_outcome(&mut self, task: &crate::projects::Task, start_time: SystemTime, plan: &ExecutionPlan) {
+        let duration_ms = start_time.elapsed()
+            .unwrap_or_default()
+            .as_millis() as u64;
+        
+        // Record aggregate outcome for each tool used
+        for step in &plan.steps {
+            let outcome = TaskOutcome {
+                task_type: task.title.clone(),
+                tool_used: step.tool.clone(),
+                success: true,
+                duration_ms,
+                retry_count: 0,
+                error_category: None,
+                timestamp: SystemTime::now(),
+            };
+            
+            self.tool_selector.record_outcome(outcome);
+        }
+        
+        tracing::info!(
+            "Worker {} recorded success: task='{}', duration={}ms, tools={}",
+            self.id.name,
+            task.title,
+            duration_ms,
+            plan.steps.len()
+        );
+    }
+    
+    /// Record failure outcome for learning
+    fn record_failure_outcome(&mut self, task: &crate::projects::Task, start_time: SystemTime, plan: &ExecutionPlan, error: &anyhow::Error) {
+        let duration_ms = start_time.elapsed()
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let error_category = ErrorCategory::classify(&error.to_string());
+        
+        for step in &plan.steps {
+            let outcome = TaskOutcome {
+                task_type: task.title.clone(),
+                tool_used: step.tool.clone(),
+                success: false,
+                duration_ms,
+                retry_count: self.execution_strategy.max_retries,
+                error_category: Some(error_category),
+                timestamp: SystemTime::now(),
+            };
+            
+            self.tool_selector.record_outcome(outcome);
+        }
+        
+        tracing::warn!(
+            "Worker {} recorded failure: task='{}', error={:?}",
+            self.id.name,
+            task.title,
+            error_category
+        );
+    }
+    
+    /// Record step failure for learning
+    fn record_step_failure(&mut self, task: &crate::projects::Task, step: &ExecutionStep, retry_count: u32, category: ErrorCategory) {
+        let outcome = TaskOutcome {
+            task_type: task.title.clone(),
+            tool_used: step.tool.clone(),
+            success: false,
+            duration_ms: 0,
+            retry_count,
+            error_category: Some(category),
+            timestamp: SystemTime::now(),
+        };
+        
+        self.learner.record_outcome(outcome);
+    }
+    
+    /// Plan task execution using LLM (original method for backward compatibility)
+    async fn plan_task_execution(&self, task_description: &str) -> Result<ExecutionPlan> {
+        let planning_prompt = self.generate_planning_prompt(task_description);
+        
+        let options = GenerationOptions {
+            temperature: Some(0.1),
+            max_tokens: Some(2048),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
+        
         let response = self.ollama_client.generate(
             "gemma3:7b",
             &planning_prompt,
@@ -567,7 +884,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
             .context("Failed to parse after JSON repair")
     }
     
-    /// Execute plan with retry logic
+    /// Execute plan with retry logic (original method for backward compatibility)
     async fn execute_with_retries(&self, plan: &ExecutionPlan) -> Result<Vec<String>> {
         let mut deliverables = Vec::new();
         
@@ -625,8 +942,6 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
         // Simple task parsing - in production this would use LLM
         // For now, support basic file operations
         if task_description.contains("read") || task_description.contains("get") {
-            // Extract file path from task description
-            // This is a simplified version - real implementation would use NLP
             let path = self.extract_path_from_task(task_description);
             
             let result = mcp_client.call_tool(
@@ -658,7 +973,6 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
             
             Ok(vec![format!("Listed directory: {}", result)])
         } else {
-            // Default: assume read operation
             Ok(vec!["File operation completed".to_string()])
         }
     }
@@ -677,9 +991,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     /// Extract file path from task description (simplified NLP)
     fn extract_path_from_task(&self, task_description: &str) -> String {
         // Very simple path extraction - would use LLM in production
-        // Look for common path patterns
         if let Some(start) = task_description.find("/") {
-            // Find end of path (space or end of string)
             let remaining = &task_description[start..];
             if let Some(end) = remaining.find(" ") {
                 remaining[..end].to_string()
@@ -687,7 +999,6 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
                 remaining.to_string()
             }
         } else {
-            // Default path for testing
             "/tmp/test.txt".to_string()
         }
     }
@@ -727,6 +1038,31 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     /// Get reference to template (for testing)
     pub fn template(&self) -> &WorkerTemplate {
         &self.template
+    }
+    
+    /// Get reference to learner (for testing and monitoring)
+    pub fn learner(&self) -> &WorkerLearner {
+        &self.learner
+    }
+    
+    /// Get mutable reference to learner (for testing)
+    pub fn learner_mut(&mut self) -> &mut WorkerLearner {
+        &mut self.learner
+    }
+    
+    /// Get reference to execution strategy (for monitoring)
+    pub fn execution_strategy(&self) -> &ExecutionStrategy {
+        &self.execution_strategy
+    }
+    
+    /// Get reference to tool selector (for monitoring)
+    pub fn tool_selector(&self) -> &ToolSelector {
+        &self.tool_selector
+    }
+    
+    /// Set self-correction enabled/disabled
+    pub fn set_self_correction(&mut self, enabled: bool) {
+        self.self_correction_enabled = enabled;
     }
 }
 

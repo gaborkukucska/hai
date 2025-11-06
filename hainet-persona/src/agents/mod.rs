@@ -15,6 +15,7 @@ pub mod state;
 pub mod pm;
 pub mod pm_intelligence;
 pub mod worker;
+pub mod worker_intelligence;
 pub mod templates;
 pub mod llm_config;
 pub mod metrics;
@@ -35,6 +36,10 @@ pub use pm_intelligence::{
     HistoricalLearner, TaskComplexityAnalyzer, DynamicTaskAdjuster,
 };
 pub use worker::WorkerAgent;
+pub use worker_intelligence::{
+    WorkerLearner, TaskOutcome, ExecutionStrategy, ToolSelector,
+    ErrorCategory, SuccessMetrics,
+};
 pub use templates::WorkerTemplate;
 
 // Re-export configuration and metrics types

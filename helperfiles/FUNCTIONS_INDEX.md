@@ -332,6 +332,26 @@ This file tracks the core functions/methods defined within the framework, catego
 - `WorkerTemplate::all_templates()` - Get all available worker templates
 - `WorkerTemplate::select_for_task(task_description)` - Select the most appropriate worker template for a task description
 
+### hainet-persona/src/agents/worker_intelligence.rs (Phase 8B Session 3 - Complete)
+- `ErrorCategory::classify(error_msg)` - Classify error from patterns (Transient, Permanent, Unknown)
+- `TaskOutcome` - Record of task execution (task_type, tool_used, success, duration, retry_count, error_category, timestamp)
+- `SuccessMetrics::success_rate()` - Calculate success rate (0.0 to 1.0)
+- `SuccessMetrics::is_reliable()` - Check if metrics indicate reliable tool (>= 3 attempts, >= 0.8 success rate)
+- `WorkerLearner::new()` - Create learner with default capacity (100 outcomes)
+- `WorkerLearner::with_capacity(capacity)` - Create learner with custom capacity
+- `WorkerLearner::record_outcome(outcome)` - Record task outcome with FIFO capacity management
+- `WorkerLearner::outcome_count()` - Get number of recorded outcomes
+- `WorkerLearner::get_tool_metrics(tool)` - Calculate success metrics for specific tool
+- `WorkerLearner::get_task_type_metrics(task_type)` - Calculate success metrics for task type
+- `WorkerLearner::recommend_tool(task_type, available_tools)` - Recommend best tool based on history
+- `ExecutionStrategy::default()` - Create default strategy (5s timeout, 3 retries, 1.5x backoff)
+- `ExecutionStrategy::adjust_for_task(task_type, learner)` - Adjust timeouts/retries based on history
+- `ExecutionStrategy::retry_delay_ms(attempt)` - Calculate exponential backoff delay for attempt
+- `ToolSelector::new(fallback_order)` - Create tool selector with fallback order
+- `ToolSelector::select_best_tool(task_type, available_tools)` - Select optimal tool based on learning
+- `ToolSelector::record_outcome(outcome)` - Record outcome for learning
+- `ToolSelector::learner()` - Get reference to learner for direct access
+
 ### hainet-persona/src/agents/mod.rs
 - `AgentContext::new(message_bus, prompt_manager, mcp_client, guardian)` - Create shared context
 
