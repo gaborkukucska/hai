@@ -4,6 +4,7 @@
 //! 
 //! ## Usage
 //! ```rust
+//! use hainet_persona::config::HaiNetConfig;
 //! let config = HaiNetConfig::load_or_default();
 //! let model = config.default_models.admin_model;
 //! ```

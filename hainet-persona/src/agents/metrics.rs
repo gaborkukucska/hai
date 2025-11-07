@@ -57,6 +57,24 @@ pub struct OperationResult {
     pub validation_passed: bool,
 }
 
+impl Default for OperationResult {
+    fn default() -> Self {
+        Self {
+            agent_type: AgentType::Admin, // Default value, should be overwritten
+            agent_id: AgentId::new(AgentType::Admin, "default".to_string()),
+            config_hash: String::new(),
+            operation_type: String::new(),
+            success: false,
+            response_time: Duration::default(),
+            tokens_used: None,
+            error_message: None,
+            json_parse_success: false,
+            had_syntax_errors: false,
+            validation_passed: false,
+        }
+    }
+}
+
 /// Collects and persists agent metrics
 pub struct MetricsCollector {
     pool: SqlitePool,

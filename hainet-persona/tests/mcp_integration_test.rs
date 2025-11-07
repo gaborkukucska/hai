@@ -21,10 +21,11 @@ async fn test_mcp_client_server_communication() -> Result<()> {
 
     // Build command to start hainet-files server
     let mut cmd = Command::new("cargo");
+    let project_root = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
     cmd.arg("run")
         .arg("--package")
         .arg("hainet-files")
-        .current_dir("/home/tom/hai");
+        .current_dir(project_root);
 
     // Start the server
     client.start_server("test-files", cmd).await?;
@@ -166,13 +167,14 @@ async fn test_mcp_multiple_servers() -> Result<()> {
     let client = MCPClientManager::new();
     
     // Start same server twice with different names (should both work)
+    let project_root = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
     let mut cmd1 = Command::new("cargo");
     cmd1.arg("run").arg("--package").arg("hainet-files")
-        .current_dir("/home/tom/hai");
+        .current_dir(project_root.clone());
     
     let mut cmd2 = Command::new("cargo");
     cmd2.arg("run").arg("--package").arg("hainet-files")
-        .current_dir("/home/tom/hai");
+        .current_dir(project_root);
     
     client.start_server("files-1", cmd1).await?;
     client.start_server("files-2", cmd2).await?;

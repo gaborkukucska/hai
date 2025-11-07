@@ -19,6 +19,7 @@ use hainet_persona::agents::{
 use hainet_persona::projects::ProjectManager;
 use hainet_persona::tools::mcp::MCPClientManager;
 use hainet_persona::guardian::GuardianSystem;
+use hainet_persona::ai_providers::AIProviderManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -114,9 +115,13 @@ async fn main() -> Result<()> {
         guardian_system.clone(),
     ));
     
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await?);
+    ai_provider_manager.discover_providers().await?;
+
     let mut admin = AdminAgent::new(
         agent_context, 
         project_manager.clone(),
+        ai_provider_manager,
         metrics.clone()
     ).await?;
     admin.start().await?;

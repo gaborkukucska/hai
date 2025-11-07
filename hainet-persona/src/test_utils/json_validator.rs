@@ -231,17 +231,17 @@ impl JSONValidator {
         let open_brackets = repaired.matches('[').count();
         let close_brackets = repaired.matches(']').count();
         
+        // Add missing closing brackets before braces
+        if open_brackets > close_brackets {
+            for _ in 0..(open_brackets - close_brackets) {
+                repaired.push(']');
+            }
+        }
+
         // Add missing closing braces
         if open_braces > close_braces {
             for _ in 0..(open_braces - close_braces) {
                 repaired.push('}');
-            }
-        }
-        
-        // Add missing closing brackets
-        if open_brackets > close_brackets {
-            for _ in 0..(open_brackets - close_brackets) {
-                repaired.push(']');
             }
         }
         
