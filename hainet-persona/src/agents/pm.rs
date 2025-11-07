@@ -855,8 +855,31 @@ mod tests {
         assert_eq!(pm.state(), &AgentState::Startup);
     }
     
+    async fn check_ollama_gemma3() -> (bool, Vec<String>) {
+        let client = OllamaClient::localhost();
+
+        if client.health_check().await.is_err() {
+            return (false, vec![]);
+        }
+
+        // Check for gemma3 models
+        let models = client.list_models().await.unwrap_or_default();
+        let gemma3_models: Vec<String> = models.iter()
+            .filter(|m| m.name.contains("gemma3"))
+            .map(|m| m.name.clone())
+            .collect();
+
+        (!gemma3_models.is_empty(), gemma3_models)
+    }
+
     #[tokio::test]
     async fn test_pm_startup_transition() {
+        let (ollama_ok, _) = check_ollama_gemma3().await;
+        if !ollama_ok {
+            println!("⚠️ Skipping test: Ollama not running");
+            return;
+        }
+
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));
         let prompt_manager = Arc::new(RwLock::new(PromptManager::new("prompts".into()).unwrap()));
         let project_manager = Arc::new(RwLock::new(

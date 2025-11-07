@@ -374,7 +374,7 @@ mod tests {
     
     #[test]
     fn test_json_repair_missing_bracket() {
-        let json = r#"{"plan_title": "Test", "plan_overview": "Overview", "plan_task_list": ["Task 1"}"#;
+        let json = r#"{"plan_title": "Test", "plan_overview": "Overview", "plan_task_list": ["Task 1""#;
         let result = JSONValidator::parse_with_fallbacks(json);
         
         assert!(result.value.is_some());

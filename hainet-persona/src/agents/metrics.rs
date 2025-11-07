@@ -344,13 +344,13 @@ mod tests {
                 agent_id: AgentId::new(AgentType::PM, "test".to_string()),
                 config_hash: "test_hash".to_string(),
                 operation_type: "test_op".to_string(),
-                success: i % 3 != 0, // 2/3 success rate
+                success: i < 7, // 7/10 success rate
                 response_time: Duration::from_millis(100 + i as u64 * 10),
                 tokens_used: Some(50 + i),
                 error_message: None,
                 json_parse_success: true,
                 had_syntax_errors: false,
-                validation_passed: i % 3 != 0,
+                validation_passed: i < 7,
             };
             
             collector.record_operation(result).await.unwrap();
@@ -358,7 +358,7 @@ mod tests {
         
         let metrics = collector.get_aggregate(AgentType::PM).await.unwrap();
         assert_eq!(metrics.total_operations, 10);
-        assert!(metrics.success_rate > 0.6 && metrics.success_rate < 0.7);
+        assert!((metrics.success_rate - 0.7).abs() < 0.01);
     }
     
     #[test]
