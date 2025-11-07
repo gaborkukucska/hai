@@ -16,6 +16,7 @@ use hainet_persona::prompts::PromptManager;
 use hainet_persona::tools::mcp::MCPClientManager;
 use hainet_persona::guardian::GuardianSystem;
 use hainet_persona::projects::ProjectManager;
+use hainet_persona::ai_providers::AIProviderManager;
 
 use crate::stt_handler::{STTHandler, AudioData, TranscriptionResult};
 
@@ -139,9 +140,12 @@ impl AdminBridge {
         let metrics_collector = Arc::new(RwLock::new(
             MetricsCollector::new(&format!("sqlite://{}?mode=rwc", metrics_db_path.display())).await?
         ));
+
+        // Create AIProviderManager
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await?);
         
         // Create Admin AI agent
-        let mut admin = AdminAgent::new(context, project_manager, metrics_collector).await?;
+        let mut admin = AdminAgent::new(context, project_manager, ai_provider_manager, metrics_collector).await?;
         
         // Start Admin AI
         admin.start().await?;
