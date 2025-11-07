@@ -312,7 +312,8 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ### hainet-persona/src/agents/admin.rs
 - `AdminAgent::new(context)` - Create new Admin AI agent
-- `AdminAgent::process_user_input(user_input)` - Process user input (stub)
+- `AdminAgent::process_user_input(user_input)` - Processes user input, detects complex intents, creates project plans, and spawns PM agents.
+- `AdminAgent::spawn_pm_agent(project)` - Spawns a new PMAgent to manage a project.
 - `Agent::id()` - Get agent identifier
 - `Agent::process_message(message)` - Process incoming message
 - `Agent::start()` - Start agent main loop
