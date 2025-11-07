@@ -170,10 +170,15 @@ impl SelectionContext {
     }
 }
 
-impl SelectionContext {
-    /// Get minimum acceptable score
-    pub fn min_acceptable_score_value(&self) -> f32 {
-        self.min_acceptable_score()
+impl SelectedModel {
+    /// Get a client for the selected provider
+    pub fn get_client(&self) -> Result<Box<dyn crate::ai_providers::ProviderClient>> {
+        match self.provider_type {
+            crate::ai_providers::discovery::ProviderType::Ollama => {
+                Ok(Box::new(crate::ai_providers::providers::OllamaClient::new(self.endpoint.clone())))
+            }
+            _ => Err(anyhow!("Provider type not yet supported for client creation")),
+        }
     }
 }
 

@@ -277,7 +277,9 @@ Research methodology:
         scores.sort_by(|a, b| b.0.cmp(&a.0));
         
         // Return template with highest score, or FileWorker as default
-        if scores[0].0 > 0 {
+        scores.sort_by(|a, b| b.0.cmp(&a.0));
+
+        if !scores.is_empty() && scores[0].0 > 0 {
             scores[0].1.clone()
         } else {
             // Default to FileWorker for generic tasks

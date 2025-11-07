@@ -19,6 +19,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use anyhow::anyhow;
+
 use super::{Agent, AgentContext, IntentParser, TaskPlanner, AgentStateMachine};
 use super::pm::PMAgent;
 use super::llm_config::AgentLLMConfig;
@@ -27,7 +29,8 @@ use crate::config::HaiNetConfig;
 use crate::messaging::{AgentId, Message};
 use crate::prompts::{AgentType, AgentState, PromptContext};
 use crate::projects::{ProjectManager, ProjectId};
-use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
+use crate::ai_providers::{AIProviderManager, SelectionContext};
+use crate::ai_providers::providers::{GenerationOptions};
 use crate::test_utils::JSONValidator;
 use std::time::Instant;
 
@@ -57,8 +60,8 @@ pub struct AdminAgent {
     /// Project manager for creating and tracking projects
     project_manager: Arc<RwLock<ProjectManager>>,
     
-    /// Ollama client for LLM-powered planning
-    ollama_client: OllamaClient,
+    /// AI provider manager for dynamic model selection
+    pub ai_provider_manager: Arc<AIProviderManager>,
     
     /// Active projects being monitored
     active_projects: HashMap<ProjectId, AgentId>,
@@ -81,6 +84,7 @@ impl AdminAgent {
     pub async fn new(
         context: Arc<AgentContext>,
         project_manager: Arc<RwLock<ProjectManager>>,
+        ai_provider_manager: Arc<AIProviderManager>,
         metrics: Arc<RwLock<MetricsCollector>>,
     ) -> Result<Self> {
         let id = AgentId::new(AgentType::Admin, "main-admin".to_string());
@@ -89,7 +93,6 @@ impl AdminAgent {
         // Get Admin-specific LLM configuration
         let llm_config = config.get_agent_llm_config(AgentType::Admin);
         
-        tracing::info!("Admin AI using model: {}", config.default_models.admin_model);
         tracing::info!("Admin AI LLM config: temp={}, max_tokens={}, provider_pref={:?}", 
                       llm_config.temperature, llm_config.max_tokens, llm_config.provider_preference);
         
@@ -100,7 +103,7 @@ impl AdminAgent {
             task_planner: TaskPlanner::new(),
             state_machine: AgentStateMachine::new(),
             project_manager,
-            ollama_client: OllamaClient::localhost(),
+            ai_provider_manager,
             active_projects: HashMap::new(),
             running: false,
             config,
@@ -109,16 +112,13 @@ impl AdminAgent {
         })
     }
     
-    /// Process user input - main entry point for user interaction
+    /// Main entry point for user interaction
     pub async fn process_user_input(&mut self, user_input: String) -> Result<String> {
-        // Record task start for metrics
-        let start_time = Instant::now();
-        
-        // Parse user intent
+        // 1. Parse Intent
         let intent = self.intent_parser.parse(&user_input).await?;
-        
         tracing::info!("Parsed intent: {:?} (confidence: {})", intent.intent_type, intent.confidence);
-        
+
+        // 2. Handle initial startup state
         // If still in Startup state, transition to Conversation first
         if *self.state_machine.current_state() == AgentState::Startup {
             tracing::warn!("Admin AI still in Startup state, transitioning to Conversation");
@@ -127,148 +127,94 @@ impl AdminAgent {
                 "Auto-transition from Startup on first message".to_string()
             )?;
         }
-        
-        // Detect if this is a complex/multi-step intent
+
+        // 3. Route to appropriate handler based on intent complexity
         if self.is_complex_intent(&intent, &user_input)? {
-            // Transition to Planning state from any valid state
-            let current_state = self.state_machine.current_state().clone();
-            
-            // Allow Planning transition from Conversation, Idle, or Monitoring states
-            if current_state == AgentState::Conversation 
-                || current_state == AgentState::Idle 
-                || current_state == AgentState::Monitoring {
-                self.state_machine.transition(
-                    AgentState::Planning,
-                    format!("Complex intent detected: {:?}", intent.intent_type)
-                )?;
-            } else {
-                // Force transition to Conversation first, then to Planning
-                tracing::warn!("Admin in unexpected state {:?}, transitioning to Conversation first", current_state);
-                self.state_machine.transition(
-                    AgentState::Conversation,
-                    "Resetting to Conversation state".to_string()
-                )?;
-                self.state_machine.transition(
-                    AgentState::Planning,
-                    format!("Complex intent detected: {:?}", intent.intent_type)
-                )?;
-            }
-            
-            // Generate project plan using LLM
-            let project_plan = self.generate_project_plan(&user_input, &intent).await?;
-            
-            // Create project
-            let project_id = self.create_project(
-                project_plan.title.clone(),
-                project_plan.overview.clone(),
-                project_plan.initial_tasks.clone(),
-            ).await?;
-            
-            // Spawn PM agent
-            let pm_id = self.spawn_pm_agent(&project_id, &project_plan).await?;
-            
-            // Track project
-            self.active_projects.insert(project_id.clone(), pm_id.clone());
-            
-            // Transition to Monitoring state
-            self.state_machine.transition(
-                AgentState::Monitoring,
-                format!("Project {} created, PM agent {} spawned", project_id, pm_id.name)
-            )?;
-            
-            // Record successful task completion
-            let response_time = start_time.elapsed();
-            {
-                let metrics = self.metrics.read().await;
-                // Estimate tokens (rough approximation: ~4 chars per token)
-                let input_tokens = (user_input.len() / 4) as u32;
-                let output_tokens = ((project_plan.title.len() + project_plan.overview.len()) / 4) as u32;
-                let total_tokens = input_tokens + output_tokens;
-                
-                let result = OperationResult {
-                    agent_type: AgentType::Admin,
-                    agent_id: self.id.clone(),
-                    config_hash: super::metrics::hash_config(&self.llm_config),
-                    operation_type: "complex_intent_planning".to_string(),
-                    success: true,
-                    response_time,
-                    tokens_used: Some(total_tokens),
-                    error_message: None,
-                    json_parse_success: true,
-                    had_syntax_errors: false,
-                    validation_passed: true,
-                };
-                
-                let _ = metrics.record_operation(result).await;
-            }
-            
-            Ok(format!(
-                "I've created a project to handle your request:\\n\\n\\\
-                 **{}**\\n\\n\\\
-                 {}\\n\\n\\\
-                 I'll work on this in the background and keep you updated on progress. \\\
-                 Feel free to ask me anything else in the meantime!",
-                project_plan.title,
-                project_plan.overview
-            ))
+            self.handle_complex_intent(&user_input, &intent).await
         } else {
-            // Simple intent - handle directly in Conversation state
-            if *self.state_machine.current_state() != AgentState::Conversation {
-                self.state_machine.transition(
-                    AgentState::Conversation,
-                    "Simple intent, conversational response".to_string()
-                )?;
-            }
-            
-            let result = self.handle_simple_intent(&user_input, &intent).await;
-            
-            // Record metrics for simple intent
-            let response_time = start_time.elapsed();
-            let metrics = self.metrics.read().await;
-            
-            match &result {
-                Ok(response) => {
-                    let input_tokens = (user_input.len() / 4) as u32;
-                    let output_tokens = (response.len() / 4) as u32;
-                    let total_tokens = input_tokens + output_tokens;
-                    
-                    let op_result = OperationResult {
-                        agent_type: AgentType::Admin,
-                        agent_id: self.id.clone(),
-                        config_hash: super::metrics::hash_config(&self.llm_config),
-                        operation_type: "simple_intent_response".to_string(),
-                        success: true,
-                        response_time,
-                        tokens_used: Some(total_tokens),
-                        error_message: None,
-                        json_parse_success: true,
-                        had_syntax_errors: false,
-                        validation_passed: true,
-                    };
-                    
-                    let _ = metrics.record_operation(op_result).await;
-                },
-                Err(e) => {
-                    let op_result = OperationResult {
-                        agent_type: AgentType::Admin,
-                        agent_id: self.id.clone(),
-                        config_hash: super::metrics::hash_config(&self.llm_config),
-                        operation_type: "simple_intent_response".to_string(),
-                        success: false,
-                        response_time,
-                        tokens_used: None,
-                        error_message: Some(e.to_string()),
-                        json_parse_success: false,
-                        had_syntax_errors: false,
-                        validation_passed: false,
-                    };
-                    
-                    let _ = metrics.record_operation(op_result).await;
-                }
-            }
-            
-            result
+            self.handle_simple_intent(&user_input, &intent).await
         }
+    }
+
+    /// Handles complex intents by creating and managing a project.
+    async fn handle_complex_intent(&mut self, user_input: &str, intent: &super::intent::Intent) -> Result<String> {
+        let start_time = Instant::now();
+
+        // 1. Transition to Planning state
+        self.transition_to_planning(intent)?;
+
+        // 2. Generate project plan using LLM
+        let project_plan = self.generate_project_plan(user_input, intent).await?;
+
+        // 3. Create project in the database
+        let project_id = self.create_project(
+            project_plan.title.clone(),
+            project_plan.overview.clone(),
+            project_plan.initial_tasks.clone(),
+        ).await?;
+
+        // 4. Spawn a PM agent to manage the project
+        let pm_id = self.spawn_pm_agent(&project_id, &project_plan).await?;
+
+        // 5. Track the new project
+        self.active_projects.insert(project_id.clone(), pm_id.clone());
+
+        // 6. Transition to Monitoring state
+        self.state_machine.transition(
+            AgentState::Monitoring,
+            format!("Project {} created, PM agent {} spawned", project_id, pm_id.name)
+        )?;
+
+        // 7. Record metrics for successful planning
+        let response_time = start_time.elapsed();
+        let metrics = self.metrics.read().await;
+        let input_tokens = (user_input.len() / 4) as u32;
+        let output_tokens = ((project_plan.title.len() + project_plan.overview.len()) / 4) as u32;
+
+        metrics.record_operation(OperationResult {
+            agent_type: AgentType::Admin,
+            agent_id: self.id.clone(),
+            config_hash: super::metrics::hash_config(&self.llm_config),
+            operation_type: "complex_intent_planning".to_string(),
+            success: true,
+            response_time,
+            tokens_used: Some(input_tokens + output_tokens),
+            ..Default::default()
+        }).await?;
+
+        // 8. Formulate and return user-facing response
+        Ok(format!(
+            "I've created a project to handle your request:\n\n**{}**\n\n{}\n\nI'll work on this in the background and keep you updated on progress. Feel free to ask me anything else in the meantime!",
+            project_plan.title,
+            project_plan.overview
+        ))
+    }
+
+    /// Transitions the agent to the Planning state, handling any necessary intermediate steps.
+    fn transition_to_planning(&mut self, intent: &super::intent::Intent) -> Result<()> {
+        let current_state = self.state_machine.current_state().clone();
+
+        // Allow Planning transition from Conversation, Idle, or Monitoring states
+        if current_state == AgentState::Conversation
+            || current_state == AgentState::Idle
+            || current_state == AgentState::Monitoring {
+            self.state_machine.transition(
+                AgentState::Planning,
+                format!("Complex intent detected: {:?}", intent.intent_type)
+            )?;
+        } else {
+            // Force transition to Conversation first, then to Planning
+            tracing::warn!("Admin in unexpected state {:?}, transitioning to Conversation first", current_state);
+            self.state_machine.transition(
+                AgentState::Conversation,
+                "Resetting to Conversation state".to_string()
+            )?;
+            self.state_machine.transition(
+                AgentState::Planning,
+                format!("Complex intent detected: {:?}", intent.intent_type)
+            )?;
+        }
+        Ok(())
     }
     
     /// Detect if intent requires a project (complex/multi-step)
@@ -359,6 +305,13 @@ impl AdminAgent {
         ).await?;
         
         drop(prompt_manager);
+
+        // Select the best model for planning
+        let selection_context = SelectionContext::for_admin();
+        let selected_model = self.ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for planning")?;
         
         // Create progressively simpler prompts based on attempt number
         let planning_prompt = self.create_planning_prompt(user_input, attempt);
@@ -377,8 +330,9 @@ impl AdminAgent {
             ..Default::default()
         };
         
-        let response = self.ollama_client.generate(
-            &self.config.default_models.admin_model,
+        let client = selected_model.get_client()?;
+        let response = client.generate(
+            &selected_model.model_id,
             &planning_prompt,
             options
         ).await.context("Failed to generate project plan with LLM")?;
@@ -596,6 +550,7 @@ impl AdminAgent {
             self.context.prompt_manager.clone(),
             self.project_manager.clone(),
         );
+        let pm_id = pm_agent.id().clone();
         
         // Assign PM to project
         {
@@ -606,23 +561,78 @@ impl AdminAgent {
         // Start PM agent (transitions to Planning → Managing)
         pm_agent.initialize_and_plan().await?;
         
-        // In a real implementation, PM agent would run in a separate task
-        // For now, we'll store the PM agent reference (simplified)
-        let pm_id = pm_agent.id().clone();
+        // Spawn the PM agent to run in the background
+        tokio::spawn(async move {
+            if let Err(e) = pm_agent.manage_loop().await {
+                tracing::error!("PMAgent {} manage_loop failed: {:?}", pm_agent.id().name, e);
+            }
+        });
         
         tracing::info!("Spawned PM agent {} for project {}", pm_id.name, project_id);
-        
-        // TODO: Store PM agent instance for lifecycle management
-        // This would involve spawning a tokio task to run pm_agent.manage_loop()
         
         Ok(pm_id)
     }
     
-    /// Handle simple intent conversationally
+    /// Handles simple intents conversationally.
     async fn handle_simple_intent(
-        &self,
+        &mut self,
         user_input: &str,
         intent: &super::intent::Intent,
+    ) -> Result<String> {
+        let start_time = Instant::now();
+
+        // 1. Ensure Conversation state
+        if *self.state_machine.current_state() != AgentState::Conversation {
+            self.state_machine.transition(
+                AgentState::Conversation,
+                "Simple intent, conversational response".to_string()
+            )?;
+        }
+
+        // 2. Generate conversational response
+        let result = self.generate_conversational_response(user_input, intent).await;
+
+        // 3. Record metrics
+        let response_time = start_time.elapsed();
+        let metrics = self.metrics.read().await;
+
+        match &result {
+            Ok(response) => {
+                let input_tokens = (user_input.len() / 4) as u32;
+                let output_tokens = (response.len() / 4) as u32;
+                metrics.record_operation(OperationResult {
+                    agent_type: AgentType::Admin,
+                    agent_id: self.id.clone(),
+                    config_hash: super::metrics::hash_config(&self.llm_config),
+                    operation_type: "simple_intent_response".to_string(),
+                    success: true,
+                    response_time,
+                    tokens_used: Some(input_tokens + output_tokens),
+                    ..Default::default()
+                }).await?;
+            },
+            Err(e) => {
+                metrics.record_operation(OperationResult {
+                    agent_type: AgentType::Admin,
+                    agent_id: self.id.clone(),
+                    config_hash: super::metrics::hash_config(&self.llm_config),
+                    operation_type: "simple_intent_response".to_string(),
+                    success: false,
+                    response_time,
+                    error_message: Some(e.to_string()),
+                    ..Default::default()
+                }).await?;
+            }
+        }
+
+        result
+    }
+
+    /// Generates a conversational response for a simple intent.
+    async fn generate_conversational_response(
+        &self,
+        user_input: &str,
+        _intent: &super::intent::Intent,
     ) -> Result<String> {
         // Load conversation prompt
         let mut prompt_manager = self.context.prompt_manager.write().await;
@@ -636,6 +646,13 @@ impl AdminAgent {
         ).await?;
         
         drop(prompt_manager);
+
+        // Select the best model for conversation
+        let selection_context = SelectionContext::for_admin();
+        let selected_model = self.ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for conversation")?;
         
         // Generate conversational response using LLM config
         let options = GenerationOptions {
@@ -645,8 +662,9 @@ impl AdminAgent {
             ..Default::default()
         };
         
-        let response = self.ollama_client.generate(
-            &self.config.default_models.admin_model,
+        let client = selected_model.get_client()?;
+        let response = client.generate(
+            &selected_model.model_id,
             user_input,
             options
         ).await.context("Failed to generate conversational response")?;
@@ -777,11 +795,12 @@ mod tests {
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
         let metrics = Arc::new(RwLock::new(
             MetricsCollector::new("sqlite::memory:").await.unwrap()
         ));
         
-        AdminAgent::new(context, project_manager, metrics).await.unwrap()
+        AdminAgent::new(context, project_manager, ai_provider_manager, metrics).await.unwrap()
     }
     
     #[tokio::test]
@@ -865,11 +884,8 @@ mod tests {
         assert_eq!(agent.state(), &AgentState::Conversation);
         
         // Test valid state transitions for Admin AI
-        // Conversation -> Planning is valid
-        agent.state_machine.transition(
-            AgentState::Planning,
-            "Testing".to_string()
-        ).unwrap();
+        let intent = agent.intent_parser.parse("Build me an app").await.unwrap();
+        agent.transition_to_planning(&intent).unwrap();
         assert_eq!(agent.state(), &AgentState::Planning);
         
         // Planning -> Conversation is valid (going back)
