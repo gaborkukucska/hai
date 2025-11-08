@@ -41,19 +41,24 @@ pub struct AIProviderManager {
 impl AIProviderManager {
     /// Create new provider manager and perform initial discovery
     pub async fn new() -> Result<Self> {
-        info!("Initializing AI Provider Manager");
+        info!("Initializing AI Provider Manager...");
         
         let discovery = ProviderDiscovery::new();
         let catalog = Arc::new(RwLock::new(ModelCatalog::new()));
         let ranker = ModelRanker::new();
         let selector = ModelSelector::new(catalog.clone());
-        
-        Ok(Self {
+
+        let manager = Self {
             discovery,
             catalog,
             ranker,
             selector,
-        })
+        };
+
+        // Perform initial discovery
+        manager.discover_providers().await?;
+
+        Ok(manager)
     }
     
     /// Discover all available AI providers on localhost and local network
@@ -87,6 +92,9 @@ impl AIProviderManager {
         context: SelectionContext,
     ) -> Result<SelectedModel> {
         let catalog = self.catalog.read().await;
+
+        info!("Selecting model for agent {:?}. Catalog has {} models.", context.agent_type, catalog.model_count());
+
         let ranked_models = self.ranker.rank_models(&catalog, &context).await?;
         
         let selected = self.selector.select_best(&ranked_models, &context).await?;
