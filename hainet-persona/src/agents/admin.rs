@@ -663,13 +663,19 @@ impl AdminAgent {
         };
         
         let client = selected_model.get_client()?;
-        let response = client.generate(
+        let response_result = client.generate(
             &selected_model.model_id,
             user_input,
             options
-        ).await.context("Failed to generate conversational response")?;
-        
-        Ok(response.text)
+        ).await;
+
+        match response_result {
+            Ok(response) => Ok(response.text),
+            Err(e) => {
+                tracing::error!("Failed to generate conversational response: {:?}", e);
+                Err(e).context("Failed to generate conversational response")
+            }
+        }
     }
     
     /// Monitor active projects for completion/failures

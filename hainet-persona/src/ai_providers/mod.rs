@@ -92,9 +92,6 @@ impl AIProviderManager {
         context: SelectionContext,
     ) -> Result<SelectedModel> {
         let catalog = self.catalog.read().await;
-
-        info!("Selecting model for agent {:?}. Catalog has {} models.", context.agent_type, catalog.model_count());
-
         let ranked_models = self.ranker.rank_models(&catalog, &context).await?;
         
         let selected = self.selector.select_best(&ranked_models, &context).await?;
