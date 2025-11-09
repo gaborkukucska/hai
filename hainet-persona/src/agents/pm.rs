@@ -19,7 +19,6 @@ use crate::ai_providers::{AIProviderManager, SelectionContext};
 use crate::test_utils::JSONValidator;
 use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
-use super::llm_config::AgentLLMConfig;
 use super::pm_intelligence::{
     HistoricalLearner, ProjectComplexity, DecompositionStrategy, 
     ProjectOutcome
@@ -54,9 +53,6 @@ pub struct PMAgent {
     
     /// AI provider manager for dynamic model selection
     ai_provider_manager: Arc<AIProviderManager>,
-    
-    /// LLM configuration for this PM agent
-    llm_config: AgentLLMConfig,
     
     /// Spawned worker agents (task_id -> worker_agent_id)
     workers: HashMap<TaskId, AgentId>,
@@ -96,7 +92,6 @@ impl PMAgent {
             prompt_manager,
             project_manager,
             ai_provider_manager,
-            llm_config: AgentLLMConfig::for_pm(),
             workers: HashMap::new(),
             task_graph: None,
             learner: HistoricalLearner::new(),
@@ -610,7 +605,6 @@ impl PMAgent {
                 Ok(TaskDetail {
                     title: t["title"].as_str().unwrap_or("Untitled Task").to_string(),
                     description: t["description"].as_str().unwrap_or("No description").to_string(),
-                    worker_type: t["worker_type"].as_str().unwrap_or("FileWorker").to_string(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -758,7 +752,6 @@ struct DetailedPlan {
 struct TaskDetail {
     title: String,
     description: String,
-    worker_type: String,
 }
 
 /// Task dependency (public for testing)
