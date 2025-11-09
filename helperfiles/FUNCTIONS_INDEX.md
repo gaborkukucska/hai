@@ -109,12 +109,6 @@ This file tracks the core functions/methods defined within the framework, catego
 - `SelectionContext::for_admin()` - Context for Admin agent selection
 - `SelectedModel::inference_url()` - Get provider-specific inference endpoint
 
-### hainet-persona/src/ai_providers/providers/ollama.rs
-- `OllamaClient::new(endpoint)` - Create Ollama API client
-- `OllamaClient::generate(model, prompt, options)` - Run inference
-- `OllamaClient::list_models()` - Enumerate available models
-- `OllamaClient::health_check()` - Check server availability
-
 ### hainet-persona/src/ai_providers/mod.rs
 - `AIProviderManager::new()` - Create central provider manager
 - `AIProviderManager::discover_providers()` - Scan and catalog all providers
@@ -153,7 +147,7 @@ This file tracks the core functions/methods defined within the framework, catego
 - `DecisionEngine::collect_violations(reports)` - Aggregate all violations
 
 ### hainet-persona/src/guardian/ollama_client.rs
-- `GuardianOllamaClient::new(endpoint, model)` - Create Guardian-specific client
+- `GuardianOllamaClient::new(ai_provider_manager)` - Create Guardian-specific client
 - `GuardianOllamaClient::analyze_pii(text)` - ML-based PII detection
 - `GuardianOllamaClient::analyze_bias(text)` - ML-based bias detection
 - `GuardianOllamaClient::analyze_harm(text)` - ML-based harm detection

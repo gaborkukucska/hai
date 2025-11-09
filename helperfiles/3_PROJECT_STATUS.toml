@@ -1772,6 +1772,33 @@ estimated_tokens = 15000
 
 # Recent completions (last 10)
 [[recent_completions]]
+date = "2025-11-08"
+event = "Refactor: OllamaClient to AIProviderManager"
+details = "Completed a major refactoring to replace all direct usages of the deprecated `OllamaClient` with the new `AIProviderManager` abstraction throughout the `hainet-persona` crate. This architectural improvement centralizes AI model discovery and selection, resolving compilation errors and improving the system's modularity. The refactoring included updating the `AdminAgent`, `WorkerAgent`, `GuardianAgent`, and their corresponding tests to use the new provider manager. This also resolved a runtime error by adding the required but previously missing `prompts` directory and its associated template files to the `hainet-portal/src-tauri` crate."
+tokens_used = 120000
+files_modified = [
+    "hainet-persona/src/agents/admin.rs",
+    "hainet-persona/src/agents/guardian.rs",
+    "hainet-persona/src/agents/worker.rs",
+    "hainet-persona/src/agents/pm.rs",
+    "hainet-persona/src/guardian/ollama_client.rs",
+    "hainet-persona/src/main.rs",
+    "hainet-persona/tests/guardian_integration_test.rs",
+    "hainet-persona/tests/pm_intelligence_integration_test.rs",
+    "hainet-persona/tests/worker_execution_test.rs",
+    "hainet-portal/src-tauri/prompts/states/conversation.toml",
+    "hainet-portal/src-tauri/prompts/states/planning.toml",
+]
+compilation_status = "Success - Clean build (0 errors, warnings from dependencies only)"
+test_status = "All workspace tests passing"
+bug_fixed = "Compilation errors due to usage of deprecated OllamaClient and runtime error due to missing prompts directory."
+features_verified = [
+    "Centralized AI model discovery and selection via AIProviderManager.",
+    "All agents now use the AIProviderManager.",
+    "The hainet-portal application starts without runtime errors.",
+]
+
+[[recent_completions]]
 date = "2025-11-04"
 event = "Deployment System Binary Transfer Bug Fix - SUCCESS! 🎉🔧"
 details = "Fixed critical SSH upload_file bug preventing binary deployment to slave devices. The root cause was in hainet-seed/src/installer/ssh_client.rs where the upload_file method used only the filename to create temp path (/tmp/{filename}), causing collision when deployment code also used /tmp/ prefix. This resulted in 'mv /tmp/hainet-upload-hainet-core /tmp/hainet-upload-hainet-core' (moving file to itself). Implemented timestamp-based unique temp path generation (/tmp/hainet-sftp-{timestamp}-{filename}) to guarantee no collisions. Deployment now works perfectly - all slave devices receive binaries and systemd services start successfully!"
