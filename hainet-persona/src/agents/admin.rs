@@ -219,15 +219,27 @@ impl AdminAgent {
     
     /// Detect if intent requires a project (complex/multi-step)
     fn is_complex_intent(&self, intent: &super::intent::Intent, user_input: &str) -> Result<bool> {
-        // Project keywords
+        // Project keywords (strong indicators of project creation)
         let project_keywords = [
             "build", "create", "develop", "make", "implement",
             "design", "write", "generate", "setup", "configure",
-            "install", "deploy", "construct", "architect"
+            "install", "deploy", "construct", "architect", "code",
+            "program", "add", "fix"
         ];
         
         let input_lower = user_input.to_lowercase();
         let has_project_keyword = project_keywords.iter()
+            .any(|kw| input_lower.contains(kw));
+        
+        // Domain-specific keywords (games, apps, websites, tools)
+        // These almost always indicate project creation
+        let domain_keywords = [
+            "game", "app", "application", "website", "site",
+            "tool", "script", "system", "service", "api",
+            "bot", "plugin", "extension", "component"
+        ];
+        
+        let has_domain_keyword = domain_keywords.iter()
             .any(|kw| input_lower.contains(kw));
         
         // Multi-step indicators
@@ -239,8 +251,19 @@ impl AdminAgent {
         let has_multi_step = multi_step_indicators.iter()
             .any(|ind| input_lower.contains(ind));
         
-        // Complex if has project keyword OR (high confidence AND multiple steps)
-        Ok(has_project_keyword || (intent.confidence >= COMPLEX_INTENT_THRESHOLD && has_multi_step))
+        // Complex intent decision tree:
+        // 1. If has project keyword + domain keyword → ALWAYS complex (e.g., "build a game")
+        // 2. If has project keyword → complex (regardless of confidence)
+        // 3. If has domain keyword → complex (even without action verb, implies creation)
+        // 4. If Task intent with high confidence + multi-step → complex
+        Ok(
+            (has_project_keyword && has_domain_keyword) ||
+            has_project_keyword ||
+            has_domain_keyword ||
+            (intent.intent_type == super::intent::IntentType::Task && 
+             intent.confidence >= COMPLEX_INTENT_THRESHOLD && 
+             has_multi_step)
+        )
     }
     
     /// Generate project plan using LLM with retry logic and format validation
@@ -331,8 +354,14 @@ impl AdminAgent {
         };
         
         let client = selected_model.get_client()?;
+        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
         let response = client.generate(
-            &selected_model.model_id,
+            model_name,
             &planning_prompt,
             options
         ).await.context("Failed to generate project plan with LLM")?;
@@ -549,6 +578,7 @@ impl AdminAgent {
             self.context.message_bus.clone(),
             self.context.prompt_manager.clone(),
             self.project_manager.clone(),
+            self.ai_provider_manager.clone(),
         );
         let pm_id = pm_agent.id().clone();
         
@@ -663,8 +693,14 @@ impl AdminAgent {
         };
         
         let client = selected_model.get_client()?;
+        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
         let response = client.generate(
-            &selected_model.model_id,
+            model_name,
             user_input,
             options
         ).await.context("Failed to generate conversational response")?;

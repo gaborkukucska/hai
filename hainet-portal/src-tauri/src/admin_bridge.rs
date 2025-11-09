@@ -197,7 +197,14 @@ impl AdminBridge {
             format!("{}\n\nAttached files:\n{}", content, attachment_info)
         };
         
-        let response_text = admin.process_user_input(input).await?;
+        let response_text = match admin.process_user_input(input).await {
+            Ok(text) => text,
+            Err(e) => {
+                log::error!("Admin AI process_user_input failed: {:?}", e);
+                log::error!("Error source chain: {:#}", e);
+                return Err(e);
+            }
+        };
         
         // Get agent state
         let state = format!("{:?}", admin.state());

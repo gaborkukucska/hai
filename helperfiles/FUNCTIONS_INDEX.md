@@ -1,5 +1,5 @@
 <!-- # START OF FILE helperfiles/FUNCTIONS_INDEX.md -->
-# Functions Index (v0.02)
+# Functions Index (v0.03)
 
 This file tracks the core functions/methods defined within the framework, categorized by component. It helps in understanding the codebase and navigating between different parts.
 
@@ -275,17 +275,24 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ## Agent System (Phase 1 Cycle 1.1 - Foundation Complete)
 
-### hainet-persona/src/agents/intent.rs
-- `IntentParser::new()` - Create intent parser with default threshold (0.6)
+### hainet-persona/src/agents/intent.rs (Enhanced Phase 8C.1)
+- `IntentParser::new()` - Create new intent parser
 - `IntentParser::with_threshold(threshold)` - Create with custom confidence threshold
 - `IntentParser::parse(user_input)` - Parse user input to extract intent
 - `IntentParser::normalize_text(text)` - Normalize text (lowercase, trim)
-- `IntentParser::classify_intent(text)` - Classify intent type (Question, Task, Command, etc.)
+- `IntentParser::classify_intent(text)` - **Enhanced classify intent** with priority-based task detection (checks task keywords before information keywords)
 - `IntentParser::extract_entities(text, intent_type)` - Extract entities (emails, dates, paths)
 - `IntentParser::extract_email(text)` - Extract email addresses from text
 - `IntentParser::extract_file_path(text)` - Extract file paths from text
 - `IntentParser::suggest_domain_and_action(text, intent_type)` - Suggest PM domain and action
 - `IntentParser::calculate_confidence(text, intent_type)` - Calculate confidence score
+
+**Classification Priority (Fixed Bug):**
+1. Question indicators (what, when, where, ?)
+2. Command indicators (stop, start, pause)
+3. **Task indicators** (build, develop, create, make, implement, code, program, add, fix, solve) - **HIGH PRIORITY**
+4. **Creative task indicators** (game, app, website, tool, script) - **NEW: Triggers Task classification**
+5. Information indicators (thank, ok, yes, no) - **LOWEST PRIORITY**
 
 ### hainet-persona/src/agents/planner.rs
 - `TaskPlanner::new()` - Create new task planner
@@ -310,14 +317,38 @@ This file tracks the core functions/methods defined within the framework, catego
 - `AgentStateMachine::is_working()` - Check if agent working (Planning/Working state)
 - `AgentStateMachine::is_error()` - Check if agent in error state
 
-### hainet-persona/src/agents/admin.rs
-- `AdminAgent::new(context)` - Create new Admin AI agent
-- `AdminAgent::process_user_input(user_input)` - Processes user input, detects complex intents, creates project plans, and spawns PM agents.
-- `AdminAgent::spawn_pm_agent(project)` - Spawns a new PMAgent to manage a project.
+### hainet-persona/src/agents/admin.rs (Enhanced Phase 8C.1)
+- `AdminAgent::new(context, project_manager, ai_provider_manager, metrics)` - Create new Admin AI agent
+- `AdminAgent::process_user_input(user_input)` - Processes user input, detects complex intents, creates project plans, and spawns PM agents
+- `AdminAgent::handle_complex_intent(user_input, intent)` - Handles complex intents by creating projects
+- `AdminAgent::handle_simple_intent(user_input, intent)` - Handles simple intents conversationally
+- `AdminAgent::transition_to_planning(intent)` - Transitions to Planning state
+- `AdminAgent::is_complex_intent(intent, user_input)` - **Enhanced complex intent detection** with multi-criteria decision tree
+- `AdminAgent::generate_project_plan(user_input, intent)` - Generate project plan with retry logic
+- `AdminAgent::generate_plan_attempt(user_input, intent, attempt)` - Generate single plan attempt
+- `AdminAgent::create_planning_prompt(user_input, attempt)` - Create planning prompt with progressive simplification
+- `AdminAgent::validate_project_plan(plan)` - Validate project plan structure
+- `AdminAgent::parse_project_plan(llm_response)` - Parse LLM response using multi-strategy JSON parsing
+- `AdminAgent::create_project(title, overview, initial_tasks)` - Create project in database
+- `AdminAgent::spawn_pm_agent(project_id, plan)` - Spawn PM agent for project
+- `AdminAgent::generate_conversational_response(user_input, intent)` - Generate conversational response
+- `AdminAgent::monitor_projects()` - Monitor active projects for completion
+- `AdminAgent::state()` - Get current state
+- `AdminAgent::active_project_count()` - Get number of active projects
 - `Agent::id()` - Get agent identifier
 - `Agent::process_message(message)` - Process incoming message
 - `Agent::start()` - Start agent main loop
 - `Agent::stop()` - Stop agent gracefully
+
+**Complex Intent Decision Tree (Enhanced):**
+1. Project keyword + domain keyword → **ALWAYS complex** (e.g., "build a game")
+2. Project keyword alone → **Complex** (regardless of confidence)
+3. Domain keyword alone → **Complex** (implies creation)
+4. Task intent + high confidence (≥0.7) + multi-step → Complex
+
+**Project Keywords:** build, create, develop, make, implement, design, write, generate, setup, configure, install, deploy, construct, architect, code, program, add, fix
+
+**Domain Keywords:** game, app, application, website, site, tool, script, system, service, api, bot, plugin, extension, component
 
 ### hainet-persona/src/agents/pm.rs
 - `PMAgent::new(id, context)` - Create a new PM agent

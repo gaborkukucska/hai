@@ -14,7 +14,8 @@ use tokio::sync::RwLock;
 use crate::messaging::{MessageBus, AgentId};
 use crate::prompts::{PromptManager, AgentType, AgentState, PromptContext};
 use crate::projects::{ProjectManager, ProjectId, TaskId};
-use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
+use crate::ai_providers::providers::{GenerationOptions};
+use crate::ai_providers::{AIProviderManager, SelectionContext};
 use crate::test_utils::JSONValidator;
 use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
@@ -51,8 +52,8 @@ pub struct PMAgent {
     /// Project manager for data persistence
     project_manager: Arc<RwLock<ProjectManager>>,
     
-    /// Ollama client for LLM-powered task decomposition
-    ollama_client: OllamaClient,
+    /// AI provider manager for dynamic model selection
+    ai_provider_manager: Arc<AIProviderManager>,
     
     /// LLM configuration for this PM agent
     llm_config: AgentLLMConfig,
@@ -83,6 +84,7 @@ impl PMAgent {
         message_bus: Arc<RwLock<MessageBus>>,
         prompt_manager: Arc<RwLock<PromptManager>>,
         project_manager: Arc<RwLock<ProjectManager>>,
+        ai_provider_manager: Arc<AIProviderManager>,
     ) -> Self {
         let id = AgentId::new(AgentType::PM, format!("PM-{}", project_id));
         
@@ -93,7 +95,7 @@ impl PMAgent {
             message_bus,
             prompt_manager,
             project_manager,
-            ollama_client: OllamaClient::localhost(),
+            ai_provider_manager,
             llm_config: AgentLLMConfig::for_pm(),
             workers: HashMap::new(),
             task_graph: None,
@@ -305,6 +307,13 @@ impl PMAgent {
         // Generate validation prompt
         let prompt = self.generate_validation_prompt(&task)?;
         
+        // Select the best model for validation using AIProviderManager
+        let selection_context = SelectionContext::for_pm();
+        let selected_model = self.ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for validation")?;
+        
         // Call LLM for validation decision
         let options = GenerationOptions {
             temperature: Some(0.3),
@@ -312,11 +321,15 @@ impl PMAgent {
             ..Default::default()
         };
         
-        // Use gemma3:7b for fast validation (prefer gemma3 over llama3.2)
-        let model = self.select_model_for_validation();
-        
-        let response = self.ollama_client.generate(
-            &model,
+        let client = selected_model.get_client()?;
+        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        let response = client.generate(
+            model_name,
             &prompt,
             options
         ).await.context("Failed to validate task with LLM")?;
@@ -534,6 +547,13 @@ impl PMAgent {
             strategy_guidance
         );
         
+        // Select the best model for planning using AIProviderManager
+        let selection_context = SelectionContext::for_pm();
+        let selected_model = self.ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for planning")?;
+        
         let options = GenerationOptions {
             temperature: Some(0.7),
             max_tokens: Some(2048),
@@ -541,11 +561,15 @@ impl PMAgent {
             ..Default::default()
         };
         
-        // Use gemma3:9b for complex task decomposition (PM's primary intelligence task)
-        let model = self.select_model_for_planning();
-        
-        let response = self.ollama_client.generate(
-            &model,
+        let client = selected_model.get_client()?;
+        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        let response = client.generate(
+            model_name,
             &planning_prompt,
             options
         ).await.context("Failed to generate detailed plan with LLM")?;
@@ -563,6 +587,8 @@ impl PMAgent {
         let parsed = match parse_result.value {
             Some(val) => {
                 tracing::info!("Successfully parsed PM plan JSON using strategy: {}", parse_result.strategy_used);
+                // Log the parsed JSON structure for debugging
+                tracing::debug!("Parsed JSON structure: {:?}", val);
                 val
             },
             None => {
@@ -572,8 +598,13 @@ impl PMAgent {
             }
         };
         
+        // Log available keys for debugging
+        if let Some(obj) = parsed.as_object() {
+            tracing::debug!("Available JSON keys: {:?}", obj.keys().collect::<Vec<_>>());
+        }
+        
         let tasks: Vec<TaskDetail> = parsed["tasks"].as_array()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'tasks' array"))?
+            .ok_or_else(|| anyhow::anyhow!("Missing 'tasks' array. Parsed JSON: {:?}", parsed))?
             .iter()
             .map(|t| {
                 Ok(TaskDetail {
@@ -619,21 +650,54 @@ impl PMAgent {
         
         tracing::info!("Spawning {} for task: {}", template.name, task.title);
         
-        // Create worker agent (simplified - in production this would be a full WorkerAgent)
-        let worker_id = AgentId::new(
-            AgentType::Worker,
-            format!("{}-{}", template.name, task_id)
+        // Create worker agent with proper template
+        // Workers expect Arc<PromptManager>, so we need to create a new instance
+        // Since PromptManager can't be cloned, we'll use the new() constructor instead
+        use std::path::PathBuf;
+        
+        // Find workspace root by looking for hainet-persona/prompts
+        // This works whether we're running from hainet-portal or hainet-persona
+        let workspace_root = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."));
+        let prompts_path = workspace_root.join("hainet-persona").join("prompts");
+        
+        let prompt_manager_for_worker = Arc::new(crate::prompts::PromptManager::new(prompts_path)?);
+        
+        let mut worker = super::worker::WorkerAgent::from_template(
+            template,
+            self.message_bus.clone(),
+            prompt_manager_for_worker,
+            self.project_manager.clone(),
+            Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new())),
         );
+        
+        let worker_id = worker.id().clone();
         
         // Store worker mapping
         self.workers.insert(task_id.clone(), worker_id.clone());
         
-        // Assign task to worker
-        let pm = self.project_manager.write().await;
-        pm.assign_task(task_id, worker_id).await?;
+        // Transition worker to Idle state
+        worker.state_machine_mut().transition(
+            AgentState::Idle,
+            "Worker initialized and ready for task".to_string()
+        )?;
         
-        // TODO: Actually spawn WorkerAgent and start execution
-        // This will be completed in Session 5
+        // Assign task to worker
+        worker.assign_task(task_id.clone()).await?;
+        
+        // Execute worker in background
+        let task_id_for_logging = task_id.clone();
+        tokio::spawn(async move {
+            tracing::info!("Worker {} starting execution for task {}", worker.id().name, task_id_for_logging);
+            
+            // Execute task
+            if let Err(e) = worker.execute_task().await {
+                tracing::error!("Worker {} task execution failed: {:?}", worker.id().name, e);
+                return;
+            }
+            
+            tracing::info!("Worker {} completed task execution, awaiting PM validation", worker.id().name);
+        });
         
         Ok(())
     }
@@ -844,9 +908,10 @@ mod tests {
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
         
         let project_id = ProjectId::new();
-        PMAgent::new(project_id, message_bus, prompt_manager, project_manager)
+        PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager)
     }
     
     #[tokio::test]
@@ -896,7 +961,8 @@ mod tests {
             ).await.unwrap()
         };
 
-        let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager);
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager);
         
         pm.start().await.unwrap();
         assert_eq!(pm.state(), &AgentState::Managing);

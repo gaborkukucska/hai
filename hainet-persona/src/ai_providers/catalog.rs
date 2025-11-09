@@ -210,6 +210,14 @@ impl ModelCatalog {
             capabilities.push(ModelCapability::FastInference);
         }
 
+        // Vision model detection
+        if name_lower.contains("vision") || 
+           name_lower.contains("vl") || 
+           name_lower.contains("clip") ||
+           name_lower.contains("llava") {
+            capabilities.push(ModelCapability::VisionUnderstanding);
+        }
+
         // Deduplicate
         capabilities.sort();
         capabilities.dedup();
@@ -272,6 +280,7 @@ pub enum ModelCapability {
     TaskPlanning,
     LongContext,
     FastInference,
+    VisionUnderstanding,
 }
 
 /// Performance metrics for a model

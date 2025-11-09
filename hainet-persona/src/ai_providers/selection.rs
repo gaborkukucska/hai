@@ -28,6 +28,15 @@ impl ModelSelector {
         Self { catalog }
     }
 
+    /// Check if a model is a vision model based on its name
+    fn is_vision_model(model_id: &str) -> bool {
+        let model_lower = model_id.to_lowercase();
+        model_lower.contains("vision") || 
+        model_lower.contains("vl") || 
+        model_lower.contains("clip") ||
+        model_lower.contains("llava")
+    }
+
     /// Select best model from ranked list
     pub async fn select_best(
         &self,
@@ -45,6 +54,15 @@ impl ModelSelector {
                 debug!(
                     "Skipping model {} (score {:.2} < min {:.2})",
                     score.model_id, score.total_score, context.min_acceptable_score()
+                );
+                continue;
+            }
+
+            // Skip vision models for text-only tasks
+            if !context.requires_vision() && Self::is_vision_model(&score.model_id) {
+                debug!(
+                    "Skipping vision model {} for text-only task",
+                    score.model_id
                 );
                 continue;
             }
@@ -167,6 +185,12 @@ impl SelectionContext {
             AgentType::Guardian => 0.7, // Guardian needs highest quality for safety analysis
             AgentType::User => 0.0, // User is human, doesn't use models directly
         }
+    }
+
+    /// Check if this context requires vision capabilities
+    pub fn requires_vision(&self) -> bool {
+        self.required_capabilities.contains(&ModelCapability::VisionUnderstanding) ||
+        self.preferred_capabilities.contains(&ModelCapability::VisionUnderstanding)
     }
 }
 

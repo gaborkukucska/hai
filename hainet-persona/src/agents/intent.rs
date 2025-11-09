@@ -127,24 +127,32 @@ impl IntentParser {
             return IntentType::Question;
         }
         
-        // Command indicators
+        // Command indicators (check before task to catch stop/start)
         let command_words = ["stop", "start", "pause", "resume", "cancel", "quit", "exit", "shutdown"];
         if command_words.iter().any(|w| text.contains(w)) {
             return IntentType::Command;
         }
         
-        // Task indicators
+        // Task indicators (HIGH PRIORITY - check before information)
+        // These are strong action verbs that indicate task/project creation
         let task_words = [
             "send", "find", "search", "create", "delete", "update", "organize", "schedule", "remind",
             "build", "develop", "make", "implement", "design", "write", "generate", "setup", 
-            "configure", "install", "deploy", "construct", "architect"
+            "configure", "install", "deploy", "construct", "architect", "code", "program",
+            "add", "fix", "solve", "help me with", "work on", "handle"
         ];
         if task_words.iter().any(|w| text.contains(w)) {
             return IntentType::Task;
         }
         
-        // Information indicators
-        let info_words = ["thank", "ok", "yes", "no", "correct", "wrong", "good", "bad"];
+        // Domain-specific task indicators (games, apps, websites, tools)
+        let creative_words = ["game", "app", "application", "website", "site", "tool", "script", "program"];
+        if creative_words.iter().any(|w| text.contains(w)) {
+            return IntentType::Task;
+        }
+        
+        // Information indicators (LOWEST PRIORITY - only match if no task detected)
+        let info_words = ["thank", "thanks", "ok", "okay", "yes", "no", "correct", "wrong"];
         if info_words.iter().any(|w| text.contains(w)) {
             return IntentType::Information;
         }
