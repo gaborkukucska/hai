@@ -921,16 +921,23 @@ mod tests {
     }
     
     async fn check_ollama_gemma3() -> (bool, Vec<String>) {
-        let client = OllamaClient::localhost();
+        let ai_provider_manager = match AIProviderManager::new().await {
+            Ok(manager) => manager,
+            Err(_) => return (false, vec![]),
+        };
 
-        if client.health_check().await.is_err() {
+        let catalog = ai_provider_manager.get_stats().await;
+        if catalog.total_models == 0 {
             return (false, vec![]);
         }
 
-        // Check for gemma3 models
-        let models = client.list_models().await.unwrap_or_default();
-        let gemma3_models: Vec<String> = models.iter()
-            .filter(|m| m.name.contains("gemma3"))
+        let all_models = {
+            let catalog_lock = ai_provider_manager.catalog.read().await;
+            catalog_lock.all_models().into_iter().map(|m| m.clone()).collect::<Vec<_>>()
+        };
+
+        let gemma3_models: Vec<String> = all_models.iter()
+            .filter(|m| m.provider_type == crate::ai_providers::discovery::ProviderType::Ollama && m.name.contains("gemma3"))
             .map(|m| m.name.clone())
             .collect();
 

@@ -32,10 +32,10 @@ use tracing::info;
 
 /// Central AI provider management system
 pub struct AIProviderManager {
-    discovery: ProviderDiscovery,
-    catalog: Arc<RwLock<ModelCatalog>>,
-    ranker: ModelRanker,
-    selector: ModelSelector,
+    pub discovery: ProviderDiscovery,
+    pub catalog: Arc<RwLock<ModelCatalog>>,
+    pub ranker: ModelRanker,
+    pub selector: ModelSelector,
 }
 
 impl AIProviderManager {
