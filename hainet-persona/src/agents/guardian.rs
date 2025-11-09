@@ -387,14 +387,15 @@ pub struct GuardianAgent {
     metrics: Arc<MetricsCollector>,
 }
 
+use crate::ai_providers::AIProviderManager;
 impl GuardianAgent {
     /// Create new Guardian agent
-    pub fn new(config: GuardianConfig, metrics: Arc<MetricsCollector>) -> Self {
+    pub fn new(config: GuardianConfig, metrics: Arc<MetricsCollector>, ai_provider_manager: Arc<AIProviderManager>) -> Self {
         let agent_id = AgentId::new_guardian("guardian-1".to_string());
         
         // Create guardian system with Ollama client
         let guardian_system = Arc::new(GuardianSystem::new(
-            Some("http://localhost:11434".to_string()),
+            ai_provider_manager,
             Some("llama3.2".to_string()),
         ));
         
@@ -418,7 +419,7 @@ impl GuardianAgent {
     }
     
     /// Create Guardian agent from HAI-Net config
-    pub fn from_config(hainet_config: &HaiNetConfig, metrics: Arc<MetricsCollector>) -> Self {
+    pub fn from_config(hainet_config: &HaiNetConfig, metrics: Arc<MetricsCollector>, ai_provider_manager: Arc<AIProviderManager>) -> Self {
         let llm_config = hainet_config.get_agent_llm_config(AgentType::Guardian);
         
         let config = GuardianConfig {
@@ -426,7 +427,7 @@ impl GuardianAgent {
             ..GuardianConfig::default()
         };
         
-        Self::new(config, metrics)
+        Self::new(config, metrics, ai_provider_manager)
     }
     
     /// Get agent ID
@@ -829,7 +830,8 @@ mod tests {
     async fn test_guardian_creation() {
         let config = GuardianConfig::default();
         let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
-        let guardian = GuardianAgent::new(config, metrics);
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let guardian = GuardianAgent::new(config, metrics, ai_provider_manager);
         
         assert_eq!(guardian.current_state().await, GuardianState::Startup);
     }
@@ -838,7 +840,8 @@ mod tests {
     async fn test_guardian_start() {
         let config = GuardianConfig::default();
         let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
-        let mut guardian = GuardianAgent::new(config, metrics);
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let mut guardian = GuardianAgent::new(config, metrics, ai_provider_manager);
         
         // Create monitoring channel for Guardian
         use tokio::sync::mpsc;

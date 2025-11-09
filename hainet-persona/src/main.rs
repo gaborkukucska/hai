@@ -63,9 +63,14 @@ async fn main() -> Result<()> {
     ));
     info!("✅ MCP client manager initialized");
 
-    // 4. Guardian System (detection engines)
+    // 4. AI Provider Manager
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await?);
+    ai_provider_manager.discover_providers().await?;
+    info!("✅ AI Provider Manager initialized");
+
+    // 5. Guardian System (detection engines)
     let guardian_system = Arc::new(RwLock::new(
-        GuardianSystem::new(None, None)
+        GuardianSystem::new(ai_provider_manager.clone(), None)
     ));
     info!("✅ Guardian system initialized");
 
@@ -94,7 +99,7 @@ async fn main() -> Result<()> {
         Arc::new(MetricsCollector::new("hainet_metrics.db").await?)
     };
     
-    let mut guardian = GuardianAgent::new(guardian_config, metrics_for_guardian.clone());
+    let mut guardian = GuardianAgent::new(guardian_config, metrics_for_guardian.clone(), ai_provider_manager.clone());
     
     // Register Guardian for monitoring all messages
     let guardian_rx = {

@@ -817,12 +817,13 @@ mod tests {
         // Use absolute path to prompts directory
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
         let prompts_path = PathBuf::from(manifest_dir).join("prompts");
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
         
         Arc::new(AgentContext::new(
             Arc::new(RwLock::new(MessageBus::new().await.expect("Failed to create MessageBus"))),
             Arc::new(RwLock::new(PromptManager::new(prompts_path).unwrap())),
             Arc::new(RwLock::new(MCPClientManager::new())),
-            Arc::new(RwLock::new(GuardianSystem::new(None, None))),
+            Arc::new(RwLock::new(GuardianSystem::new(ai_provider_manager, None))),
         ))
     }
     

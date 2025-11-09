@@ -26,6 +26,8 @@ pub use decision_engine::{
 };
 
 use anyhow::Result;
+use crate::ai_providers::AIProviderManager;
+use std::sync::Arc;
 
 /// Complete Guardian system orchestrating all constitutional compliance checks
 pub struct GuardianSystem {
@@ -38,9 +40,9 @@ pub struct GuardianSystem {
 
 impl GuardianSystem {
     /// Create new Guardian system with Ollama client (optional for rule-based mode)
-    pub fn new(ollama_endpoint: Option<String>, model: Option<String>) -> Self {
-        let ollama_client = if let (Some(endpoint), Some(model_name)) = (ollama_endpoint, model) {
-            Some(GuardianOllamaClient::new(endpoint, model_name))
+    pub fn new(ai_provider_manager: Arc<AIProviderManager>, model: Option<String>) -> Self {
+        let ollama_client = if let Some(model_name) = model {
+            Some(GuardianOllamaClient::new(ai_provider_manager, model_name))
         } else {
             None
         };
