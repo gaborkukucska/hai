@@ -28,7 +28,7 @@ async fn test_uninstallation_flow() -> Result<()> {
             password: "".to_string(),
         },
         is_connected: false,
-        commands: commands.clone(),
+        executed_commands: commands.clone(),
     };
 
     uninstaller.uninstall_from_device(&mut client).await?;

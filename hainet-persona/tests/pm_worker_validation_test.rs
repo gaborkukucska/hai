@@ -21,12 +21,14 @@ fn should_skip_llm_tests() -> bool {
     std::env::var("SKIP_LLM_TESTS").is_ok()
 }
 
+use hainet_persona::ai_providers::AIProviderManager;
 /// Create test infrastructure
 async fn create_test_environment() -> Result<(
     Arc<RwLock<MessageBus>>,
     Arc<PromptManager>,
     Arc<RwLock<ProjectManager>>,
     Arc<RwLock<MCPClientManager>>,
+    Arc<AIProviderManager>,
 )> {
     let message_bus = Arc::new(RwLock::new(MessageBus::new().await?));
     let prompt_manager = Arc::new(PromptManager::new("prompts".into())?);
@@ -34,13 +36,14 @@ async fn create_test_environment() -> Result<(
         ProjectManager::new("sqlite::memory:").await?
     ));
     let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await?);
     
-    Ok((message_bus, prompt_manager, project_manager, mcp_client))
+    Ok((message_bus, prompt_manager, project_manager, mcp_client, ai_provider_manager))
 }
 
 #[tokio::test]
 async fn test_task_status_polling() -> Result<()> {
-    let (message_bus, prompt_manager, project_manager, mcp_client) = 
+    let (message_bus, prompt_manager, project_manager, mcp_client, ai_provider_manager) =
         create_test_environment().await?;
     
     // Create project and task
@@ -66,6 +69,7 @@ async fn test_task_status_polling() -> Result<()> {
         prompt_manager.clone(),
         project_manager.clone(),
         mcp_client.clone(),
+        ai_provider_manager.clone(),
     );
     
     // Transition to Idle
@@ -87,7 +91,7 @@ async fn test_task_status_polling() -> Result<()> {
 
 #[tokio::test]
 async fn test_revision_request_flow() -> Result<()> {
-    let (message_bus, prompt_manager, project_manager, mcp_client) = 
+    let (message_bus, prompt_manager, project_manager, mcp_client, _) =
         create_test_environment().await?;
     
     // Create project and task
@@ -157,7 +161,7 @@ async fn test_revision_request_flow() -> Result<()> {
 
 #[tokio::test]
 async fn test_max_revisions_enforcement() -> Result<()> {
-    let (message_bus, prompt_manager, project_manager, mcp_client) = 
+    let (message_bus, prompt_manager, project_manager, mcp_client, _) =
         create_test_environment().await?;
     
     // Create project and task
@@ -232,7 +236,7 @@ async fn test_max_revisions_enforcement() -> Result<()> {
 
 #[tokio::test]
 async fn test_task_approval_flow() -> Result<()> {
-    let (message_bus, prompt_manager, project_manager, mcp_client) = 
+    let (message_bus, prompt_manager, project_manager, mcp_client, _) =
         create_test_environment().await?;
     
     // Create project and task
@@ -295,7 +299,7 @@ async fn test_task_approval_flow() -> Result<()> {
 
 #[tokio::test]
 async fn test_task_failure_flow() -> Result<()> {
-    let (message_bus, prompt_manager, project_manager, mcp_client) = 
+    let (message_bus, prompt_manager, project_manager, mcp_client, _) =
         create_test_environment().await?;
     
     // Create project and task
@@ -340,7 +344,7 @@ async fn test_task_failure_flow() -> Result<()> {
 
 #[tokio::test]
 async fn test_state_transitions_validation_cycle() -> Result<()> {
-    let (message_bus, prompt_manager, project_manager, mcp_client) = 
+    let (message_bus, prompt_manager, project_manager, mcp_client, _) =
         create_test_environment().await?;
     
     // Create project and task

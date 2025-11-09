@@ -19,6 +19,7 @@ use hainet_persona::tools::mcp::MCPClientManager;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use anyhow::Result;
+use hainet_persona::ai_providers::AIProviderManager;
 
 // ============================================================================
 // Test Helpers
@@ -31,6 +32,7 @@ async fn create_test_worker() -> WorkerAgent {
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));
     let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
     
     WorkerAgent::new(
         WorkerType::Files,
@@ -38,6 +40,7 @@ async fn create_test_worker() -> WorkerAgent {
         prompt_manager,
         project_manager,
         mcp_client,
+        ai_provider_manager,
     )
 }
 
@@ -317,6 +320,7 @@ async fn test_worker_network_worker_creation() {
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));
     let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
     
     let worker = WorkerAgent::new(
         WorkerType::Network,
@@ -324,6 +328,7 @@ async fn test_worker_network_worker_creation() {
         prompt_manager,
         project_manager,
         mcp_client,
+        ai_provider_manager,
     );
     
     assert_eq!(worker.worker_type(), &WorkerType::Network);
@@ -339,6 +344,7 @@ async fn test_worker_research_worker_creation() {
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));
     let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
     
     let worker = WorkerAgent::new(
         WorkerType::Research,
@@ -346,6 +352,7 @@ async fn test_worker_research_worker_creation() {
         prompt_manager,
         project_manager,
         mcp_client,
+        ai_provider_manager,
     );
     
     assert_eq!(worker.worker_type(), &WorkerType::Research);

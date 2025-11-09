@@ -10,7 +10,7 @@ pub struct MockSSHClient {
     pub ip: String,
     pub _credentials: SSHCredentials,
     pub is_connected: bool,
-    pub commands: Arc<Mutex<Vec<String>>>,
+    pub executed_commands: Arc<Mutex<Vec<String>>>,
 }
 
 impl SSHClientTrait for MockSSHClient {
@@ -51,22 +51,22 @@ impl SSHClientTrait for MockSSHClient {
     }
 
     fn execute_command(&self, command: &str) -> Result<String> {
-        self.commands.lock().unwrap().push(command.to_string());
+        self.executed_commands.lock().unwrap().push(command.to_string());
         Ok("mock output".to_string())
     }
 
     fn upload_file(&self, _local_path: &Path, remote_path: &str) -> Result<()> {
-        self.commands.lock().unwrap().push(format!("upload_file to {}", remote_path));
+        self.executed_commands.lock().unwrap().push(format!("upload_file to {}", remote_path));
         Ok(())
     }
 
     fn create_remote_directory(&self, path: &str) -> Result<()> {
-        self.commands.lock().unwrap().push(format!("mkdir -p {}", path));
+        self.executed_commands.lock().unwrap().push(format!("mkdir -p {}", path));
         Ok(())
     }
 
     fn set_permissions(&self, path: &str, mode: u32) -> Result<()> {
-        self.commands.lock().unwrap().push(format!("chmod {:o} {}", mode, path));
+        self.executed_commands.lock().unwrap().push(format!("chmod {:o} {}", mode, path));
         Ok(())
     }
 }

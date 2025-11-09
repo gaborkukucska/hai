@@ -5,23 +5,23 @@
 //! This module provides a Guardian-specific wrapper around Ollama API
 //! for PII detection, bias analysis, and harm detection using LLMs.
 
-use crate::ai_providers::providers::ollama::OllamaClient;
-use crate::ai_providers::providers::ProviderClient;
+use crate::ai_providers::{AIProviderManager, SelectionContext};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Guardian-specific Ollama client with JSON-structured output parsing
 #[derive(Clone)]
 pub struct GuardianOllamaClient {
-    client: OllamaClient,
+    ai_provider_manager: Arc<AIProviderManager>,
     default_model: String,
 }
 
 impl GuardianOllamaClient {
     /// Create new Guardian Ollama client
-    pub fn new(endpoint: String, default_model: String) -> Self {
+    pub fn new(ai_provider_manager: Arc<AIProviderManager>, default_model: String) -> Self {
         Self {
-            client: OllamaClient::new(endpoint),
+            ai_provider_manager,
             default_model,
         }
     }
@@ -53,9 +53,22 @@ JSON response:"#,
             system: None,
         };
 
-        let response = self
-            .client
-            .generate(&self.default_model, &prompt, options)
+        let selection_context = SelectionContext::for_guardian();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for PII analysis")?;
+
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+
+        let response = client
+            .generate(model_name, &prompt, options)
             .await
             .context("Failed to generate PII analysis")?;
 
@@ -91,9 +104,22 @@ JSON response:"#,
             system: None,
         };
 
-        let response = self
-            .client
-            .generate(&self.default_model, &prompt, options)
+        let selection_context = SelectionContext::for_guardian();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for bias analysis")?;
+
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+
+        let response = client
+            .generate(model_name, &prompt, options)
             .await
             .context("Failed to generate bias analysis")?;
 
@@ -129,9 +155,22 @@ JSON response:"#,
             system: None,
         };
 
-        let response = self
-            .client
-            .generate(&self.default_model, &prompt, options)
+        let selection_context = SelectionContext::for_guardian();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for harm analysis")?;
+
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+
+        let response = client
+            .generate(model_name, &prompt, options)
             .await
             .context("Failed to generate harm analysis")?;
 
@@ -258,10 +297,11 @@ mod tests {
         assert_eq!(result.risk_level, RiskLevel::High);
     }
 
-    #[test]
-    fn test_parse_json_from_markdown() {
+    #[tokio::test]
+    async fn test_parse_json_from_markdown() {
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
         let client = GuardianOllamaClient::new(
-            "http://localhost:11434".to_string(),
+            ai_provider_manager,
             "gemma3:4b-it".to_string(),
         );
 

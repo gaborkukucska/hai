@@ -669,6 +669,7 @@ impl PMAgent {
             prompt_manager_for_worker,
             self.project_manager.clone(),
             Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new())),
+            self.ai_provider_manager.clone(),
         );
         
         let worker_id = worker.id().clone();
@@ -715,27 +716,6 @@ impl PMAgent {
     /// Get reference to task graph (for testing)
     pub fn task_graph(&self) -> Option<&TaskGraph> {
         self.task_graph.as_ref()
-    }
-    
-    /// Select model for task planning (complex decomposition)
-    /// Prefers gemma3:9b for better structured reasoning
-    fn select_model_for_planning(&self) -> String {
-        // Prefer gemma3 based on model size from config
-        match self.llm_config.model_size_preference {
-            super::llm_config::ModelSize::SevenB | super::llm_config::ModelSize::FourteenBPlus => {
-                "gemma3:9b".to_string()
-            },
-            _ => {
-                // Fall back to 7b for smaller configurations
-                "gemma3:7b".to_string()
-            }
-        }
-    }
-    
-    /// Select model for task validation (faster checks)
-    /// Uses gemma3:7b for speed while maintaining quality
-    fn select_model_for_validation(&self) -> String {
-        "gemma3:7b".to_string()
     }
 }
 

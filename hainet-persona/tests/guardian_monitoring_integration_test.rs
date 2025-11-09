@@ -9,6 +9,7 @@
 use hainet_persona::agents::{GuardianAgent, GuardianConfig};
 use hainet_persona::agents::metrics::MetricsCollector;
 use hainet_persona::messaging::{MessageBus, AgentId, Message, MessageContent, Priority};
+use hainet_persona::ai_providers::AIProviderManager;
 use hainet_persona::prompts::AgentType;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
@@ -18,10 +19,11 @@ async fn test_guardian_monitoring_integration() {
     // Initialize components
     let message_bus = Arc::new(MessageBus::new().await.unwrap());
     let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
     
     // Create Guardian agent
     let config = GuardianConfig::default();
-    let mut guardian = GuardianAgent::new(config, metrics);
+    let mut guardian = GuardianAgent::new(config, metrics, ai_provider_manager);
     
     // Register Guardian for monitoring
     let guardian_rx = message_bus
@@ -97,10 +99,11 @@ async fn test_guardian_detects_pii_violation() {
     // Initialize components
     let message_bus = Arc::new(MessageBus::new().await.unwrap());
     let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
     
     // Create Guardian agent
     let config = GuardianConfig::default();
-    let mut guardian = GuardianAgent::new(config, metrics);
+    let mut guardian = GuardianAgent::new(config, metrics, ai_provider_manager);
     
     // Register Guardian for monitoring
     let guardian_rx = message_bus
@@ -155,10 +158,11 @@ async fn test_guardian_detects_harm_keywords() {
     // Initialize components
     let message_bus = Arc::new(MessageBus::new().await.unwrap());
     let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
     
     // Create Guardian agent
     let config = GuardianConfig::default();
-    let mut guardian = GuardianAgent::new(config, metrics);
+    let mut guardian = GuardianAgent::new(config, metrics, ai_provider_manager);
     
     // Register Guardian for monitoring
     let guardian_rx = message_bus
@@ -213,10 +217,11 @@ async fn test_guardian_allows_safe_messages() {
     // Initialize components
     let message_bus = Arc::new(MessageBus::new().await.unwrap());
     let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
     
     // Create Guardian agent
     let config = GuardianConfig::default();
-    let mut guardian = GuardianAgent::new(config, metrics);
+    let mut guardian = GuardianAgent::new(config, metrics, ai_provider_manager);
     
     // Register Guardian for monitoring
     let guardian_rx = message_bus

@@ -13,7 +13,7 @@ use crate::messaging::{MessageBus, AgentId};
 use crate::prompts::{PromptManager, AgentType, AgentState, WorkerType};
 use crate::projects::{ProjectManager, TaskId};
 use crate::tools::mcp::MCPClientManager;
-use crate::ai_providers::providers::{OllamaClient, ProviderClient, GenerationOptions};
+use crate::ai_providers::{AIProviderManager, SelectionContext, providers::GenerationOptions};
 use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
 use super::worker_intelligence::{WorkerLearner, ExecutionStrategy, ToolSelector, ErrorCategory, TaskOutcome};
@@ -55,8 +55,8 @@ pub struct WorkerAgent {
     /// MCP client for tool access
     mcp_client: Arc<RwLock<MCPClientManager>>,
     
-    /// Ollama client for LLM-powered task analysis
-    ollama_client: OllamaClient,
+    /// AI provider manager for dynamic model selection
+    ai_provider_manager: Arc<AIProviderManager>,
     
     /// Maximum retry attempts for failed operations (deprecated - use execution_strategy.max_retries)
     max_retries: usize,
@@ -82,6 +82,7 @@ impl WorkerAgent {
         prompt_manager: Arc<PromptManager>,
         project_manager: Arc<RwLock<ProjectManager>>,
         mcp_client: Arc<RwLock<MCPClientManager>>,
+        ai_provider_manager: Arc<AIProviderManager>,
     ) -> Self {
         let id = AgentId::new(AgentType::Worker, format!("Worker-{:?}", worker_type));
         
@@ -126,7 +127,7 @@ impl WorkerAgent {
             prompt_manager,
             project_manager,
             mcp_client,
-            ollama_client: OllamaClient::localhost(),
+            ai_provider_manager,
             max_retries: 3, // Kept for backward compatibility
             learner: WorkerLearner::new(), // Default 100 outcome capacity
             execution_strategy: ExecutionStrategy::default(), // 5s timeout, 3 retries, 1.5x backoff
@@ -142,6 +143,7 @@ impl WorkerAgent {
         prompt_manager: Arc<PromptManager>,
         project_manager: Arc<RwLock<ProjectManager>>,
         mcp_client: Arc<RwLock<MCPClientManager>>,
+        ai_provider_manager: Arc<AIProviderManager>,
     ) -> Self {
         let id = AgentId::new(AgentType::Worker, template.name.clone());
         
@@ -177,7 +179,7 @@ impl WorkerAgent {
             prompt_manager,
             project_manager,
             mcp_client,
-            ollama_client: OllamaClient::localhost(),
+            ai_provider_manager,
             max_retries: 3, // Kept for backward compatibility
             learner: WorkerLearner::new(),
             execution_strategy: ExecutionStrategy::default(),
@@ -474,8 +476,22 @@ impl WorkerAgent {
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
+
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for planning")?;
+
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
         
-        let response = self.ollama_client.generate("gemma3:7b", &planning_prompt, options)
+        let response = client.generate(model_name, &planning_prompt, options)
             .await
             .context("Failed to generate execution plan with LLM")?;
         
@@ -682,9 +698,23 @@ impl WorkerAgent {
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
+
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for planning")?;
         
-        let response = self.ollama_client.generate(
-            "gemma3:7b",
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+
+        let response = client.generate(
+            model_name,
             &planning_prompt,
             options
         ).await.context("Failed to generate execution plan with LLM")?;
@@ -1113,13 +1143,15 @@ mod tests {
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
         let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
         
         WorkerAgent::new(
             WorkerType::Files, 
             message_bus, 
             prompt_manager, 
             project_manager,
-            mcp_client
+            mcp_client,
+            ai_provider_manager
         )
     }
     
