@@ -23,6 +23,104 @@ use super::config::{MCPServersConfig, ServerConfig};
 // Type alias to simplify the RunningService type
 type RunningClient = rmcp::service::RunningService<RoleClient, MinimalClientHandler>;
 
+/// Tool metadata for discovery-based loading
+///
+/// Provides structured access to tool information for LLM consumption.
+/// Designed to be loaded lazily when the LLM needs specific tool details.
+#[derive(Debug, Clone)]
+pub struct ToolMetadata {
+    /// Tool name (e.g., "file_write")
+    pub name: String,
+    
+    /// Server name (e.g., "hainet-files")
+    pub server: String,
+    
+    /// Human-readable description of what the tool does
+    pub description: String,
+    
+    /// JSON schema for tool parameters
+    pub input_schema: Value,
+    
+    /// Formatted parameter documentation for LLM prompts
+    pub parameter_docs: String,
+}
+
+impl ToolMetadata {
+    /// Create metadata from an rmcp Tool and server name
+    fn from_tool(tool: &Tool, server_name: &str) -> Self {
+        // Convert Arc<Map> to Value for processing
+        let schema_value = Value::Object(tool.input_schema.as_ref().clone());
+        let parameter_docs = Self::format_parameters(&schema_value);
+        
+        Self {
+            name: tool.name.to_string(),
+            server: server_name.to_string(),
+            description: tool.description.clone().map(|s| s.to_string()).unwrap_or_default(),
+            input_schema: schema_value,
+            parameter_docs,
+        }
+    }
+    
+    /// Format JSON schema into human-readable parameter documentation
+    fn format_parameters(schema: &Value) -> String {
+        let mut docs = String::new();
+        
+        // Extract properties from schema
+        if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+            let required = schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            
+            for (param_name, param_info) in properties {
+                let param_type = param_info
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("any");
+                
+                let param_desc = param_info
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
+                
+                let required_marker = if required.contains(&param_name.as_str()) {
+                    " (required)"
+                } else {
+                    " (optional)"
+                };
+                
+                docs.push_str(&format!(
+                    "- {}: {} {}\n  {}\n",
+                    param_name, param_type, required_marker, param_desc
+                ));
+            }
+        }
+        
+        docs
+    }
+    
+    /// Get a concise summary for tool listing (name + brief description)
+    pub fn summary(&self) -> String {
+        let desc = if self.description.len() > 80 {
+            format!("{}...", &self.description[..77])
+        } else {
+            self.description.clone()
+        };
+        
+        format!("{}::{} - {}", self.server, self.name, desc)
+    }
+    
+    /// Get full tool identifier (server::tool_name)
+    pub fn full_name(&self) -> String {
+        format!("{}::{}", self.server, self.name)
+    }
+}
+
 /// Minimal client handler for MCP connections
 #[derive(Clone)]
 struct MinimalClientHandler;
@@ -191,6 +289,84 @@ impl MCPClientManager {
             .map_err(|e| anyhow!("Failed to list tools from '{}': {:?}", server_name, e))?;
 
         Ok(result)
+    }
+    
+    /// Get metadata for a specific tool (discovery-based loading)
+    ///
+    /// Returns structured tool information for LLM consumption.
+    /// Tool identifier format: "server_name::tool_name"
+    ///
+    /// # Arguments
+    /// * `tool_identifier` - Full tool name (e.g., "hainet-files::file_write")
+    ///
+    /// # Example
+    /// ```
+    /// let metadata = client.get_tool_metadata("hainet-files::file_write").await?;
+    /// println!("Tool: {}", metadata.summary());
+    /// println!("Parameters:\n{}", metadata.parameter_docs);
+    /// ```
+    pub async fn get_tool_metadata(&self, tool_identifier: &str) -> Result<ToolMetadata> {
+        // Parse tool identifier (server::tool format)
+        let parts: Vec<&str> = tool_identifier.split("::").collect();
+        if parts.len() != 2 {
+            return Err(anyhow!(
+                "Invalid tool identifier '{}'. Expected format: 'server::tool'",
+                tool_identifier
+            ));
+        }
+        
+        let server_name = parts[0];
+        let tool_name = parts[1];
+        
+        debug!(
+            "Getting metadata for tool '{}' from server '{}'",
+            tool_name, server_name
+        );
+        
+        // List all tools from the server
+        let tools = self.list_tools(server_name).await?;
+        
+        // Find the specific tool
+        let tool = tools
+            .iter()
+            .find(|t| t.name == tool_name)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Tool '{}' not found on server '{}'. Available tools: {}",
+                    tool_name,
+                    server_name,
+                    tools.iter().map(|t| t.name.as_ref()).collect::<Vec<_>>().join(", ")
+                )
+            })?;
+        
+        // Convert to metadata
+        Ok(ToolMetadata::from_tool(tool, server_name))
+    }
+    
+    /// List all available tools with metadata (for discovery)
+    ///
+    /// Returns concise summaries of all tools from all connected servers.
+    /// Useful for initial tool discovery phase.
+    pub async fn list_all_tool_summaries(&self) -> Result<Vec<String>> {
+        let mut summaries = Vec::new();
+        
+        let server_names = self.list_servers().await;
+        
+        for server_name in server_names {
+            match self.list_tools(&server_name).await {
+                Ok(tools) => {
+                    for tool in tools {
+                        let metadata = ToolMetadata::from_tool(&tool, &server_name);
+                        summaries.push(metadata.summary());
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to list tools from '{}': {}", server_name, e);
+                }
+            }
+        }
+        
+        Ok(summaries)
     }
 
     /// List resources from a server

@@ -1,0 +1,38 @@
+# START OF FILE hainet-persona/prompts/agents/worker/planning.toml
+
+[metadata]
+name = "worker_planning"
+version = "1.0.0"
+description = "Minimal planning prompt for discovery-based tool loading"
+
+[prompt]
+template = """
+You are a Worker AI agent planning task execution.
+
+TASK: {{task_description}}
+YOUR ROLE: {{worker_role}}
+CAPABILITIES: {{worker_capabilities}}
+
+SESSION PROGRESS:
+{{session_tasks}}
+
+AVAILABLE TOOLS (names only):
+{{tool_list}}
+
+INSTRUCTIONS:
+1. Identify which tools you need for this task (use tool names above)
+2. List the tools you want to learn more about
+3. Keep your response focused and concise
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{
+  "needed_tools": ["server::tool_name1", "server::tool_name2"],
+  "reasoning": "Brief explanation of why these tools"
+}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"""
+
+[context_requirements]
+required = ["task_description", "worker_role", "worker_capabilities", "tool_list", "session_tasks"]
+optional = []

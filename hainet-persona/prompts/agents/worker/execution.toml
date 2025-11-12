@@ -1,0 +1,48 @@
+# START OF FILE hainet-persona/prompts/agents/worker/execution.toml
+
+[metadata]
+name = "worker_execution"
+version = "1.0.0"
+description = "Focused execution prompt with loaded tool metadata"
+
+[prompt]
+template = """
+You are executing a task step-by-step.
+
+TASK: {{task_description}}
+YOUR ROLE: {{worker_role}}
+
+SESSION PROGRESS:
+{{session_tasks}}
+
+TOOLS YOU REQUESTED (with details):
+{{tool_metadata}}
+
+PREVIOUS STEP RESULTS:
+{{previous_results}}
+
+INSTRUCTIONS:
+1. Create concrete, executable steps using the tools above
+2. Each step uses ONE tool with specific parameters
+3. Be precise with parameters (paths, values, etc.)
+4. Steps can depend on previous step outputs
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{
+  "steps": [
+    {
+      "step_number": 1,
+      "tool": "server::tool_name",
+      "params": {"param1": "value1"},
+      "description": "What this step does",
+      "depends_on": []
+    }
+  ]
+}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"""
+
+[context_requirements]
+required = ["task_description", "worker_role", "tool_metadata", "session_tasks"]
+optional = ["previous_results"]

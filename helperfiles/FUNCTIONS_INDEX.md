@@ -784,6 +784,48 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ---
 
+## MCP Tool Client (Phase 5 - Session 38 Phase 2 Complete)
+
+### hainet-persona/src/tools/mcp/client.rs
+- `MCPClientManager::new()` - Initialize MCP client manager
+- `MCPClientManager::start_server(name, command)` - Start an MCP server and connect to it
+- `MCPClientManager::call_tool(server, tool, args)` - Execute a tool on a specific server
+- `MCPClientManager::list_tools(server)` - List all tools from a server
+- `MCPClientManager::list_resources(server)` - List resources from a server
+- `MCPClientManager::read_resource(server, uri)` - Read a resource from a server
+- `MCPClientManager::list_prompts(server)` - List prompts from a server
+- `MCPClientManager::get_prompt(server, name, args)` - Get a prompt from a server
+- `MCPClientManager::shutdown_server(name)` - Shutdown a specific server
+- `MCPClientManager::shutdown_all()` - Shutdown all servers
+- `MCPClientManager::start_from_config(path)` - Load and start servers from config file
+- `MCPClientManager::start_default_servers()` - Start all enabled servers from default config
+
+### Discovery-Based Tool Loading (Session 38 Phase 2 - Complete) ✅
+- `MCPClientManager::get_tool_metadata(tool_identifier)` - **Lazy-load metadata for a specific tool**
+  - Format: `"server::tool"` (e.g., `"hainet-files::file_write"`)
+  - Returns: `ToolMetadata` with description, parameters, formatted docs
+  - Use: When LLM needs details about a specific tool
+- `MCPClientManager::list_all_tool_summaries()` - **Get concise summaries of all available tools**
+  - Returns: Vec of tool summaries (80 char max each)
+  - Format: `"server::tool - brief description..."`
+  - Use: Initial discovery phase (minimal context)
+- `ToolMetadata::summary()` - Concise tool summary (80 chars max)
+- `ToolMetadata::full_name()` - Returns `"server::tool"` identifier
+- `ToolMetadata::format_parameters()` - JSON schema → human-readable docs
+
+**ToolMetadata Structure:**
+```rust
+pub struct ToolMetadata {
+    pub name: String,              // Tool name
+    pub server: String,            // Server name
+    pub description: String,       // Human-readable description
+    pub input_schema: Value,       // JSON schema for parameters
+    pub parameter_docs: String,    // Formatted parameter documentation
+}
+```
+
+---
+
 ## Test Infrastructure (Phase 6A Session 1 - Complete)
 
 ### hainet-persona/tests/helpers/mod.rs

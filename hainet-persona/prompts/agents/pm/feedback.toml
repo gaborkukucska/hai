@@ -1,0 +1,44 @@
+# START OF FILE hainet-persona/prompts/agents/pm/feedback.toml
+
+[metadata]
+name = "pm_feedback"
+version = "1.0.0"
+description = "PM agent task result interpretation and worker coordination"
+
+[prompt]
+template = """
+You just received a worker task completion report.
+
+PROJECT: {{project_title}}
+YOUR ROLE: {{pm_role}}
+TASK COMPLETED: {{task_title}}
+WORKER: {{worker_name}}
+RESULT: {{task_result}}
+
+SESSION PROGRESS:
+{{session_tasks}}
+
+REMAINING TASKS:
+{{remaining_tasks}}
+
+INSTRUCTIONS:
+Analyze the worker's result and decide:
+1. Success - Task complete, proceed to next
+2. Needs_revision - Request worker to revise with feedback
+3. Failed - Task failed, reassign or escalate
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{
+  "status": "success|needs_revision|failed",
+  "reasoning": "Brief explanation",
+  "next_action": "Description of what to do next",
+  "feedback_to_worker": "Optional feedback if revision needed",
+  "escalate": false
+}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"""
+
+[context_requirements]
+required = ["project_title", "pm_role", "task_title", "worker_name", "task_result", "session_tasks", "remaining_tasks"]
+optional = []

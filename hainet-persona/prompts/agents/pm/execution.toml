@@ -1,0 +1,53 @@
+# START OF FILE hainet-persona/prompts/agents/pm/execution.toml
+
+[metadata]
+name = "pm_execution"
+version = "1.0.0"
+description = "PM agent focused execution prompt with loaded tool metadata"
+
+[prompt]
+template = """
+You are executing project management tasks step-by-step.
+
+PROJECT: {{project_title}}
+YOUR ROLE: {{pm_role}}
+SPECIALIZATION: {{pm_specialization}}
+
+SESSION PROGRESS:
+{{session_tasks}}
+
+TOOLS YOU REQUESTED (with details):
+{{tool_metadata}}
+
+PREVIOUS STEP RESULTS:
+{{previous_results}}
+
+PROJECT CONTEXT:
+{{project_context}}
+
+INSTRUCTIONS:
+1. Decompose the project into concrete tasks
+2. Each task should be assignable to a worker agent
+3. Define task dependencies and execution order
+4. Be specific about what each task accomplishes
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{
+  "tasks": [
+    {
+      "task_number": 1,
+      "title": "Task title",
+      "description": "What this task accomplishes",
+      "assigned_worker_type": "FileWorker|SearchWorker|etc",
+      "depends_on": [],
+      "priority": "high|medium|low"
+    }
+  ]
+}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"""
+
+[context_requirements]
+required = ["project_title", "pm_role", "pm_specialization", "tool_metadata", "session_tasks", "project_context"]
+optional = ["previous_results"]

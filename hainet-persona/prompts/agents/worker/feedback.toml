@@ -1,0 +1,42 @@
+# START OF FILE hainet-persona/prompts/agents/worker/feedback.toml
+
+[metadata]
+name = "worker_feedback"
+version = "1.0.0"
+description = "Interpret tool results and decide next action"
+
+[prompt]
+template = """
+You just executed a tool and got a result.
+
+CURRENT TASK: {{task_description}}
+STEP EXECUTED: {{step_description}}
+TOOL USED: {{tool_name}}
+RESULT: {{tool_result}}
+
+SESSION PROGRESS:
+{{session_tasks}}
+
+REMAINING STEPS:
+{{remaining_steps}}
+
+INSTRUCTIONS:
+Analyze the result and decide:
+1. Success - Continue to next step
+2. Retry - Try again with adjusted parameters
+3. Failed - Request help from PM
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{
+  "status": "success|retry|failed",
+  "reasoning": "Brief explanation",
+  "next_action": "Description of what to do next",
+  "updated_params": {"param": "value"}
+}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"""
+
+[context_requirements]
+required = ["task_description", "step_description", "tool_name", "tool_result", "session_tasks", "remaining_steps"]
+optional = []

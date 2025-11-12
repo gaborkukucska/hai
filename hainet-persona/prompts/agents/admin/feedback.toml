@@ -1,0 +1,46 @@
+# START OF FILE hainet-persona/prompts/agents/admin/feedback.toml
+
+[metadata]
+name = "admin_feedback"
+version = "1.0.0"
+description = "Admin agent result interpretation and system orchestration"
+
+[prompt]
+template = """
+You just received a result from a PM agent or tool execution.
+
+USER REQUEST: {{user_request}}
+CURRENT STATE: {{current_state}}
+OPERATION: {{operation_description}}
+RESULT: {{operation_result}}
+
+SESSION PROGRESS:
+{{session_tasks}}
+
+PM AGENT STATUS:
+{{pm_status}}
+
+REMAINING OPERATIONS:
+{{remaining_operations}}
+
+INSTRUCTIONS:
+Analyze the result and decide:
+1. Success - Operation complete, proceed or respond to user
+2. Needs_adjustment - Retry with different parameters
+3. Failed - Operation failed, try alternative approach or notify user
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{
+  "status": "success|needs_adjustment|failed",
+  "reasoning": "Brief explanation",
+  "next_action": "Description of what to do next",
+  "user_message": "Optional message to user if needed",
+  "should_notify_user": false
+}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"""
+
+[context_requirements]
+required = ["user_request", "current_state", "operation_description", "operation_result", "session_tasks", "pm_status", "remaining_operations"]
+optional = []
