@@ -1,10 +1,10 @@
 <!-- # START OF FILE helperfiles/SESSION_38_WORKER_PROMPT_REFACTORING.md -->
-# Session 38: Worker Prompt Refactoring - Discovery-Based Tool Loading
+# Session 38: Worker, PM and Admin Agent Prompt Refactoring - Discovery-Based Tool Loading
 
 **Date:** 2025-11-13
 **Phase:** Maintenance & Bugfixes
 **Session:** 38
-**Focus:** Fixing worker JSON parsing failures through modular prompt architecture
+**Focus:** Fixing worker JSON parsing failures through modular prompt architecture and session tasks as short term memory for all agents.
 **Status:** IN PROGRESS
 
 ## 1. Problem Statement
@@ -57,7 +57,7 @@ Startup → Load ALL tool info → Generate plan → Parse JSON → Execute
 ## 3. Implementation Plan
 
 ### **Phase 1: Session Task List** (Foundation) ✅ COMPLETE
-**Goal:** Give workers memory of their progress within a session
+**Goal:** Give workers, PMs and the Admin memory of their progress within a session
 
 **Components:**
 - `hainet-persona/src/agents/session_tasks.rs` (new module) ✅
@@ -97,6 +97,20 @@ Session tasks are **completely separate** from project tasks:
 **No overlap or conflict** - these serve different purposes and do not interact with each other.
 
 ---
+### **Phase 1B: PM Agent Session Tasks** ⏳ NEXT
+- [ ] Add session task list to `PMAgent` struct
+- [ ] Track project decomposition tasks in session
+- [ ] Update task spawning to add to session list
+- [ ] Update task completion to mark in session
+- [ ] Test PM session awareness
+
+### **Phase 1C: Admin Agent Session Tasks** ⏳ NEXT
+- [ ] Add session task list to `AdminAgent` struct
+- [ ] Track conversation/project creation in session
+- [ ] Update state transitions to reflect in session
+- [ ] Test Admin session awareness
+
+---
 
 ### **Phase 2: Tool Metadata System** (Discovery)
 **Goal:** Move tool information OUT of prompts, INTO tools themselves
@@ -120,6 +134,14 @@ pub struct ToolMetadata {
 - Each MCP tool defines its own metadata
 - Example: `mcp-servers/hainet-files/src/tools/file_write.rs`
 - Metadata retrieved only when LLM requests it
+
+### **Phase 2: Tool Metadata System** ⏳
+- [ ] Define `ToolMetadata` struct in MCP client
+- [ ] Implement `get_tool_metadata()` method in `MCPClientManager`
+- [ ] Add metadata to hainet-files tools (file_read, file_write, file_list)
+- [ ] Add metadata to hainet-system tools (system_status, list_services)
+- [ ] Add metadata to hainet-dev tools (git_status, cargo_build)
+- [ ] Test metadata retrieval
 
 ---
 
@@ -170,6 +192,15 @@ hainet-persona/prompts/agents/worker/
 - Dynamic data injection (only relevant info)
 - Tool information lazy-loaded on-demand
 
+### **Phase 3: Discovery-Based Execution** ⏳
+- [ ] Create minimal prompt templates in `hainet-persona/prompts/agents/worker/`
+- [ ] Implement `execute_task_with_discovery()` method
+- [ ] Implement `plan_tool_usage()` (LLM identifies needed tools)
+- [ ] Implement `execute_step_with_feedback()` (tool result → progress)
+- [ ] Update `generate_startup_prompt()` to use modular templates
+- [ ] Replace `execute_task()` with discovery-based version
+- [ ] Test with snake game project
+
 ---
 
 ### **Phase 4: Model Family Preferences** (Enhancement)
@@ -188,6 +219,25 @@ worker_model_family = "qwen"      # Prefers qwen2.* models
 - Boost matching models by +20% score
 - Fallback to best available if preferred family not found
 - Load preferences in agent constructors
+
+### **Phase 4: Model Family Preferences** ⏳
+- [ ] Add `[ai_preferences]` section to `hainet.toml`
+- [ ] Create config loading in `hainet-persona/src/config.rs`
+- [ ] Update `ModelSelector::select_best()` signature
+- [ ] Implement family-based score boosting (+20%)
+- [ ] Pass preferences to agent constructors
+- [ ] Test with different model families (llama, gemma, qwen)
+
+---
+
+### **Phase 5: Integration & Testing** ⏳
+- [ ] Run worker execution tests
+- [ ] Test with multiple concurrent projects
+- [ ] Measure JSON parsing success rate
+- [ ] Verify session task list functionality
+- [ ] Benchmark prompt length and token usage
+- [ ] Update documentation
+- [ ] Update `PROJECT_STATUS.toml`
 
 ---
 
@@ -233,53 +283,6 @@ worker_model_family = "qwen"      # Prefers qwen2.* models
 - Integration: Task lifecycle tracking in worker execution
 - Compilation: Zero errors, clean build
 - Documentation: Architectural clarification added
-
-### **Phase 1B: PM Agent Session Tasks** ⏳ NEXT
-- [ ] Add session task list to `PMAgent` struct
-- [ ] Track project decomposition tasks in session
-- [ ] Update task spawning to add to session list
-- [ ] Update task completion to mark in session
-- [ ] Test PM session awareness
-
-### **Phase 1C: Admin Agent Session Tasks** ⏳ NEXT
-- [ ] Add session task list to `AdminAgent` struct
-- [ ] Track conversation/project creation in session
-- [ ] Update state transitions to reflect in session
-- [ ] Test Admin session awareness
-
-### **Phase 2: Tool Metadata System** ⏳
-- [ ] Define `ToolMetadata` struct in MCP client
-- [ ] Implement `get_tool_metadata()` method in `MCPClientManager`
-- [ ] Add metadata to hainet-files tools (file_read, file_write, file_list)
-- [ ] Add metadata to hainet-system tools (system_status, list_services)
-- [ ] Add metadata to hainet-dev tools (git_status, cargo_build)
-- [ ] Test metadata retrieval
-
-### **Phase 3: Discovery-Based Execution** ⏳
-- [ ] Create minimal prompt templates in `hainet-persona/prompts/agents/worker/`
-- [ ] Implement `execute_task_with_discovery()` method
-- [ ] Implement `plan_tool_usage()` (LLM identifies needed tools)
-- [ ] Implement `execute_step_with_feedback()` (tool result → progress)
-- [ ] Update `generate_startup_prompt()` to use modular templates
-- [ ] Replace `execute_task()` with discovery-based version
-- [ ] Test with snake game project
-
-### **Phase 4: Model Family Preferences** ⏳
-- [ ] Add `[ai_preferences]` section to `hainet.toml`
-- [ ] Create config loading in `hainet-persona/src/config.rs`
-- [ ] Update `ModelSelector::select_best()` signature
-- [ ] Implement family-based score boosting (+20%)
-- [ ] Pass preferences to agent constructors
-- [ ] Test with different model families (llama, gemma, qwen)
-
-### **Phase 5: Integration & Testing** ⏳
-- [ ] Run worker execution tests
-- [ ] Test with multiple concurrent projects
-- [ ] Measure JSON parsing success rate
-- [ ] Verify session task list functionality
-- [ ] Benchmark prompt length and token usage
-- [ ] Update documentation
-- [ ] Update `PROJECT_STATUS.toml`
 
 ---
 
