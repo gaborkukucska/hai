@@ -23,6 +23,7 @@ use super::pm_intelligence::{
     HistoricalLearner, ProjectComplexity, DecompositionStrategy, 
     ProjectOutcome
 };
+use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
 
 /// Project Manager Agent
 /// 
@@ -71,6 +72,9 @@ pub struct PMAgent {
     
     /// Project start time for duration tracking
     project_start_time: Option<SystemTime>,
+    
+    /// Session task list for LLM context (short-term memory)
+    session_tasks: SessionTaskList,
 }
 
 impl PMAgent {
@@ -98,6 +102,7 @@ impl PMAgent {
             project_complexity: None,
             selected_strategy: None,
             project_start_time: None,
+            session_tasks: SessionTaskList::new(),
         }
     }
     
@@ -118,6 +123,9 @@ impl PMAgent {
         // Record project start time
         self.project_start_time = Some(SystemTime::now());
         
+        // Add initial session task: project analysis
+        self.session_tasks.add_task("Analyze project requirements".to_string(), None);
+        
         // Transition from Startup to Idle (PM agents must go through Idle first)
         self.state_machine.transition(
             AgentState::Idle,
@@ -130,8 +138,14 @@ impl PMAgent {
             "PM starting project analysis".to_string()
         )?;
         
+        // Mark analysis task as in progress
+        let _ = self.session_tasks.start_task("Analyze project requirements");
+        
         // Analyze project and create detailed plan
         self.analyze_and_plan().await?;
+        
+        // Mark analysis as complete
+        let _ = self.session_tasks.complete_task("Analyze project requirements");
         
         // Transition to Managing
         self.state_machine.transition(
@@ -189,7 +203,7 @@ impl PMAgent {
             strategy
         ).await?;
         
-        // Create detailed tasks in database
+        // Create detailed tasks in database and add to session task list
         for task_detail in &detailed_plan.tasks {
             let project_manager = self.project_manager.write().await;
             project_manager.create_task(
@@ -197,6 +211,14 @@ impl PMAgent {
                 task_detail.title.clone(),
                 task_detail.description.clone(),
             ).await?;
+            
+            // Add task to session list (truncated title for readability)
+            let task_title = if task_detail.title.len() > 50 {
+                format!("{}...", &task_detail.title[..47])
+            } else {
+                task_detail.title.clone()
+            };
+            self.session_tasks.add_task(task_title, None);
         }
         
         // Build dependency graph
@@ -293,7 +315,7 @@ impl PMAgent {
     }
     
     /// Validate task results submitted by worker
-    async fn validate_task(&self, task_id: &TaskId) -> Result<()> {
+    async fn validate_task(&mut self, task_id: &TaskId) -> Result<()> {
         let task = {
             let pm = self.project_manager.read().await;
             pm.get_task(task_id).await?
@@ -337,6 +359,14 @@ impl PMAgent {
         if validation.approved {
             // Approve task
             pm.approve_task(task_id, validation.feedback).await?;
+            
+            // Update session task to complete
+            let task_title = if task.title.len() > 50 {
+                format!("{}...", &task.title[..47])
+            } else {
+                task.title.clone()
+            };
+            let _ = self.session_tasks.update_status(&task_title, SessionTaskStatus::Complete);
             
             tracing::info!(
                 "PM {} approved task {} - {}",
@@ -638,6 +668,14 @@ impl PMAgent {
                 .find(|t| &t.id == task_id)
                 .ok_or_else(|| anyhow::anyhow!("Task not found"))?
         };
+        
+        // Update session task status to in progress
+        let task_title = if task.title.len() > 50 {
+            format!("{}...", &task.title[..47])
+        } else {
+            task.title.clone()
+        };
+        let _ = self.session_tasks.update_status(&task_title, SessionTaskStatus::InProgress);
         
         // Select appropriate worker template based on task description
         let template = WorkerTemplate::select_for_task(&task.description);

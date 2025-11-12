@@ -19,12 +19,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use anyhow::anyhow;
-
 use super::{Agent, AgentContext, IntentParser, TaskPlanner, AgentStateMachine};
 use super::pm::PMAgent;
 use super::llm_config::AgentLLMConfig;
 use super::metrics::{MetricsCollector, OperationResult};
+use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
 use crate::config::HaiNetConfig;
 use crate::messaging::{AgentId, Message};
 use crate::prompts::{AgentType, AgentState, PromptContext};
@@ -77,6 +76,9 @@ pub struct AdminAgent {
     
     /// Metrics collector
     metrics: Arc<RwLock<MetricsCollector>>,
+    
+    /// Session task list for LLM context (short-term memory)
+    session_tasks: SessionTaskList,
 }
 
 impl AdminAgent {
@@ -109,6 +111,7 @@ impl AdminAgent {
             config,
             llm_config,
             metrics,
+            session_tasks: SessionTaskList::new(),
         })
     }
     
@@ -127,13 +130,34 @@ impl AdminAgent {
                 "Auto-transition from Startup on first message".to_string()
             )?;
         }
+        
+        // 3. Add user request to session tasks
+        let request_title = if user_input.len() > 50 {
+            format!("{}...", &user_input[..47])
+        } else {
+            user_input.clone()
+        };
+        self.session_tasks.add_task(request_title.clone(), None);
+        let _ = self.session_tasks.start_task(&request_title);
 
-        // 3. Route to appropriate handler based on intent complexity
-        if self.is_complex_intent(&intent, &user_input)? {
+        // 4. Route to appropriate handler based on intent complexity
+        let result = if self.is_complex_intent(&intent, &user_input)? {
             self.handle_complex_intent(&user_input, &intent).await
         } else {
             self.handle_simple_intent(&user_input, &intent).await
+        };
+        
+        // 5. Update session task status based on result
+        match &result {
+            Ok(_) => {
+                let _ = self.session_tasks.complete_task(&request_title);
+            },
+            Err(_) => {
+                let _ = self.session_tasks.fail_task(&request_title);
+            }
         }
+        
+        result
     }
 
     /// Handles complex intents by creating and managing a project.
@@ -142,11 +166,22 @@ impl AdminAgent {
 
         // 1. Transition to Planning state
         self.transition_to_planning(intent)?;
+        
+        // Add planning task to session
+        self.session_tasks.add_task("Generate project plan".to_string(), None);
+        let _ = self.session_tasks.start_task("Generate project plan");
 
         // 2. Generate project plan using LLM
         let project_plan = self.generate_project_plan(user_input, intent).await?;
+        
+        // Mark planning complete
+        let _ = self.session_tasks.complete_task("Generate project plan");
 
         // 3. Create project in the database
+        let project_title_short = format!("Create project: {}", &project_plan.title[..project_plan.title.len().min(30)]);
+        self.session_tasks.add_task(project_title_short.clone(), None);
+        let _ = self.session_tasks.start_task(&project_title_short);
+        
         let project_id = self.create_project(
             project_plan.title.clone(),
             project_plan.overview.clone(),
@@ -154,10 +189,18 @@ impl AdminAgent {
         ).await?;
 
         // 4. Spawn a PM agent to manage the project
+        self.session_tasks.add_task("Spawn PM agent".to_string(), None);
+        let _ = self.session_tasks.start_task("Spawn PM agent");
+        
         let pm_id = self.spawn_pm_agent(&project_id, &project_plan).await?;
+        
+        let _ = self.session_tasks.complete_task("Spawn PM agent");
 
         // 5. Track the new project
         self.active_projects.insert(project_id.clone(), pm_id.clone());
+        
+        // Mark project creation complete
+        let _ = self.session_tasks.complete_task(&project_title_short);
 
         // 6. Transition to Monitoring state
         self.state_machine.transition(

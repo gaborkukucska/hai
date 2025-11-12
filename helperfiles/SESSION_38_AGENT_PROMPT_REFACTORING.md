@@ -97,18 +97,30 @@ Session tasks are **completely separate** from project tasks:
 **No overlap or conflict** - these serve different purposes and do not interact with each other.
 
 ---
-### **Phase 1B: PM Agent Session Tasks** ⏳ NEXT
-- [ ] Add session task list to `PMAgent` struct
-- [ ] Track project decomposition tasks in session
-- [ ] Update task spawning to add to session list
-- [ ] Update task completion to mark in session
-- [ ] Test PM session awareness
+### **Phase 1B: PM Agent Session Tasks** ✅ COMPLETE (2025-11-13 06:42 AM)
+- [x] Add session task list to `PMAgent` struct
+- [x] Track project decomposition tasks in session
+- [x] Update task spawning to add to session list
+- [x] Update task completion to mark in session
+- [x] Test PM session awareness (compilation verified)
 
-### **Phase 1C: Admin Agent Session Tasks** ⏳ NEXT
-- [ ] Add session task list to `AdminAgent` struct
-- [ ] Track conversation/project creation in session
-- [ ] Update state transitions to reflect in session
-- [ ] Test Admin session awareness
+**Implementation Details:**
+- Session tasks added to PM lifecycle: project analysis, task creation, task execution tracking
+- Tasks added to session list during planning phase
+- Task status updated when workers are spawned and tasks are validated
+- Truncated task titles (max 50 chars) for prompt readability
+
+### **Phase 1C: Admin Agent Session Tasks** ✅ COMPLETE (2025-11-13 06:42 AM)
+- [x] Add session task list to `AdminAgent` struct
+- [x] Track conversation/project creation in session
+- [x] Update state transitions to reflect in session
+- [x] Test Admin session awareness (compilation verified)
+
+**Implementation Details:**
+- Session tasks track user requests (simple/complex intents)
+- Complex intent handling tracks: plan generation, project creation, PM spawning
+- Task status automatically updated based on operation success/failure
+- Truncated request titles (max 50 chars) for prompt readability
 
 ---
 
@@ -429,14 +441,15 @@ self.session_tasks.update_status(
 
 **Session Start:** 2025-11-13 05:26 AM  
 **Phase 1 Complete:** 2025-11-13 06:15 AM  
-**Status:** Phase 1 ✅ Complete | Phases 1B-C, 2-4 ⏳ Pending  
+**Phases 1B-C Complete:** 2025-11-13 06:42 AM  
+**Status:** Phases 1, 1B-C ✅ Complete | Phases 2-4 ⏳ Pending  
 **Estimated Duration:** 2-3 sessions (full implementation)
 
 ---
 
-## 12. Phase 1 Completion Summary
+## 12. Phase 1, 1B, 1C Completion Summary
 
-### Completed Work (2025-11-13 06:15 AM)
+### Phase 1: Worker Session Tasks (2025-11-13 06:15 AM) ✅
 
 **Implemented:**
 - ✅ Session task list module (`session_tasks.rs`) - 400+ lines
@@ -452,6 +465,57 @@ self.session_tasks.update_status(
 1. `hainet-persona/src/agents/session_tasks.rs` (new)
 2. `hainet-persona/src/agents/mod.rs` (exports)
 3. `hainet-persona/src/agents/worker.rs` (integration)
+
+### Phase 1B: PM Agent Session Tasks (2025-11-13 06:42 AM) ✅
+
+**Implemented:**
+- ✅ Session task list added to `PMAgent` struct
+- ✅ Project analysis tracked ("Analyze project requirements")
+- ✅ Task decomposition tracked (all project tasks added to session)
+- ✅ Worker spawning updates session task status (pending → in_progress)
+- ✅ Task validation updates session task status (in_progress → complete)
+- ✅ Title truncation for prompt efficiency (max 50 chars)
+
+**Files Modified:**
+1. `hainet-persona/src/agents/pm.rs` (session task integration)
+
+**PM Session Task Lifecycle:**
+```
+1. Startup → Add "Analyze project requirements" (pending)
+2. Planning → Mark analysis (in_progress)
+3. Plan Complete → Mark analysis (complete), add all tasks (pending)
+4. Managing → Spawn worker → Mark task (in_progress)
+5. Validation → Approve task → Mark task (complete)
+```
+
+### Phase 1C: Admin Agent Session Tasks (2025-11-13 06:42 AM) ✅
+
+**Implemented:**
+- ✅ Session task list added to `AdminAgent` struct
+- ✅ User request tracking (all inputs added to session)
+- ✅ Complex intent workflow tracking (plan generation, project creation, PM spawn)
+- ✅ Automatic status updates based on operation results
+- ✅ Title truncation for prompt efficiency (max 50 chars)
+
+**Files Modified:**
+1. `hainet-persona/src/agents/admin.rs` (session task integration)
+
+**Admin Session Task Lifecycle:**
+```
+Simple Intent:
+1. User request → Add request (in_progress)
+2. Generate response → Success/Failure → Mark (complete/failed)
+
+Complex Intent:
+1. User request → Add request (in_progress)
+2. Add "Generate project plan" (in_progress)
+3. Plan generated → Mark plan (complete)
+4. Add "Create project: <title>" (in_progress)
+5. Add "Spawn PM agent" (in_progress)
+6. PM spawned → Mark PM (complete)
+7. Project created → Mark project (complete)
+8. Request complete → Mark request (complete)
+```
 
 **Architecture Impact:**
 - Workers now have short-term memory of session progress
