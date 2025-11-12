@@ -25,13 +25,13 @@ use hainet_persona::ai_providers::AIProviderManager;
 /// Create test infrastructure
 async fn create_test_environment() -> Result<(
     Arc<RwLock<MessageBus>>,
-    Arc<PromptManager>,
+    Arc<RwLock<PromptManager>>,
     Arc<RwLock<ProjectManager>>,
     Arc<RwLock<MCPClientManager>>,
     Arc<AIProviderManager>,
 )> {
     let message_bus = Arc::new(RwLock::new(MessageBus::new().await?));
-    let prompt_manager = Arc::new(PromptManager::new("prompts".into())?);
+    let prompt_manager = Arc::new(RwLock::new(PromptManager::new("prompts".into())?));
     let project_manager = Arc::new(RwLock::new(
         ProjectManager::new("sqlite::memory:").await?
     ));

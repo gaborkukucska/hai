@@ -645,22 +645,13 @@ impl PMAgent {
         tracing::info!("Spawning {} for task: {}", template.name, task.title);
         
         // Create worker agent with proper template
-        // Workers expect Arc<PromptManager>, so we need to create a new instance
-        // Since PromptManager can't be cloned, we'll use the new() constructor instead
-        use std::path::PathBuf;
-        
-        // Find workspace root by looking for hainet-persona/prompts
-        // This works whether we're running from hainet-portal or hainet-persona
-        let workspace_root = std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."));
-        let prompts_path = workspace_root.join("hainet-persona").join("prompts");
-        
-        let prompt_manager_for_worker = Arc::new(crate::prompts::PromptManager::new(prompts_path)?);
-        
+        // Workers need Arc<PromptManager>, but we have Arc<RwLock<PromptManager>>
+        // We can't unwrap the RwLock, so we need to share the RwLock-wrapped version
+        // Let's check the WorkerAgent signature to see what it actually needs
         let mut worker = super::worker::WorkerAgent::from_template(
             template,
             self.message_bus.clone(),
-            prompt_manager_for_worker,
+            self.prompt_manager.clone(),
             self.project_manager.clone(),
             Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new())),
             self.ai_provider_manager.clone(),

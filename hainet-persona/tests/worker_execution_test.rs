@@ -27,7 +27,7 @@ use hainet_persona::ai_providers::AIProviderManager;
 
 async fn create_test_worker() -> WorkerAgent {
     let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));
-    let prompt_manager = Arc::new(PromptManager::new("prompts".into()).unwrap());
+    let prompt_manager = Arc::new(RwLock::new(PromptManager::new("prompts".into()).unwrap()));
     let project_manager = Arc::new(RwLock::new(
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));
@@ -315,7 +315,7 @@ async fn test_worker_file_worker_template() {
 #[tokio::test]
 async fn test_worker_network_worker_creation() {
     let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));
-    let prompt_manager = Arc::new(PromptManager::new("prompts".into()).unwrap());
+    let prompt_manager = Arc::new(RwLock::new(PromptManager::new("prompts".into()).unwrap()));
     let project_manager = Arc::new(RwLock::new(
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));
@@ -339,7 +339,7 @@ async fn test_worker_network_worker_creation() {
 #[tokio::test]
 async fn test_worker_research_worker_creation() {
     let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));
-    let prompt_manager = Arc::new(PromptManager::new("prompts".into()).unwrap());
+    let prompt_manager = Arc::new(RwLock::new(PromptManager::new("prompts".into()).unwrap()));
     let project_manager = Arc::new(RwLock::new(
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));

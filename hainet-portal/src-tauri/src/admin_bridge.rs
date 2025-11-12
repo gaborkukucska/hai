@@ -100,11 +100,17 @@ impl AdminBridge {
         
         log::info!("Prompts path: {:?}", prompts_path);
         
+        // Create AIProviderManager first (needed by GuardianSystem)
+        let ai_provider_manager = Arc::new(AIProviderManager::new().await?);
+        
         // Create shared context
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await?));
         let prompt_manager = Arc::new(RwLock::new(PromptManager::new(prompts_path)?));
         let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
-        let guardian = Arc::new(RwLock::new(GuardianSystem::new(None, None)));
+        let guardian = Arc::new(RwLock::new(GuardianSystem::new(
+            ai_provider_manager.clone(),
+            None
+        )));
         
         let context = Arc::new(AgentContext::new(
             message_bus,
@@ -140,11 +146,8 @@ impl AdminBridge {
         let metrics_collector = Arc::new(RwLock::new(
             MetricsCollector::new(&format!("sqlite://{}?mode=rwc", metrics_db_path.display())).await?
         ));
-
-        // Create AIProviderManager
-        let ai_provider_manager = Arc::new(AIProviderManager::new().await?);
         
-        // Create Admin AI agent
+        // Create Admin AI agent (ai_provider_manager already created earlier)
         let mut admin = AdminAgent::new(context, project_manager, ai_provider_manager, metrics_collector).await?;
         
         // Start Admin AI

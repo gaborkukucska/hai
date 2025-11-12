@@ -17,6 +17,7 @@ use crate::ai_providers::{AIProviderManager, SelectionContext, providers::Genera
 use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
 use super::worker_intelligence::{WorkerLearner, ExecutionStrategy, ToolSelector, ErrorCategory, TaskOutcome};
+use super::session_tasks::SessionTaskList;
 use serde_json::json;
 use std::time::SystemTime;
 
@@ -47,7 +48,7 @@ pub struct WorkerAgent {
     message_bus: Arc<RwLock<MessageBus>>,
     
     /// Prompt manager for generating prompts
-    prompt_manager: Arc<PromptManager>,
+    prompt_manager: Arc<RwLock<PromptManager>>,
     
     /// Project manager for task updates
     project_manager: Arc<RwLock<ProjectManager>>,
@@ -72,6 +73,9 @@ pub struct WorkerAgent {
     
     /// Enable self-correction (default: true)
     self_correction_enabled: bool,
+    
+    /// Session task list - tracks progress within session
+    session_tasks: SessionTaskList,
 }
 
 impl WorkerAgent {
@@ -79,7 +83,7 @@ impl WorkerAgent {
     pub fn new(
         worker_type: WorkerType,
         message_bus: Arc<RwLock<MessageBus>>,
-        prompt_manager: Arc<PromptManager>,
+        prompt_manager: Arc<RwLock<PromptManager>>,
         project_manager: Arc<RwLock<ProjectManager>>,
         mcp_client: Arc<RwLock<MCPClientManager>>,
         ai_provider_manager: Arc<AIProviderManager>,
@@ -133,6 +137,7 @@ impl WorkerAgent {
             execution_strategy: ExecutionStrategy::default(), // 5s timeout, 3 retries, 1.5x backoff
             tool_selector: ToolSelector::new(fallback_tools),
             self_correction_enabled: true,
+            session_tasks: SessionTaskList::new(),
         }
     }
     
@@ -140,7 +145,7 @@ impl WorkerAgent {
     pub fn from_template(
         template: WorkerTemplate,
         message_bus: Arc<RwLock<MessageBus>>,
-        prompt_manager: Arc<PromptManager>,
+        prompt_manager: Arc<RwLock<PromptManager>>,
         project_manager: Arc<RwLock<ProjectManager>>,
         mcp_client: Arc<RwLock<MCPClientManager>>,
         ai_provider_manager: Arc<AIProviderManager>,
@@ -185,6 +190,7 @@ impl WorkerAgent {
             execution_strategy: ExecutionStrategy::default(),
             tool_selector: ToolSelector::new(fallback_tools),
             self_correction_enabled: true,
+            session_tasks: SessionTaskList::new(),
         }
     }
     
@@ -216,6 +222,19 @@ impl WorkerAgent {
         let project_manager = self.project_manager.write().await;
         project_manager.assign_task(&task_id, self.id.clone()).await?;
         
+        // Get task details and add to session task list
+        let task = self.get_task_details(&task_id).await?;
+        self.session_tasks.add_task(
+            task.title.clone(), 
+            Some(task.description.clone())
+        );
+        
+        tracing::debug!(
+            "Worker {} added task to session: {}",
+            self.id.name,
+            task.title
+        );
+        
         Ok(())
     }
     
@@ -227,6 +246,10 @@ impl WorkerAgent {
         
         // Get task details
         let task = self.get_task_details(&task_id).await?;
+        
+        // Mark task as in progress in session
+        self.session_tasks.start_task(&task.title)
+            .unwrap_or_else(|e| tracing::warn!("Failed to update session task: {}", e));
         
         // Adjust execution strategy based on task title (proxy for task type) and history
         self.execution_strategy.adjust_for_task(&task.title, &mut self.learner);
@@ -262,6 +285,10 @@ impl WorkerAgent {
         
         match result {
             Ok(deliverables) => {
+                // Mark task as complete in session
+                self.session_tasks.complete_task(&task.title)
+                    .unwrap_or_else(|e| tracing::warn!("Failed to complete session task: {}", e));
+                
                 // Record success outcome
                 self.record_success_outcome(&task, start_time, &execution_plan);
                 
@@ -280,6 +307,10 @@ impl WorkerAgent {
                 Ok(())
             }
             Err(e) => {
+                // Mark task as failed in session
+                self.session_tasks.fail_task(&task.title)
+                    .unwrap_or_else(|err| tracing::warn!("Failed to fail session task: {}", err));
+                
                 // Record failure outcome
                 self.record_failure_outcome(&task, start_time, &execution_plan, &e);
                 
@@ -1094,6 +1125,16 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     pub fn set_self_correction(&mut self, enabled: bool) {
         self.self_correction_enabled = enabled;
     }
+    
+    /// Get reference to session tasks (for monitoring)
+    pub fn session_tasks(&self) -> &SessionTaskList {
+        &self.session_tasks
+    }
+    
+    /// Get mutable reference to session tasks (for testing)
+    pub fn session_tasks_mut(&mut self) -> &mut SessionTaskList {
+        &mut self.session_tasks
+    }
 }
 
 #[async_trait::async_trait]
@@ -1138,7 +1179,7 @@ mod tests {
     
     async fn create_test_worker() -> WorkerAgent {
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await.unwrap()));
-        let prompt_manager = Arc::new(PromptManager::new("prompts".into()).unwrap());
+        let prompt_manager = Arc::new(RwLock::new(PromptManager::new("prompts".into()).unwrap()));
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));

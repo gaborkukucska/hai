@@ -19,6 +19,7 @@ pub mod worker_intelligence;
 pub mod templates;
 pub mod llm_config;
 pub mod metrics;
+pub mod session_tasks;
 
 // Re-export core agent types
 pub use admin::AdminAgent;
@@ -41,6 +42,7 @@ pub use worker_intelligence::{
     ErrorCategory, SuccessMetrics,
 };
 pub use templates::WorkerTemplate;
+pub use session_tasks::{SessionTaskList, SessionTask, TaskStatus as SessionTaskStatus, SessionTaskStats};
 
 // Re-export configuration and metrics types
 pub use llm_config::{
