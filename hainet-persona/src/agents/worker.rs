@@ -18,8 +18,13 @@ use super::state::AgentStateMachine;
 use super::templates::WorkerTemplate;
 use super::worker_intelligence::{WorkerLearner, ExecutionStrategy, ToolSelector, ErrorCategory, TaskOutcome};
 use super::session_tasks::SessionTaskList;
+use super::worker_discovery::{
+    DiscoveryContext, DiscoveryExecutionPlan, DiscoveryExecutionStep,
+    parse_tool_selection, parse_execution_plan, format_tool_list, format_tool_metadata,
+};
 use serde_json::json;
 use std::time::SystemTime;
+use std::collections::HashMap;
 
 /// Worker Agent
 /// 
@@ -238,7 +243,66 @@ impl WorkerAgent {
         Ok(())
     }
     
-    /// Execute assigned task with LLM-powered planning and learning
+    /// Execute assigned task with discovery-based tool loading (NEW)
+    /// 
+    /// This method uses modular prompts and lazy-loads tool metadata to avoid
+    /// overwhelming small LLMs with excessive context.
+    pub async fn execute_task_with_discovery(&mut self) -> Result<()> {
+        let task_id = self.current_task.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No task assigned"))?
+            .clone();
+        
+        // Get task details
+        let task = self.get_task_details(&task_id).await?;
+        
+        // Mark task as in progress in session
+        self.session_tasks.start_task(&task.title)
+            .unwrap_or_else(|e| tracing::warn!("Failed to update session task: {}", e));
+        
+        // Transition to Planning
+        self.state_machine.transition(
+            AgentState::Planning,
+            "Discovery-based planning".to_string()
+        )?;
+        
+        // Execute with discovery-based approach
+        let start_time = SystemTime::now();
+        let result = self.execute_with_discovery(&task).await;
+        
+        match result {
+            Ok(deliverables) => {
+                // Mark task as complete in session
+                self.session_tasks.complete_task(&task.title)
+                    .unwrap_or_else(|e| tracing::warn!("Failed to complete session task: {}", e));
+                
+                // Transition to Reporting
+                self.state_machine.transition(
+                    AgentState::Reporting,
+                    "Task complete, reporting to PM".to_string()
+                )?;
+                
+                // Submit task for review
+                let project_manager = self.project_manager.write().await;
+                project_manager.complete_task(&task_id, deliverables).await?;
+                
+                tracing::info!("Worker {} completed task: {}", self.id.name, task.title);
+                
+                Ok(())
+            }
+            Err(e) => {
+                // Mark task as failed in session
+                self.session_tasks.fail_task(&task.title)
+                    .unwrap_or_else(|err| tracing::warn!("Failed to fail session task: {}", err));
+                
+                Err(e)
+            }
+        }
+    }
+    
+    /// Execute assigned task with LLM-powered planning and learning (LEGACY)
+    /// 
+    /// This is the original monolithic approach - kept for backward compatibility.
+    /// Use execute_task_with_discovery() for new code.
     pub async fn execute_task(&mut self) -> Result<()> {
         let task_id = self.current_task.as_ref()
             .ok_or_else(|| anyhow::anyhow!("No task assigned"))?
@@ -1135,6 +1199,376 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     pub fn session_tasks_mut(&mut self) -> &mut SessionTaskList {
         &mut self.session_tasks
     }
+    
+    // ========================================================================
+    // DISCOVERY-BASED EXECUTION METHODS (NEW)
+    // ========================================================================
+    
+    /// Execute task using discovery-based approach
+    async fn execute_with_discovery(&mut self, task: &crate::projects::Task) -> Result<Vec<String>> {
+        // Step 1: Discover available tools (names only)
+        let available_tools = self.discover_tools().await?;
+        tracing::info!(
+            "Worker {} discovered {} available tools",
+            self.id.name,
+            available_tools.len()
+        );
+        
+        // Step 2: Ask LLM which tools it needs (minimal context)
+        let tool_selection = self.identify_needed_tools_discovery(task, &available_tools).await?;
+        tracing::info!(
+            "Worker {} selected {} tools: {:?}",
+            self.id.name,
+            tool_selection.needed_tools.len(),
+            tool_selection.needed_tools
+        );
+        
+        // Step 3: Lazy-load metadata for selected tools only
+        let tool_metadata = self.load_tool_metadata(&tool_selection.needed_tools).await?;
+        tracing::info!(
+            "Worker {} loaded metadata for {} tools",
+            self.id.name,
+            tool_metadata.len()
+        );
+        
+        // Step 4: Generate execution plan with focused context
+        let execution_plan = self.generate_execution_plan_discovery(task, &tool_metadata).await?;
+        tracing::info!(
+            "Worker {} planned {} steps",
+            self.id.name,
+            execution_plan.steps.len()
+        );
+        
+        // Step 5: Execute plan with feedback loop
+        self.state_machine.transition(
+            AgentState::Working,
+            "Executing discovery-based plan".to_string()
+        )?;
+        
+        let deliverables = self.execute_discovery_plan(&execution_plan, task).await?;
+        
+        Ok(deliverables)
+    }
+    
+    /// Ask LLM which tools it needs (Phase 1: Tool Selection)
+    async fn identify_needed_tools_discovery(
+        &self,
+        task: &crate::projects::Task,
+        available_tools: &[String],
+    ) -> Result<super::worker_discovery::ToolSelectionRequest> {
+        // Format minimal tool list
+        let tool_list = format_tool_list(available_tools);
+        
+        // Generate planning prompt using TOML template
+        let planning_prompt = format!(
+            r#"You are a Worker AI agent planning task execution.
+
+TASK: {}
+YOUR ROLE: {}
+CAPABILITIES: {:?}
+
+SESSION PROGRESS:
+{}
+
+AVAILABLE TOOLS (names only):
+{}
+
+INSTRUCTIONS:
+1. Identify which tools you need for this task (use tool names above)
+2. List the tools you want to learn more about
+3. Keep your response focused and concise
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{{
+  "needed_tools": ["server::tool_name1", "server::tool_name2"],
+  "reasoning": "Brief explanation of why these tools"
+}}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"#,
+            task.description,
+            self.template.name,
+            self.template.capabilities,
+            self.session_tasks.to_prompt_format(),
+            tool_list
+        );
+        
+        let options = GenerationOptions {
+            temperature: Some(0.3),
+            max_tokens: Some(512),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
+        
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select model for tool selection")?;
+        
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        let response = client
+            .generate(model_name, &planning_prompt, options)
+            .await
+            .context("Failed to get tool selection from LLM")?;
+        
+        parse_tool_selection(&response.text)
+            .context("Failed to parse tool selection response")
+    }
+    
+    /// Load metadata for selected tools (Phase 2: Lazy Loading)
+    async fn load_tool_metadata(&self, tool_names: &[String]) -> Result<HashMap<String, String>> {
+        let mut metadata_map = HashMap::new();
+        
+        let mcp_client = self.mcp_client.read().await;
+        
+        for tool_identifier in tool_names {
+            match mcp_client.get_tool_metadata(tool_identifier).await {
+                Ok(metadata) => {
+                    let formatted = format!(
+                        "{}\n{}\n\nParameters:\n{}",
+                        metadata.full_name(),
+                        metadata.description,
+                        metadata.parameter_docs
+                    );
+                    metadata_map.insert(tool_identifier.clone(), formatted);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to load metadata for {}: {}",
+                        tool_identifier,
+                        e
+                    );
+                }
+            }
+        }
+        
+        Ok(metadata_map)
+    }
+    
+    /// Generate execution plan with loaded metadata (Phase 3: Focused Planning)
+    async fn generate_execution_plan_discovery(
+        &self,
+        task: &crate::projects::Task,
+        tool_metadata: &HashMap<String, String>,
+    ) -> Result<DiscoveryExecutionPlan> {
+        let formatted_metadata = format_tool_metadata(tool_metadata);
+        
+        let execution_prompt = format!(
+            r#"You are executing a task step-by-step.
+
+TASK: {}
+YOUR ROLE: {}
+
+SESSION PROGRESS:
+{}
+
+TOOLS YOU REQUESTED (with details):
+{}
+
+PREVIOUS STEP RESULTS:
+No previous results yet
+
+INSTRUCTIONS:
+1. Create concrete, executable steps using the tools above
+2. Each step uses ONE tool with specific parameters
+3. Be precise with parameters (paths, values, etc.)
+4. Steps can depend on previous step outputs
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{{
+  "steps": [
+    {{
+      "step_number": 1,
+      "tool": "server::tool_name",
+      "params": {{"param1": "value1"}},
+      "description": "What this step does",
+      "depends_on": []
+    }}
+  ]
+}}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"#,
+            task.description,
+            self.template.name,
+            self.session_tasks.to_prompt_format(),
+            formatted_metadata
+        );
+        
+        let options = GenerationOptions {
+            temperature: Some(0.1),
+            max_tokens: Some(2048),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
+        
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select model for execution planning")?;
+        
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        let response = client
+            .generate(model_name, &execution_prompt, options)
+            .await
+            .context("Failed to generate execution plan")?;
+        
+        parse_execution_plan(&response.text)
+            .context("Failed to parse execution plan")
+    }
+    
+    /// Execute discovery-based plan (Phase 4: Execution with Feedback)
+    async fn execute_discovery_plan(
+        &mut self,
+        plan: &DiscoveryExecutionPlan,
+        task: &crate::projects::Task,
+    ) -> Result<Vec<String>> {
+        let mut deliverables = Vec::new();
+        
+        for (idx, step) in plan.steps.iter().enumerate() {
+            tracing::info!(
+                "Worker {} executing discovery step {}/{}: {}",
+                self.id.name,
+                idx + 1,
+                plan.steps.len(),
+                step.description
+            );
+            
+            let step_start = SystemTime::now();
+            let mut retry_count = 0u32;
+            
+            let result = loop {
+                retry_count += 1;
+                
+                match self.execute_discovery_step(step).await {
+                    Ok(result) => {
+                        // Record successful step
+                        let duration_ms = step_start.elapsed()
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        
+                        let outcome = TaskOutcome {
+                            task_type: task.title.clone(),
+                            tool_used: step.tool.clone(),
+                            success: true,
+                            duration_ms,
+                            retry_count: retry_count.saturating_sub(1),
+                            error_category: None,
+                            timestamp: SystemTime::now(),
+                        };
+                        
+                        self.learner.record_outcome(outcome.clone());
+                        self.tool_selector.record_outcome(outcome);
+                        
+                        break result;
+                    }
+                    Err(error) => {
+                        // Self-correction with adaptive retry
+                        if self.self_correction_enabled {
+                            let error_category = ErrorCategory::classify(&error.to_string());
+                            
+                            tracing::warn!(
+                                "Worker {} discovery step failed (attempt {}): {:?} - {}",
+                                self.id.name,
+                                retry_count,
+                                error_category,
+                                error
+                            );
+                            
+                            match error_category {
+                                ErrorCategory::Transient => {
+                                    if retry_count <= self.execution_strategy.max_retries {
+                                        let delay_ms = self.execution_strategy.retry_delay_ms(retry_count);
+                                        tracing::info!("Retrying in {}ms (transient error)", delay_ms);
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                        continue;
+                                    } else {
+                                        self.record_step_failure(task, &convert_to_legacy_step(step), retry_count, error_category);
+                                        return Err(anyhow::anyhow!(
+                                            "Discovery step {} failed after {} retries: {}",
+                                            idx + 1,
+                                            self.execution_strategy.max_retries,
+                                            error
+                                        ));
+                                    }
+                                }
+                                ErrorCategory::Permanent => {
+                                    tracing::error!("Permanent error detected, requesting PM help");
+                                    self.record_step_failure(task, &convert_to_legacy_step(step), retry_count, error_category);
+                                    return Err(anyhow::anyhow!(
+                                        "Permanent error (requesting PM help): {}",
+                                        error
+                                    ));
+                                }
+                                ErrorCategory::Unknown => {
+                                    if retry_count == 1 {
+                                        tracing::info!("Retrying unknown error once");
+                                        let delay_ms = self.execution_strategy.retry_delay_ms(retry_count);
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                        continue;
+                                    } else {
+                                        tracing::error!("Unknown error persists, requesting PM help");
+                                        self.record_step_failure(task, &convert_to_legacy_step(step), retry_count, error_category);
+                                        return Err(error);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Self-correction disabled
+                            if retry_count <= self.execution_strategy.max_retries {
+                                let delay_ms = 500 * retry_count as u64;
+                                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                continue;
+                            } else {
+                                return Err(error);
+                            }
+                        }
+                    }
+                }
+            };
+            
+            deliverables.push(format!(
+                "Step {}: {} - {}",
+                idx + 1,
+                step.description,
+                result
+            ));
+        }
+        
+        Ok(deliverables)
+    }
+    
+    /// Execute single discovery step
+    async fn execute_discovery_step(&self, step: &DiscoveryExecutionStep) -> Result<String> {
+        // Parse tool name: "server::tool_name"
+        let parts: Vec<&str> = step.tool.split("::").collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid tool format: {}", step.tool));
+        }
+        
+        let (server, tool) = (parts[0], parts[1]);
+        
+        let mcp_client = self.mcp_client.read().await;
+        let result = mcp_client.call_tool(server, tool, step.params.clone()).await?;
+        
+        Ok(result.to_string())
+    }
 }
 
 #[async_trait::async_trait]
@@ -1171,6 +1605,15 @@ struct ExecutionStep {
     tool: String,  // Format: "server::tool_name"
     params: serde_json::Value,
     description: String,
+}
+
+/// Convert DiscoveryExecutionStep to ExecutionStep (for backward compatibility)
+fn convert_to_legacy_step(discovery_step: &DiscoveryExecutionStep) -> ExecutionStep {
+    ExecutionStep {
+        tool: discovery_step.tool.clone(),
+        params: discovery_step.params.clone(),
+        description: discovery_step.description.clone(),
+    }
 }
 
 #[cfg(test)]

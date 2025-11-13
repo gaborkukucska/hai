@@ -24,6 +24,9 @@ use super::pm_intelligence::{
     ProjectOutcome
 };
 use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
+use super::pm_discovery::{
+    parse_project_execution_plan, parse_worker_task_feedback, ProjectExecutionPlan,
+};
 
 /// Project Manager Agent
 /// 
@@ -508,7 +511,109 @@ impl PMAgent {
         Ok(())
     }
     
-    /// Generate detailed plan using LLM with strategy-aware prompting (optimized for local LLMs)
+    /// Generate detailed plan using LLM with discovery-based prompting (NEW)
+    async fn generate_detailed_plan_with_discovery(
+        &self,
+        project: &crate::projects::Project,
+        existing_tasks: &[crate::projects::Task],
+        strategy: DecompositionStrategy,
+    ) -> Result<DetailedPlan> {
+        // Use modular prompt template from pm/planning.toml
+        let strategy_guidance = match strategy {
+            DecompositionStrategy::Sequential => 
+                "Tasks must complete in order. Each depends on previous.",
+            DecompositionStrategy::Parallel => 
+                "Tasks are independent. No dependencies.",
+            DecompositionStrategy::Hybrid => 
+                "Mix sequential and parallel. Some tasks can run together, others must wait.",
+        };
+        
+        let existing_tasks_formatted = existing_tasks.iter()
+            .enumerate()
+            .map(|(i, t)| format!("{}. {}", i + 1, t.description))
+            .collect::<Vec<_>>()
+            .join("\n");
+        
+        // Compact planning prompt using discovery principles
+        let planning_prompt = format!(
+            r#"You are a PM breaking down a project into tasks.
+
+PROJECT: {}
+OVERVIEW: {}
+
+EXISTING TASKS:
+{}
+
+STRATEGY: {}
+
+WORKERS AVAILABLE:
+- FileWorker (file operations)
+- CodeWorker (code analysis, compilation)
+- NetworkWorker (API calls, network ops)
+- ResearchWorker (documentation, research)
+
+SESSION PROGRESS:
+{}
+
+INSTRUCTIONS:
+1. Create specific, actionable tasks
+2. Assign appropriate worker type
+3. Define clear dependencies
+4. Keep titles under 60 chars
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{{
+  "tasks": [
+    {{
+      "title": "Task title",
+      "description": "Detailed description",
+      "worker_type": "FileWorker"
+    }}
+  ],
+  "dependencies": [
+    {{
+      "task_index": 1,
+      "depends_on": [0]
+    }}
+  ]
+}}
+
+CRITICAL: JSON only. No explanations.
+"#,
+            project.title,
+            project.overview,
+            existing_tasks_formatted,
+            strategy_guidance,
+            self.session_tasks.to_prompt_format()
+        );
+        
+        let selection_context = SelectionContext::for_pm();
+        let selected_model = self.ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select model for PM planning")?;
+        
+        let options = GenerationOptions {
+            temperature: Some(0.5),
+            max_tokens: Some(2048),
+            ..Default::default()
+        };
+        
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        let response = client.generate(model_name, &planning_prompt, options)
+            .await
+            .context("Failed to generate PM plan")?;
+        
+        self.parse_detailed_plan(&response.text)
+    }
+    
+    /// Generate detailed plan using LLM with strategy-aware prompting (LEGACY)
     async fn generate_detailed_plan_with_strategy(
         &self,
         project: &crate::projects::Project,
