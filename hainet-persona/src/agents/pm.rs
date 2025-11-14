@@ -61,6 +61,9 @@ pub struct PMAgent {
     /// Shared MCP client manager (initialized with connected servers)
     mcp_client: Arc<RwLock<crate::tools::mcp::MCPClientManager>>,
     
+    /// User settings manager for model preferences
+    user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>,
+    
     /// Spawned worker agents (task_id -> worker_agent_id)
     workers: HashMap<TaskId, AgentId>,
     
@@ -92,6 +95,7 @@ impl PMAgent {
         project_manager: Arc<RwLock<ProjectManager>>,
         ai_provider_manager: Arc<AIProviderManager>,
         mcp_client: Arc<RwLock<crate::tools::mcp::MCPClientManager>>,
+        user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>,
     ) -> Self {
         let id = AgentId::new(AgentType::PM, format!("PM-{}", project_id));
         
@@ -104,6 +108,7 @@ impl PMAgent {
             project_manager,
             ai_provider_manager,
             mcp_client,
+            user_settings,
             workers: HashMap::new(),
             task_graph: None,
             learner: HistoricalLearner::new(),
@@ -714,8 +719,33 @@ CRITICAL: JSON only. No explanations.
         
         // Select the best model for planning using AIProviderManager
         let selection_context = SelectionContext::for_pm();
+        
+        // Load user preference for PM agent if available
+        let preferred_family = if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            match settings.get_model_preference("pm").await {
+                Ok(Some(family)) => {
+                    tracing::info!("✅ Loaded user preference for PM: family='{}'", family);
+                    Some(family)
+                },
+                Ok(None) => {
+                    tracing::warn!("⚠️  No user preference set for PM agent");
+                    None
+                },
+                Err(e) => {
+                    tracing::error!("❌ Failed to load user preference for PM: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            tracing::warn!("⚠️  UserSettingsManager not available in context");
+            None
+        };
+        
+        tracing::info!("🎯 Model selection for PM planning: preferred_family={:?}", preferred_family);
+        
         let selected_model = self.ai_provider_manager
-            .select_model_for_agent(selection_context)
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
             .await
             .context("Failed to select a model for planning")?;
         
@@ -1091,7 +1121,7 @@ mod tests {
         let mcp_client = Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new()));
         
         let project_id = ProjectId::new();
-        PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager, mcp_client)
+        PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager, mcp_client, None)
     }
     
     #[tokio::test]
@@ -1150,7 +1180,7 @@ mod tests {
 
         let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
         let mcp_client = Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new()));
-        let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager, mcp_client);
+        let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager, mcp_client, None);
         
         pm.start().await.unwrap();
         assert_eq!(pm.state(), &AgentState::Managing);

@@ -343,6 +343,8 @@ mod tests {
             requires_math: false,
             requires_coding: false,
             task_type: None,
+            preferred_family: None,
+            allow_fallback: true,
         };
 
         let score = ranker.score_capabilities(&model, &context);
@@ -364,6 +366,8 @@ mod tests {
             requires_math: false,
             requires_coding: false,
             task_type: None,
+            preferred_family: None,
+            allow_fallback: true,
         };
 
         let score = ranker.score_capabilities(&model, &context);
@@ -387,6 +391,8 @@ mod tests {
             requires_math: false,
             requires_coding: false,
             task_type: None,
+            preferred_family: None,
+            allow_fallback: true,
         };
 
         let small_score = ranker.score_efficiency(&small_model, &context_prefer_small);

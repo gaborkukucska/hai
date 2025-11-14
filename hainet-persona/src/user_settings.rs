@@ -67,12 +67,12 @@ impl UserSettingsManager {
         Ok(())
     }
     
-    /// Get model preference for an agent type
+    /// Get model preference for an agent type (case-insensitive)
     pub async fn get_model_preference(&self, agent_type: &str) -> Result<Option<String>> {
         let result = sqlx::query(
             r#"
             SELECT model_family FROM user_model_preferences
-            WHERE agent_type = ?
+            WHERE LOWER(agent_type) = LOWER(?)
             "#
         )
         .bind(agent_type)

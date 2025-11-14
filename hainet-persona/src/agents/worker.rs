@@ -224,8 +224,10 @@ impl WorkerAgent {
         self.current_task = Some(task_id.clone());
         
         // Update task status to Assigned
-        let project_manager = self.project_manager.write().await;
-        project_manager.assign_task(&task_id, self.id.clone()).await?;
+        {
+            let project_manager = self.project_manager.write().await;
+            project_manager.assign_task(&task_id, self.id.clone()).await?;
+        } // Write lock explicitly dropped here
         
         // Get task details and add to session task list
         let task = self.get_task_details(&task_id).await?;

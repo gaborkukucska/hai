@@ -640,7 +640,7 @@ impl AdminAgent {
         project_id: &ProjectId,
         _plan: &ProjectPlan,
     ) -> Result<AgentId> {
-        // Create PM agent - pass shared MCP client from context
+        // Create PM agent - pass shared MCP client and user settings from context
         let mut pm_agent = PMAgent::new(
             project_id.clone(),
             self.context.message_bus.clone(),
@@ -648,6 +648,7 @@ impl AdminAgent {
             self.project_manager.clone(),
             self.ai_provider_manager.clone(),
             self.context.mcp_client.clone(), // Pass shared MCP client
+            self.context.user_settings.clone(), // Pass user settings for model preferences
         );
         let pm_id = pm_agent.id().clone();
         

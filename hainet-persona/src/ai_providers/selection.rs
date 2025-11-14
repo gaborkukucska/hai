@@ -80,6 +80,10 @@ impl ModelSelector {
                     preferred_family, context.agent_type
                 );
                 
+                // Collect all suitable models from the preferred family
+                let catalog = self.catalog.read().await;
+                let mut candidates: Vec<(&ModelScore, &crate::ai_providers::catalog::CatalogedModel)> = Vec::new();
+                
                 for (index, score) in ranked_models.iter().enumerate() {
                     // Check if model matches preferred family
                     if !Self::matches_family(&score.model_id, preferred_family) {
@@ -127,27 +131,70 @@ impl ModelSelector {
                     }
 
                     // Verify model still exists in catalog
-                    let catalog = self.catalog.read().await;
                     if let Some(model) = catalog.get_model(&score.model_id) {
-                        info!(
-                            "Selected model {} from preferred family '{}' (rank {}, score {:.2}) for agent {:?}",
-                            score.model_id,
-                            preferred_family,
-                            index + 1,
-                            score.total_score,
-                            context.agent_type
-                        );
-
-                        return Ok(SelectedModel {
-                            model_id: score.model_id.clone(),
-                            model_name: model.name.clone(),
-                            endpoint: model.endpoint.clone(),
-                            provider_type: model.provider_type,
-                            score: score.total_score,
-                            rank: index + 1,
-                            context: context.clone(),
-                        });
+                        candidates.push((score, model));
                     }
+                }
+                
+                // If we have candidates, prefer optimal-sized models for balance of speed and quality
+                if !candidates.is_empty() {
+                    // Sort by size (ascending)
+                    candidates.sort_by(|a, b| {
+                        a.1.size_gb.partial_cmp(&b.1.size_gb).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    
+                    // Find the optimal model based on context preference
+                    // Always prefer smaller models for better responsiveness - avoid large models that timeout
+                    let optimal_index = match context.preferred_model_size {
+                        ModelSizePreference::Small => {
+                            // Prefer 2.5-4GB range (e.g., gemma3:4b), avoid tiny models < 2.5GB
+                            candidates.iter().position(|(_, m)| m.size_gb >= 2.5 && m.size_gb <= 4.5)
+                                .or_else(|| candidates.iter().position(|(_, m)| m.size_gb >= 2.5 && m.size_gb <= 6.0))
+                                .unwrap_or(0)
+                        },
+                        ModelSizePreference::Medium => {
+                            // Prefer 4-6GB range (e.g., gemma3:4b, gemma3:9b-q4), prioritize reliability
+                            candidates.iter().position(|(_, m)| m.size_gb >= 4.0 && m.size_gb <= 6.0)
+                                .or_else(|| candidates.iter().position(|(_, m)| m.size_gb >= 2.5 && m.size_gb <= 4.0))
+                                .or_else(|| candidates.iter().position(|(_, m)| m.size_gb >= 6.0 && m.size_gb <= 8.0))
+                                .unwrap_or(0)
+                        },
+                        ModelSizePreference::Large => {
+                            // For "large", still cap at 8GB to avoid timeouts, prefer 6-8GB range
+                            candidates.iter().position(|(_, m)| m.size_gb >= 6.0 && m.size_gb <= 8.0)
+                                .or_else(|| candidates.iter().position(|(_, m)| m.size_gb >= 4.0 && m.size_gb <= 6.0))
+                                .unwrap_or_else(|| candidates.len() - 1)
+                        },
+                        ModelSizePreference::Any => {
+                            // Prefer sweet spot (3-5GB) as default for best balance
+                            candidates.iter().position(|(_, m)| m.size_gb >= 3.0 && m.size_gb <= 5.0)
+                                .or_else(|| candidates.iter().position(|(_, m)| m.size_gb >= 2.5 && m.size_gb <= 6.0))
+                                .unwrap_or(0)
+                        }
+                    };
+                    
+                    let (selected_score, selected_model) = candidates[optimal_index];
+                    let rank = ranked_models.iter().position(|s| s.model_id == selected_score.model_id).map(|p| p + 1).unwrap_or(0);
+                    
+                    info!(
+                        "Selected model {} from preferred family '{}' (rank {}, score {:.2}, size {:.1}GB) for agent {:?}",
+                        selected_score.model_id,
+                        preferred_family,
+                        rank,
+                        selected_score.total_score,
+                        selected_model.size_gb,
+                        context.agent_type
+                    );
+
+                    return Ok(SelectedModel {
+                        model_id: selected_score.model_id.clone(),
+                        model_name: selected_model.name.clone(),
+                        endpoint: selected_model.endpoint.clone(),
+                        provider_type: selected_model.provider_type,
+                        score: selected_score.total_score,
+                        rank,
+                        context: context.clone(),
+                    });
                 }
                 
                 // No suitable model found in preferred family
