@@ -16,6 +16,14 @@ pub struct DevicePreference {
     pub is_default: bool,
 }
 
+/// Model family preference for AI agent types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelPreference {
+    pub agent_type: String,  // 'Admin', 'PM', 'Worker'
+    pub preferred_family: String,  // 'auto', 'llama3', 'gemma3', 'qwen', 'deepseek', 'phi'
+    pub allow_fallback: bool,
+}
+
 /// Settings storage manager with SQLite backend
 pub struct SettingsStorage {
     pool: SqlitePool,
@@ -69,6 +77,20 @@ impl SettingsStorage {
         // Create index for faster lookups
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_device_type ON device_preferences(device_type)"
+        )
+        .execute(&self.pool)
+        .await?;
+        
+        // Model preferences table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS model_preferences (
+                agent_type TEXT PRIMARY KEY,
+                preferred_family TEXT NOT NULL,
+                allow_fallback INTEGER DEFAULT 1,
+                updated_at INTEGER NOT NULL
+            )
+            "#
         )
         .execute(&self.pool)
         .await?;
@@ -254,8 +276,79 @@ impl SettingsStorage {
             .execute(&mut *tx)
             .await?;
         
+        sqlx::query("DELETE FROM model_preferences")
+            .execute(&mut *tx)
+            .await?;
+        
         tx.commit().await?;
         Ok(())
+    }
+    
+    /// Save model preference for an agent type
+    pub async fn save_model_preference(
+        &self,
+        agent_type: &str,
+        family: &str,
+        allow_fallback: bool,
+    ) -> Result<()> {
+        let timestamp = Self::now();
+        
+        sqlx::query(
+            r#"
+            INSERT INTO model_preferences (agent_type, preferred_family, allow_fallback, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(agent_type) DO UPDATE SET
+                preferred_family = excluded.preferred_family,
+                allow_fallback = excluded.allow_fallback,
+                updated_at = excluded.updated_at
+            "#
+        )
+        .bind(agent_type)
+        .bind(family)
+        .bind(allow_fallback as i32)
+        .bind(timestamp)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    /// Get model preference for a specific agent type
+    pub async fn get_model_preference(&self, agent_type: &str) -> Result<Option<ModelPreference>> {
+        let result = sqlx::query_as::<_, (String, String, i32)>(
+            "SELECT agent_type, preferred_family, allow_fallback 
+             FROM model_preferences 
+             WHERE agent_type = ?"
+        )
+        .bind(agent_type)
+        .fetch_optional(&self.pool)
+        .await?;
+        
+        Ok(result.map(|(agent_type, preferred_family, allow_fallback)| ModelPreference {
+            agent_type,
+            preferred_family,
+            allow_fallback: allow_fallback != 0,
+        }))
+    }
+    
+    /// Get all model preferences
+    pub async fn get_all_model_preferences(&self) -> Result<Vec<ModelPreference>> {
+        let results = sqlx::query_as::<_, (String, String, i32)>(
+            "SELECT agent_type, preferred_family, allow_fallback 
+             FROM model_preferences 
+             ORDER BY agent_type"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        
+        Ok(results
+            .into_iter()
+            .map(|(agent_type, preferred_family, allow_fallback)| ModelPreference {
+                agent_type,
+                preferred_family,
+                allow_fallback: allow_fallback != 0,
+            })
+            .collect())
     }
 }
 

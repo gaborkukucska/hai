@@ -86,3 +86,26 @@ export interface DevicePreference {
   device_name: string;
   is_default: boolean;
 }
+
+// Model Preference Types
+export interface ModelPreference {
+  agent_type: 'Admin' | 'PM' | 'Worker';
+  preferred_family: string;
+  allow_fallback: boolean;
+}
+
+export interface ModelFamily {
+  id: string;
+  name: string;
+  description: string;
+}
+
+// Predefined model families
+export const MODEL_FAMILIES: ModelFamily[] = [
+  { id: 'auto', name: 'Auto (Best Available)', description: 'Automatically select best model' },
+  { id: 'llama3', name: 'Llama 3', description: 'Meta\'s Llama 3 family' },
+  { id: 'gemma3', name: 'Gemma 3', description: 'Google\'s Gemma 3 family' },
+  { id: 'qwen', name: 'Qwen', description: 'Alibaba\'s Qwen family' },
+  { id: 'deepseek', name: 'DeepSeek', description: 'DeepSeek family' },
+  { id: 'phi', name: 'Phi', description: 'Microsoft\'s Phi family' },
+];

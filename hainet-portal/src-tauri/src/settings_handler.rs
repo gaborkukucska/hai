@@ -7,7 +7,7 @@ use tauri::State;
 use std::sync::Mutex;
 use tokio::sync::RwLock;
 use std::sync::Arc;
-use crate::settings_storage::{SettingsStorage, DevicePreference};
+use crate::settings_storage::{SettingsStorage, DevicePreference, ModelPreference};
 
 pub struct SystemInfo {
     pub sys: Mutex<System>,
@@ -196,6 +196,46 @@ pub async fn get_default_device(
     storage.get_default_device(&device_type)
         .await
         .map_err(|e| format!("Failed to get default device: {}", e))
+}
+
+#[tauri::command]
+pub async fn get_model_preferences(
+    storage: State<'_, SettingsState>
+) -> Result<Vec<ModelPreference>, String> {
+    let storage = storage.read().await;
+    
+    storage.get_all_model_preferences()
+        .await
+        .map_err(|e| format!("Failed to get model preferences: {}", e))
+}
+
+#[tauri::command]
+pub async fn save_model_preference(
+    agent_type: String,
+    family: String,
+    allow_fallback: bool,
+    storage: State<'_, SettingsState>
+) -> Result<(), String> {
+    let storage = storage.read().await;
+    
+    storage.save_model_preference(&agent_type, &family, allow_fallback)
+        .await
+        .map_err(|e| format!("Failed to save model preference: {}", e))?;
+    
+    log::info!("Model preference saved: {} -> {} (fallback: {})", agent_type, family, allow_fallback);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_model_preference(
+    agent_type: String,
+    storage: State<'_, SettingsState>
+) -> Result<Option<ModelPreference>, String> {
+    let storage = storage.read().await;
+    
+    storage.get_model_preference(&agent_type)
+        .await
+        .map_err(|e| format!("Failed to get model preference: {}", e))
 }
 
 #[tauri::command]

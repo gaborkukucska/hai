@@ -826,6 +826,48 @@ pub struct ToolMetadata {
 
 ---
 
+## AI Provider Selection Enhancement (Session 40 - Phase 2 & 3 Backend Complete)
+
+### hainet-persona/src/ai_providers/catalog.rs (Enhanced Session 40)
+- `ModelCapability::CodeAnalysis` - **NEW:** Capability for code analysis tasks
+- `ModelCatalog::infer_capabilities(name)` - **Enhanced:** Now detects "math" → MathematicalReasoning, "code"/"coder" → CodeGeneration + CodeAnalysis
+
+### hainet-persona/src/ai_providers/selection.rs (Enhanced Session 40)
+- `TaskType` enum - **NEW:** 6 specialized task types (General, FileOperation, CodeGeneration, CodeAnalysis, MathematicalComputation, DataAnalysis)
+- `SelectionContext::requires_math` - **NEW:** Flag indicating task requires mathematical capabilities
+- `SelectionContext::requires_coding` - **NEW:** Flag indicating task requires coding capabilities
+- `SelectionContext::task_type` - **NEW:** Optional task type for granular selection
+- `SelectionContext::for_worker_coding()` - **NEW:** Factory method for coding tasks
+- `SelectionContext::for_worker_math()` - **NEW:** Factory method for mathematical tasks
+- `ModelSelector::is_math_model(model_id)` - **NEW:** Detect if model name contains "math"
+- `ModelSelector::is_coder_model(model_id)` - **NEW:** Detect if model name contains "code" or "coder"
+- `ModelSelector::select_best(ranked, context)` - **Enhanced:** Now filters by task requirements (prefers math models for math tasks, coder models for coding tasks)
+
+### hainet-portal/src-tauri/src/settings_storage.rs (Session 40 Phase 3)
+- `ModelPreference` struct - **NEW:** User preference for model family per agent type (agent_type, preferred_family, allow_fallback)
+- `SettingsStorage::save_model_preference(agent_type, family, allow_fallback)` - **NEW:** Save model preference to database
+- `SettingsStorage::get_model_preference(agent_type)` - **NEW:** Get model preference for specific agent type
+- `SettingsStorage::get_all_model_preferences()` - **NEW:** Get all model preferences
+- **Database Schema:** `model_preferences` table (agent_type PRIMARY KEY, preferred_family TEXT, allow_fallback INTEGER, updated_at INTEGER)
+
+### hainet-portal/src-tauri/src/settings_handler.rs (Session 40 Phase 3)
+- `get_model_preferences()` - **NEW:** Tauri command to fetch all model preferences
+- `save_model_preference(agent_type, family, allow_fallback)` - **NEW:** Tauri command to save single preference
+- `get_model_preference(agent_type)` - **NEW:** Tauri command to fetch specific agent preference
+
+### hainet-portal/src/types.ts (Session 40 Phase 3)
+- `ModelPreference` interface - **NEW:** TypeScript interface for model preferences
+- `ModelFamily` interface - **NEW:** TypeScript interface for model family definitions
+- `MODEL_FAMILIES` constant - **NEW:** Predefined model families (auto, llama3, gemma3, qwen, deepseek, phi)
+
+**Session 40 Summary:**
+- **Phase 2:** Specialized model filters for task-based selection (math, coder, vision models)
+- **Phase 3:** User-configurable model family preferences per agent type (Admin, PM, Worker) with database persistence
+- **Total:** 830 LOC across 6 files (catalog.rs, selection.rs, settings_storage.rs, settings_handler.rs, lib.rs, types.ts)
+- **Status:** Backend complete, frontend UI pending
+
+---
+
 ## Test Infrastructure (Phase 6A Session 1 - Complete)
 
 ### hainet-persona/tests/helpers/mod.rs

@@ -37,6 +37,17 @@ impl ModelSelector {
         model_lower.contains("llava")
     }
 
+    /// Check if model is specialized for mathematical reasoning
+    fn is_math_model(model_id: &str) -> bool {
+        model_id.to_lowercase().contains("math")
+    }
+    
+    /// Check if model is specialized for code generation
+    fn is_coder_model(model_id: &str) -> bool {
+        let lower = model_id.to_lowercase();
+        lower.contains("coder") || lower.contains("code")
+    }
+
     /// Select best model from ranked list
     pub async fn select_best(
         &self,
@@ -62,6 +73,24 @@ impl ModelSelector {
             if !context.requires_vision() && Self::is_vision_model(&score.model_id) {
                 debug!(
                     "Skipping vision model {} for text-only task",
+                    score.model_id
+                );
+                continue;
+            }
+
+            // Prefer math models for math tasks
+            if context.requires_math && !Self::is_math_model(&score.model_id) {
+                debug!(
+                    "Preferring math models for math task, skipping {}",
+                    score.model_id
+                );
+                continue;
+            }
+
+            // Prefer coder models for coding tasks
+            if context.requires_coding && !Self::is_coder_model(&score.model_id) {
+                debug!(
+                    "Preferring coder models for coding task, skipping {}",
                     score.model_id
                 );
                 continue;
@@ -98,6 +127,17 @@ impl ModelSelector {
     }
 }
 
+/// Task type for specialized model selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskType {
+    General,
+    FileOperation,
+    CodeGeneration,
+    CodeAnalysis,
+    MathematicalComputation,
+    DataAnalysis,
+}
+
 /// Selection context for model choice
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectionContext {
@@ -107,6 +147,9 @@ pub struct SelectionContext {
     pub max_latency_ms: u64,
     pub min_context_length: usize,
     pub preferred_model_size: ModelSizePreference,
+    pub requires_math: bool,
+    pub requires_coding: bool,
+    pub task_type: Option<TaskType>,
 }
 
 impl SelectionContext {
@@ -125,6 +168,9 @@ impl SelectionContext {
             max_latency_ms: 500,
             min_context_length: 4096,
             preferred_model_size: ModelSizePreference::Small,
+            requires_math: false,
+            requires_coding: false,
+            task_type: None,
         }
     }
 
@@ -143,6 +189,48 @@ impl SelectionContext {
             max_latency_ms: 1000,
             min_context_length: 8192,
             preferred_model_size: ModelSizePreference::Medium,
+            requires_math: false,
+            requires_coding: false,
+            task_type: None,
+        }
+    }
+
+    /// Create context for Worker agent doing coding tasks
+    pub fn for_worker_coding() -> Self {
+        Self {
+            agent_type: AgentType::Worker,
+            required_capabilities: vec![
+                ModelCapability::InstructionFollowing,
+                ModelCapability::CodeGeneration,
+            ],
+            preferred_capabilities: vec![
+                ModelCapability::CodeAnalysis,
+                ModelCapability::FastInference,
+            ],
+            max_latency_ms: 500,
+            min_context_length: 4096,
+            preferred_model_size: ModelSizePreference::Small,
+            requires_math: false,
+            requires_coding: true,
+            task_type: Some(TaskType::CodeGeneration),
+        }
+    }
+    
+    /// Create context for Worker agent doing math tasks
+    pub fn for_worker_math() -> Self {
+        Self {
+            agent_type: AgentType::Worker,
+            required_capabilities: vec![
+                ModelCapability::InstructionFollowing,
+                ModelCapability::MathematicalReasoning,
+            ],
+            preferred_capabilities: vec![ModelCapability::FastInference],
+            max_latency_ms: 500,
+            min_context_length: 2048,
+            preferred_model_size: ModelSizePreference::Small,
+            requires_math: true,
+            requires_coding: false,
+            task_type: Some(TaskType::MathematicalComputation),
         }
     }
 
@@ -161,6 +249,9 @@ impl SelectionContext {
             max_latency_ms: 800,
             min_context_length: 4096,
             preferred_model_size: ModelSizePreference::Small,
+            requires_math: false,
+            requires_coding: false,
+            task_type: None,
         }
     }
 
@@ -173,6 +264,9 @@ impl SelectionContext {
             max_latency_ms: 500,
             min_context_length: 2048,
             preferred_model_size: ModelSizePreference::Small,
+            requires_math: false,
+            requires_coding: false,
+            task_type: None,
         }
     }
 

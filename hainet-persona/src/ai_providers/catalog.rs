@@ -186,8 +186,13 @@ impl ModelCatalog {
             capabilities.push(ModelCapability::SafetyAnalysis);
         }
 
-        if name_lower.contains("code") {
+        if name_lower.contains("code") || name_lower.contains("coder") {
             capabilities.push(ModelCapability::CodeGeneration);
+            capabilities.push(ModelCapability::CodeAnalysis);
+        }
+
+        if name_lower.contains("math") {
+            capabilities.push(ModelCapability::MathematicalReasoning);
         }
 
         if name_lower.contains("gemma") {
@@ -270,6 +275,7 @@ pub enum ModelCapability {
     GeneralConversation,
     InstructionFollowing,
     CodeGeneration,
+    CodeAnalysis,
     MathematicalReasoning,
     LogicalReasoning,
     CreativeWriting,

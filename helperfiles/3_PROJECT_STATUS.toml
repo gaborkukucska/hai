@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-12T08:08:00.000000+00:00"
+last_updated = "2025-11-14T04:33:00.000000+00:00"
 project_name = "HAI-Net Seed"
-version = "0.38"
-current_phase = "Maintenance & Bugfixes"
-current_cycle = "Session 37 - Compilation Bugfix - COMPLETE"
+version = "0.40"
+current_phase = "Agent Intelligence Enhancement & Model Selection"
+current_cycle = "Session 40 - Model Selection Enhancement - Phase 2 & 3 Backend COMPLETE"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -89,7 +89,8 @@ phase_7_progress = 1.00  # 8/8 cycles complete - PHASE 7 COMPLETE! 🎉 (7.7 Ver
 phase_8a_progress = 1.00  # 4/4 sessions complete - PHASE 8A COMPLETE! 🎉
 phase_9a_progress = 1.00  # 5/5 sessions complete - PHASE 9A COMPLETE! 🎉
 phase_8b_progress = 1.00  # 5/5 sessions complete - PHASE 8B COMPLETE! 🎉
-total_loc_produced = 38744  # +250 LOC for new tests and session log
+phase_session_40_progress = 0.65  # Phase 2 COMPLETE (100%), Phase 3 Backend COMPLETE (100%), Phase 3 Frontend (0%), Phase 1 (0%)
+total_loc_produced = 39574  # +830 LOC (Phase 2: 200, Phase 3 Backend: 630)
 total_tests_passing = 577  # +4 new tests
 total_crates = 10
 mcp_integration_complete = true
@@ -185,6 +186,72 @@ sessions_complete = 7
 sessions_remaining = 0
 
 # Completed cycles
+[[completed_cycles]]
+id = "40.1"
+name = "Model Selection Enhancement - Phase 2 & 3 Backend Complete"
+completion_date = "2025-11-14"
+loc = 830  # Phase 2: 200 LOC, Phase 3 Backend: 630 LOC
+tests = 0  # Backend compilation verified, tests pending
+goal = "Enhance model selection with specialized filters (math, coder, vision) and user-configurable model family preferences per agent type"
+files_created = [
+    "helperfiles/SESSION_40_MODEL_SELECTION_ENHANCEMENT.md (3200+ LOC) - Complete session documentation with implementation plan"
+]
+files_modified = [
+    "hainet-persona/src/ai_providers/catalog.rs (+20 LOC) - Added CodeAnalysis capability, enhanced infer_capabilities()",
+    "hainet-persona/src/ai_providers/selection.rs (+180 LOC) - Added specialized model detection, TaskType enum, extended SelectionContext",
+    "hainet-portal/src-tauri/src/settings_storage.rs (+150 LOC) - Added model_preferences table and methods",
+    "hainet-portal/src-tauri/src/settings_handler.rs (+50 LOC) - Added Tauri commands for model preferences",
+    "hainet-portal/src-tauri/src/lib.rs (+3 LOC) - Registered new commands",
+    "hainet-portal/src/types.ts (+30 LOC) - Added ModelPreference, ModelFamily types and MODEL_FAMILIES constant",
+    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 40 completion"
+]
+key_features = [
+    "Specialized model filters: is_math_model(), is_coder_model() detection methods",
+    "TaskType enum: General, FileOperation, CodeGeneration, CodeAnalysis, MathematicalComputation, DataAnalysis",
+    "Extended SelectionContext with requires_math, requires_coding, task_type fields",
+    "Factory methods: for_worker_coding(), for_worker_math()",
+    "Task-aware model filtering in select_best() method",
+    "SQLite model_preferences table (agent_type, preferred_family, allow_fallback)",
+    "Database methods: save_model_preference(), get_model_preference(), get_all_model_preferences()",
+    "Tauri commands: get_model_preferences, save_model_preference, get_model_preference",
+    "TypeScript types for frontend integration",
+    "MODEL_FAMILIES constant: auto, llama3, gemma3, qwen, deepseek, phi"
+]
+compilation_status = "Success - hainet-persona (17 warnings, 0 errors), hainet-portal (7 warnings, 0 errors)"
+test_status = "Backend compilation verified, integration tests pending"
+phase_breakdown = [
+    "Phase 2: Specialized Model Filters - 100% COMPLETE (catalog.rs, selection.rs)",
+    "Phase 3: User Model Preferences - Backend 100% COMPLETE (settings_storage, settings_handler, lib.rs, types.ts)",
+    "Phase 3: Frontend UI - PENDING (Settings.tsx model preferences section)",
+    "Phase 1: Stalling Fix Testing - PENDING (deferred until Phase 2 & 3 complete)"
+]
+technical_highlights = [
+    "Model name detection: 'math' → MathematicalReasoning, 'code'/'coder' → CodeGeneration + CodeAnalysis",
+    "Preference-based filtering: Filter models by user's preferred family with optional fallback",
+    "Database schema: model_preferences table with updated_at timestamp",
+    "Type-safe Rust ↔ TypeScript communication via Tauri",
+    "Thread-safe state management: Arc<RwLock<SettingsStorage>>",
+    "6 predefined model families with descriptions",
+    "Backward compatible: All existing selection logic preserved"
+]
+architecture_components = [
+    "ModelCapability enum: Added CodeAnalysis variant",
+    "TaskType enum: 6 specialized task types for granular selection",
+    "SelectionContext: Extended with task-specific flags",
+    "SettingsStorage: Database methods for model preferences",
+    "Tauri commands: Full CRUD for model preferences",
+    "TypeScript interfaces: ModelPreference, ModelFamily"
+]
+remaining_work = [
+    "Phase 3 Frontend: Add Model Preferences UI section to Settings.tsx (~120 LOC)",
+    "Phase 3 Integration: Integrate preferences into AIProviderManager (~180 LOC)",
+    "Phase 1: Test Session 39 MCP client sharing fix",
+    "Phase 1: Apply additional fixes if stalling persists (~90 LOC)",
+    "Integration testing: E2E testing with real model selection"
+]
+next_step = "Phase 3 Frontend: Settings.tsx model preferences UI OR Phase 1: Test project stalling fix"
+phase_completion = "Session 40: 65% complete (Phase 2: 100%, Phase 3 Backend: 100%, Phase 3 Frontend: 0%, Phase 1: 0%)"
+
 [[completed_cycles]]
 id = "8B.5"
 name = "E2E Intelligence Testing & Bug Fixes - Session 5 Complete"
