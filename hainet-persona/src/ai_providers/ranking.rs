@@ -340,6 +340,9 @@ mod tests {
             max_latency_ms: 500,
             min_context_length: 2048,
             preferred_model_size: ModelSizePreference::Small,
+            requires_math: false,
+            requires_coding: false,
+            task_type: None,
         };
 
         let score = ranker.score_capabilities(&model, &context);
@@ -358,6 +361,9 @@ mod tests {
             max_latency_ms: 500,
             min_context_length: 2048,
             preferred_model_size: ModelSizePreference::Small,
+            requires_math: false,
+            requires_coding: false,
+            task_type: None,
         };
 
         let score = ranker.score_capabilities(&model, &context);
@@ -378,6 +384,9 @@ mod tests {
             max_latency_ms: 500,
             min_context_length: 2048,
             preferred_model_size: ModelSizePreference::Small,
+            requires_math: false,
+            requires_coding: false,
+            task_type: None,
         };
 
         let small_score = ranker.score_efficiency(&small_model, &context_prefer_small);
