@@ -262,6 +262,13 @@ impl ProviderDiscovery {
         Ok(data
             .models
             .into_iter()
+            .filter(|m| {
+                // Filter out embedding models - they don't support generate API
+                let name_lower = m.name.to_lowercase();
+                !name_lower.contains("embed") && 
+                !name_lower.contains("bge-") &&
+                !name_lower.contains("nomic-embed")
+            })
             .map(|m| {
                 let size_gb = m.size as f32 / 1_000_000_000.0;
                 ModelInfo {

@@ -615,13 +615,14 @@ impl AdminAgent {
         project_id: &ProjectId,
         _plan: &ProjectPlan,
     ) -> Result<AgentId> {
-        // Create PM agent
+        // Create PM agent - pass shared MCP client from context
         let mut pm_agent = PMAgent::new(
             project_id.clone(),
             self.context.message_bus.clone(),
             self.context.prompt_manager.clone(),
             self.project_manager.clone(),
             self.ai_provider_manager.clone(),
+            self.context.mcp_client.clone(), // Pass shared MCP client
         );
         let pm_id = pm_agent.id().clone();
         

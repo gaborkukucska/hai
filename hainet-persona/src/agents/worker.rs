@@ -1128,19 +1128,50 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
         }
     }
     
-    /// Discover available tools from connected MCP servers
+    /// Discover available tools from connected MCP servers (with timeout)
     pub async fn discover_tools(&self) -> Result<Vec<String>> {
+        tracing::info!("[DIAGNOSTIC] Worker {} starting tool discovery", self.id.name);
+        
+        // Wrap discovery in timeout to prevent hanging
+        let discovery_timeout = tokio::time::Duration::from_secs(10);
+        
+        match tokio::time::timeout(discovery_timeout, self.discover_tools_internal()).await {
+            Ok(result) => {
+                tracing::info!("[DIAGNOSTIC] Worker {} tool discovery completed", self.id.name);
+                result
+            }
+            Err(_) => {
+                let error_msg = format!(
+                    "Tool discovery timed out after {:?}. MCP servers may not be responding.",
+                    discovery_timeout
+                );
+                tracing::error!("[DIAGNOSTIC] Worker {} {}", self.id.name, error_msg);
+                Err(anyhow::anyhow!(error_msg))
+            }
+        }
+    }
+    
+    /// Internal tool discovery implementation (without timeout wrapper)
+    async fn discover_tools_internal(&self) -> Result<Vec<String>> {
         let mcp_client = self.mcp_client.read().await;
+        
+        tracing::info!("[DIAGNOSTIC] Worker {} calling list_servers()", self.id.name);
         let servers = mcp_client.list_servers().await;
+        tracing::info!("[DIAGNOSTIC] Worker {} found {} servers: {:?}", self.id.name, servers.len(), servers);
         
         let mut all_tools = Vec::new();
         
         for server_name in servers {
+            tracing::debug!("Worker {} listing tools for server: {}", self.id.name, server_name);
             let tools = mcp_client.list_tools(&server_name).await?;
+            tracing::debug!("Worker {} found {} tools in {}", self.id.name, tools.len(), server_name);
+            
             for tool in tools {
                 all_tools.push(format!("{}::{}", server_name, tool.name));
             }
         }
+        
+        tracing::info!("[DIAGNOSTIC] Worker {} discovered {} total tools", self.id.name, all_tools.len());
         
         Ok(all_tools)
     }

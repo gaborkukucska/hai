@@ -58,6 +58,9 @@ pub struct PMAgent {
     /// AI provider manager for dynamic model selection
     ai_provider_manager: Arc<AIProviderManager>,
     
+    /// Shared MCP client manager (initialized with connected servers)
+    mcp_client: Arc<RwLock<crate::tools::mcp::MCPClientManager>>,
+    
     /// Spawned worker agents (task_id -> worker_agent_id)
     workers: HashMap<TaskId, AgentId>,
     
@@ -88,6 +91,7 @@ impl PMAgent {
         prompt_manager: Arc<RwLock<PromptManager>>,
         project_manager: Arc<RwLock<ProjectManager>>,
         ai_provider_manager: Arc<AIProviderManager>,
+        mcp_client: Arc<RwLock<crate::tools::mcp::MCPClientManager>>,
     ) -> Self {
         let id = AgentId::new(AgentType::PM, format!("PM-{}", project_id));
         
@@ -99,6 +103,7 @@ impl PMAgent {
             prompt_manager,
             project_manager,
             ai_provider_manager,
+            mcp_client,
             workers: HashMap::new(),
             task_graph: None,
             learner: HistoricalLearner::new(),
@@ -251,8 +256,32 @@ impl PMAgent {
                 break;
             }
             
+            // Log task status distribution for debugging
+            {
+                let pm = self.project_manager.read().await;
+                let all_tasks = pm.get_project_tasks(&self.project_id).await?;
+                let task_status_summary: HashMap<String, usize> = all_tasks.iter()
+                    .fold(HashMap::new(), |mut acc, task| {
+                        let status_str = format!("{:?}", task.status);
+                        *acc.entry(status_str).or_insert(0) += 1;
+                        acc
+                    });
+                
+                tracing::info!(
+                    "PM {} manage_loop iteration: {:?}",
+                    self.id.name,
+                    task_status_summary
+                );
+            }
+            
             // Get executable tasks (unassigned + dependencies met)
             let executable_tasks = self.get_executable_tasks().await?;
+            
+            tracing::info!(
+                "PM {} found {} executable tasks",
+                self.id.name,
+                executable_tasks.len()
+            );
             
             // Spawn workers and assign tasks
             for task_id in executable_tasks {
@@ -261,6 +290,12 @@ impl PMAgent {
             
             // Check for completed tasks needing validation
             let tasks_under_review = self.get_tasks_under_review().await?;
+            
+            tracing::info!(
+                "PM {} found {} tasks under review",
+                self.id.name,
+                tasks_under_review.len()
+            );
             
             for task_id in tasks_under_review {
                 self.validate_task(&task_id).await?;
@@ -272,8 +307,8 @@ impl PMAgent {
                 break;
             }
             
-            // Sleep briefly before next iteration
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            // Sleep for 500ms to give workers time to execute (increased from 100ms)
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         }
         
         Ok(())
@@ -765,45 +800,67 @@ CRITICAL: JSON only. No explanations.
     
     /// Spawn worker for a specific task
     async fn spawn_worker_for_task(&mut self, task_id: &TaskId) -> Result<()> {
-        // Get task details
-        let task = {
+        // Get task details - scope ends here, releasing lock
+        let (task_title, task_description) = {
             let pm = self.project_manager.read().await;
             let tasks = pm.get_project_tasks(&self.project_id).await?;
-            tasks.into_iter()
+            let task = tasks.into_iter()
                 .find(|t| &t.id == task_id)
-                .ok_or_else(|| anyhow::anyhow!("Task not found"))?
-        };
+                .ok_or_else(|| anyhow::anyhow!("Task not found"))?;
+            
+            let title = task.title.clone();
+            let description = task.description.clone();
+            // Lock automatically dropped at end of scope
+            (title, description)
+        }; // Lock is DEFINITELY gone here
         
         // Update session task status to in progress
-        let task_title = if task.title.len() > 50 {
-            format!("{}...", &task.title[..47])
+        let session_task_title = if task_title.len() > 50 {
+            format!("{}...", &task_title[..47])
         } else {
-            task.title.clone()
+            task_title.clone()
         };
-        let _ = self.session_tasks.update_status(&task_title, SessionTaskStatus::InProgress);
+        let _ = self.session_tasks.update_status(&session_task_title, SessionTaskStatus::InProgress);
         
         // Select appropriate worker template based on task description
-        let template = WorkerTemplate::select_for_task(&task.description);
+        let template = WorkerTemplate::select_for_task(&task_description);
+        let template_name = template.name.clone(); // Save name before moving template
         
-        tracing::info!("Spawning {} for task: {}", template.name, task.title);
+        tracing::info!("Spawning {} for task: {}", template_name, task_title);
+        tracing::info!("[DIAGNOSTIC] PM {} selected template: {}", self.id.name, template_name);
+        tracing::info!("[DIAGNOSTIC] PM {} about to create worker from template", self.id.name);
         
         // Create worker agent with proper template
-        // Workers need Arc<PromptManager>, but we have Arc<RwLock<PromptManager>>
-        // We can't unwrap the RwLock, so we need to share the RwLock-wrapped version
-        // Let's check the WorkerAgent signature to see what it actually needs
+        // CRITICAL FIX: Pass shared MCP client instead of creating new empty one
+        // This ensures workers have access to the MCP servers initialized at Portal startup
         let mut worker = super::worker::WorkerAgent::from_template(
             template,
             self.message_bus.clone(),
             self.prompt_manager.clone(),
             self.project_manager.clone(),
-            Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new())),
+            self.mcp_client.clone(), // ✅ Use shared MCP client (already has connected servers)
             self.ai_provider_manager.clone(),
         );
         
+        // Log MCP client status for diagnostics
+        {
+            let client = self.mcp_client.read().await;
+            let servers = client.list_servers().await;
+            tracing::info!(
+                "Worker {} created with {} MCP servers: {:?}",
+                template_name,
+                servers.len(),
+                servers
+            );
+        }
+        
         let worker_id = worker.id().clone();
+        tracing::info!("[DIAGNOSTIC] PM {} created worker with ID: {}", self.id.name, worker_id.name);
         
         // Store worker mapping
         self.workers.insert(task_id.clone(), worker_id.clone());
+        
+        tracing::info!("[DIAGNOSTIC] PM {} about to transition worker to Idle", self.id.name);
         
         // Transition worker to Idle state
         worker.state_machine_mut().transition(
@@ -811,21 +868,36 @@ CRITICAL: JSON only. No explanations.
             "Worker initialized and ready for task".to_string()
         )?;
         
-        // Assign task to worker
+        tracing::info!("[DIAGNOSTIC] PM {} worker transitioned to Idle successfully", self.id.name);
+        
+        tracing::info!("[DIAGNOSTIC] PM {} about to call assign_task", self.id.name);
+        
+        // Assign task to worker (lock should be fully released by now)
         worker.assign_task(task_id.clone()).await?;
+        
+        tracing::info!("[DIAGNOSTIC] PM {} assign_task completed successfully", self.id.name);
+        
+        tracing::info!("[DIAGNOSTIC] About to spawn worker {} for task {}", worker.id().name, task_id);
         
         // Execute worker in background
         let task_id_for_logging = task_id.clone();
+        let worker_name = worker.id().name.clone();
         tokio::spawn(async move {
-            tracing::info!("Worker {} starting execution for task {}", worker.id().name, task_id_for_logging);
+            tracing::info!("[DIAGNOSTIC] Worker {} tokio::spawn ENTERED async block for task {}", worker_name, task_id_for_logging);
             
-            // Execute task
-            if let Err(e) = worker.execute_task().await {
-                tracing::error!("Worker {} task execution failed: {:?}", worker.id().name, e);
-                return;
+            // Execute task with timeout
+            let execution_timeout = tokio::time::Duration::from_secs(120); // 2 minute timeout for entire task
+            match tokio::time::timeout(execution_timeout, worker.execute_task()).await {
+                Ok(Ok(())) => {
+                    tracing::info!("Worker {} completed task execution, awaiting PM validation", worker_name);
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("Worker {} task execution failed: {:?}", worker_name, e);
+                }
+                Err(_) => {
+                    tracing::error!("Worker {} task execution TIMED OUT after {:?}", worker_name, execution_timeout);
+                }
             }
-            
-            tracing::info!("Worker {} completed task execution, awaiting PM validation", worker.id().name);
         });
         
         Ok(())
@@ -1016,9 +1088,10 @@ mod tests {
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
         let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let mcp_client = Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new()));
         
         let project_id = ProjectId::new();
-        PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager)
+        PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager, mcp_client)
     }
     
     #[tokio::test]
@@ -1076,7 +1149,8 @@ mod tests {
         };
 
         let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
-        let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager);
+        let mcp_client = Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new()));
+        let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager, mcp_client);
         
         pm.start().await.unwrap();
         assert_eq!(pm.state(), &AgentState::Managing);

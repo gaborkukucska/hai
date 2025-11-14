@@ -112,6 +112,30 @@ impl AdminBridge {
             None
         )));
         
+        // Initialize MCP servers from default config before creating agents
+        {
+            let mut client = mcp_client.write().await;
+            match client.start_default_servers().await {
+                Ok(results) => {
+                    log::info!("MCP servers initialized successfully");
+                    // Log server initialization results
+                    for (server_name, result) in &results {
+                        match result {
+                            Ok(_) => log::info!("MCP server '{}' started", server_name),
+                            Err(e) => log::warn!("MCP server '{}' failed to start: {:?}", server_name, e),
+                        }
+                    }
+                    // Log available servers for diagnostics
+                    let servers = client.list_servers().await;
+                    log::info!("Available MCP servers: {:?}", servers);
+                },
+                Err(e) => {
+                    log::warn!("Failed to initialize MCP servers: {:?}", e);
+                    log::warn!("Workers will have no tools available");
+                }
+            }
+        }
+        
         let context = Arc::new(AgentContext::new(
             message_bus,
             prompt_manager,
