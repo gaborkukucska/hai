@@ -13,6 +13,7 @@ pub mod tools;
 pub mod agents;
 pub mod projects;
 pub mod test_utils;
+pub mod user_settings;
 
 // TODO: Implement these modules in later cycles
 // pub mod memory;
@@ -39,6 +40,10 @@ pub use projects::{
     ProjectManager, Project, ProjectId, ProjectStatus,
     Task, TaskId, TaskStatus,
     Milestone, MilestoneId, MilestoneStatus,
+};
+
+pub use user_settings::{
+    UserSettingsManager, SharedUserSettings, ModelPreference,
 };
 
 /// Initialize the persona system

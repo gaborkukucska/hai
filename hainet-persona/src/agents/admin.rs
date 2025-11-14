@@ -374,8 +374,33 @@ impl AdminAgent {
 
         // Select the best model for planning
         let selection_context = SelectionContext::for_admin();
+        
+        // Load user preference for Admin agent if available
+        let preferred_family = if let Some(ref user_settings) = self.context.user_settings {
+            let settings = user_settings.read().await;
+            match settings.get_model_preference("admin").await {
+                Ok(Some(family)) => {
+                    tracing::info!("✅ Loaded user preference for Admin: family='{}'", family);
+                    Some(family)
+                },
+                Ok(None) => {
+                    tracing::warn!("⚠️  No user preference set for Admin agent");
+                    None
+                },
+                Err(e) => {
+                    tracing::error!("❌ Failed to load user preference for Admin: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            tracing::warn!("⚠️  UserSettingsManager not available in context");
+            None
+        };
+        
+        tracing::info!("🎯 Model selection for Admin planning: preferred_family={:?}", preferred_family);
+        
         let selected_model = self.ai_provider_manager
-            .select_model_for_agent(selection_context)
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
             .await
             .context("Failed to select a model for planning")?;
         
@@ -723,8 +748,17 @@ impl AdminAgent {
 
         // Select the best model for conversation
         let selection_context = SelectionContext::for_admin();
+        
+        // Load user preference for Admin agent if available
+        let preferred_family = if let Some(ref user_settings) = self.context.user_settings {
+            let settings = user_settings.read().await;
+            settings.get_model_preference("admin").await.ok().flatten()
+        } else {
+            None
+        };
+        
         let selected_model = self.ai_provider_manager
-            .select_model_for_agent(selection_context)
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
             .await
             .context("Failed to select a model for conversation")?;
         

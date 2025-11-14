@@ -109,6 +109,25 @@ impl AIProviderManager {
         Ok(selected)
     }
     
+    /// Select optimal model for a specific agent task with user preferences
+    /// 
+    /// This is a convenience wrapper around select_model_for_agent that applies
+    /// user-specified model family preferences to the selection context.
+    pub async fn select_model_for_agent_with_preferences(
+        &self,
+        mut context: SelectionContext,
+        preferred_family: Option<String>,
+    ) -> Result<SelectedModel> {
+        // Apply user preference if provided
+        if let Some(family) = preferred_family {
+            if !family.is_empty() {
+                context = context.with_preferred_family(Some(family));
+            }
+        }
+        
+        self.select_model_for_agent(context).await
+    }
+    
     /// Refresh catalog (re-scan providers and update models)
     pub async fn refresh_catalog(&self) -> Result<()> {
         info!("Refreshing AI provider catalog");

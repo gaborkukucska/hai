@@ -62,6 +62,7 @@ use crate::messaging::{AgentId, MessageBus};
 use crate::prompts::PromptManager;
 use crate::tools::mcp::MCPClientManager;
 use crate::guardian::GuardianSystem;
+use crate::user_settings::SharedUserSettings;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -97,6 +98,9 @@ pub struct AgentContext {
     
     /// Constitutional Guardian system
     pub guardian: Arc<RwLock<GuardianSystem>>,
+    
+    /// User settings manager for model preferences
+    pub user_settings: Option<SharedUserSettings>,
 }
 
 impl AgentContext {
@@ -111,6 +115,13 @@ impl AgentContext {
             prompt_manager,
             mcp_client,
             guardian,
+            user_settings: None,
         }
+    }
+    
+    /// Set user settings manager
+    pub fn with_user_settings(mut self, user_settings: SharedUserSettings) -> Self {
+        self.user_settings = Some(user_settings);
+        self
     }
 }

@@ -202,11 +202,22 @@ pub async fn get_default_device(
 pub async fn get_model_preferences(
     storage: State<'_, SettingsState>
 ) -> Result<Vec<ModelPreference>, String> {
+    log::info!("[Backend] get_model_preferences called");
     let storage = storage.read().await;
     
-    storage.get_all_model_preferences()
+    let prefs = storage.get_all_model_preferences()
         .await
-        .map_err(|e| format!("Failed to get model preferences: {}", e))
+        .map_err(|e| {
+            log::error!("[Backend] Failed to get model preferences: {}", e);
+            format!("Failed to get model preferences: {}", e)
+        })?;
+    
+    log::info!("[Backend] Returning {} model preferences", prefs.len());
+    for pref in &prefs {
+        log::debug!("[Backend]   - {}: {} (fallback: {})", pref.agent_type, pref.preferred_family, pref.allow_fallback);
+    }
+    
+    Ok(prefs)
 }
 
 #[tauri::command]
@@ -216,13 +227,52 @@ pub async fn save_model_preference(
     allow_fallback: bool,
     storage: State<'_, SettingsState>
 ) -> Result<(), String> {
+    log::info!("[Backend] save_model_preference called: {} -> {} (fallback: {})", agent_type, family, allow_fallback);
     let storage = storage.read().await;
     
     storage.save_model_preference(&agent_type, &family, allow_fallback)
         .await
-        .map_err(|e| format!("Failed to save model preference: {}", e))?;
+        .map_err(|e| {
+            log::error!("[Backend] Failed to save model preference: {}", e);
+            format!("Failed to save model preference: {}", e)
+        })?;
     
-    log::info!("Model preference saved: {} -> {} (fallback: {})", agent_type, family, allow_fallback);
+    log::info!("[Backend] Model preference saved successfully: {} -> {}", agent_type, family);
+    
+    // Sync preference to hainet-persona database
+    if let Err(e) = sync_preference_to_persona(&agent_type, &family).await {
+        log::warn!("Failed to sync preference to hainet-persona: {}", e);
+        // Don't fail the request - Portal settings were saved successfully
+    }
+    
+    Ok(())
+}
+
+/// Sync a model preference to hainet-persona's database
+async fn sync_preference_to_persona(agent_type: &str, model_family: &str) -> Result<(), String> {
+    // Determine database path (same as in admin_bridge.rs)
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| "Cannot determine home directory".to_string())?;
+    let hainet_dir = home_dir.join(".hainet");
+    let data_dir = hainet_dir.join("data");
+    
+    // Create directories if they don't exist
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("Failed to create data directory: {}", e))?;
+    
+    let settings_db_path = data_dir.join("user_settings.db");
+    let db_connection_string = format!("sqlite://{}?mode=rwc", settings_db_path.display());
+    
+    // Create UserSettingsManager
+    let user_settings = hainet_persona::UserSettingsManager::new(&db_connection_string).await
+        .map_err(|e| format!("Failed to create UserSettingsManager: {}", e))?;
+    
+    // Set the preference
+    user_settings.set_model_preference(agent_type, model_family).await
+        .map_err(|e| format!("Failed to set preference in hainet-persona: {}", e))?;
+    
+    log::info!("Synced preference for {} to {} in hainet-persona database", agent_type, model_family);
+    
     Ok(())
 }
 

@@ -48,6 +48,20 @@ impl ModelSelector {
         lower.contains("coder") || lower.contains("code")
     }
 
+    /// Check if model belongs to a specific family
+    fn matches_family(model_id: &str, family: &str) -> bool {
+        let model_lower = model_id.to_lowercase();
+        let family_lower = family.to_lowercase();
+        
+        // Handle "auto" - matches all models
+        if family_lower == "auto" {
+            return true;
+        }
+        
+        // Match by family name in model ID
+        model_lower.contains(&family_lower)
+    }
+
     /// Select best model from ranked list
     pub async fn select_best(
         &self,
@@ -58,7 +72,101 @@ impl ModelSelector {
             return Err(anyhow!("No models available for selection"));
         }
 
-        // Try models in order of ranking
+        // First pass: Try to find model from preferred family
+        if let Some(ref preferred_family) = context.preferred_family {
+            if preferred_family != "auto" {
+                info!(
+                    "Filtering models by preferred family '{}' for agent {:?}",
+                    preferred_family, context.agent_type
+                );
+                
+                for (index, score) in ranked_models.iter().enumerate() {
+                    // Check if model matches preferred family
+                    if !Self::matches_family(&score.model_id, preferred_family) {
+                        debug!(
+                            "Skipping model {} (not in preferred family '{}')",
+                            score.model_id, preferred_family
+                        );
+                        continue;
+                    }
+                    
+                    // Skip if total score is too low
+                    if score.total_score < context.min_acceptable_score() {
+                        debug!(
+                            "Skipping model {} (score {:.2} < min {:.2})",
+                            score.model_id, score.total_score, context.min_acceptable_score()
+                        );
+                        continue;
+                    }
+
+                    // Skip vision models for text-only tasks
+                    if !context.requires_vision() && Self::is_vision_model(&score.model_id) {
+                        debug!(
+                            "Skipping vision model {} for text-only task",
+                            score.model_id
+                        );
+                        continue;
+                    }
+
+                    // Prefer math models for math tasks
+                    if context.requires_math && !Self::is_math_model(&score.model_id) {
+                        debug!(
+                            "Preferring math models for math task, skipping {}",
+                            score.model_id
+                        );
+                        continue;
+                    }
+
+                    // Prefer coder models for coding tasks
+                    if context.requires_coding && !Self::is_coder_model(&score.model_id) {
+                        debug!(
+                            "Preferring coder models for coding task, skipping {}",
+                            score.model_id
+                        );
+                        continue;
+                    }
+
+                    // Verify model still exists in catalog
+                    let catalog = self.catalog.read().await;
+                    if let Some(model) = catalog.get_model(&score.model_id) {
+                        info!(
+                            "Selected model {} from preferred family '{}' (rank {}, score {:.2}) for agent {:?}",
+                            score.model_id,
+                            preferred_family,
+                            index + 1,
+                            score.total_score,
+                            context.agent_type
+                        );
+
+                        return Ok(SelectedModel {
+                            model_id: score.model_id.clone(),
+                            model_name: model.name.clone(),
+                            endpoint: model.endpoint.clone(),
+                            provider_type: model.provider_type,
+                            score: score.total_score,
+                            rank: index + 1,
+                            context: context.clone(),
+                        });
+                    }
+                }
+                
+                // No suitable model found in preferred family
+                if !context.allow_fallback {
+                    return Err(anyhow!(
+                        "No suitable models found in preferred family '{}' for agent {:?}, and fallback is disabled",
+                        preferred_family,
+                        context.agent_type
+                    ));
+                }
+                
+                info!(
+                    "No suitable model found in preferred family '{}', falling back to all models",
+                    preferred_family
+                );
+            }
+        }
+
+        // Second pass: Try all models (fallback or no preference)
         for (index, score) in ranked_models.iter().enumerate() {
             // Skip if total score is too low
             if score.total_score < context.min_acceptable_score() {
@@ -150,6 +258,12 @@ pub struct SelectionContext {
     pub requires_math: bool,
     pub requires_coding: bool,
     pub task_type: Option<TaskType>,
+    /// User's preferred model family (e.g., "gemma3", "llama3", "qwen")
+    /// If Some, only models from this family will be considered
+    /// If None or "auto", all models are considered
+    pub preferred_family: Option<String>,
+    /// Whether to allow fallback to other families if preferred family has no suitable models
+    pub allow_fallback: bool,
 }
 
 impl SelectionContext {
@@ -171,6 +285,8 @@ impl SelectionContext {
             requires_math: false,
             requires_coding: false,
             task_type: None,
+            preferred_family: None,
+            allow_fallback: true,
         }
     }
 
@@ -192,6 +308,8 @@ impl SelectionContext {
             requires_math: false,
             requires_coding: false,
             task_type: None,
+            preferred_family: None,
+            allow_fallback: true,
         }
     }
 
@@ -213,6 +331,8 @@ impl SelectionContext {
             requires_math: false,
             requires_coding: true,
             task_type: Some(TaskType::CodeGeneration),
+            preferred_family: None,
+            allow_fallback: true,
         }
     }
     
@@ -231,6 +351,8 @@ impl SelectionContext {
             requires_math: true,
             requires_coding: false,
             task_type: Some(TaskType::MathematicalComputation),
+            preferred_family: None,
+            allow_fallback: true,
         }
     }
 
@@ -252,6 +374,8 @@ impl SelectionContext {
             requires_math: false,
             requires_coding: false,
             task_type: None,
+            preferred_family: None,
+            allow_fallback: true,
         }
     }
 
@@ -267,6 +391,8 @@ impl SelectionContext {
             requires_math: false,
             requires_coding: false,
             task_type: None,
+            preferred_family: None,
+            allow_fallback: true,
         }
     }
 
@@ -285,6 +411,18 @@ impl SelectionContext {
     pub fn requires_vision(&self) -> bool {
         self.required_capabilities.contains(&ModelCapability::VisionUnderstanding) ||
         self.preferred_capabilities.contains(&ModelCapability::VisionUnderstanding)
+    }
+    
+    /// Set preferred model family for this context
+    pub fn with_preferred_family(mut self, family: Option<String>) -> Self {
+        self.preferred_family = family;
+        self
+    }
+    
+    /// Set fallback behavior for this context
+    pub fn with_fallback(mut self, allow_fallback: bool) -> Self {
+        self.allow_fallback = allow_fallback;
+        self
     }
 }
 

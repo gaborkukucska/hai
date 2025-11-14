@@ -136,13 +136,6 @@ impl AdminBridge {
             }
         }
         
-        let context = Arc::new(AgentContext::new(
-            message_bus,
-            prompt_manager,
-            mcp_client,
-            guardian,
-        ));
-        
         // Create project manager with SQLite database
         // Use a more reliable path in the user's home directory
         let home_dir = dirs::home_dir()
@@ -170,6 +163,19 @@ impl AdminBridge {
         let metrics_collector = Arc::new(RwLock::new(
             MetricsCollector::new(&format!("sqlite://{}?mode=rwc", metrics_db_path.display())).await?
         ));
+        
+        // Create user settings manager with database path
+        let settings_db_path = data_dir.join("user_settings.db");
+        let user_settings = Arc::new(RwLock::new(
+            hainet_persona::UserSettingsManager::new(&format!("sqlite://{}?mode=rwc", settings_db_path.display())).await?
+        ));
+        
+        let context = Arc::new(AgentContext::new(
+            message_bus,
+            prompt_manager,
+            mcp_client,
+            guardian,
+        ).with_user_settings(user_settings));
         
         // Create Admin AI agent (ai_provider_manager already created earlier)
         let mut admin = AdminAgent::new(context, project_manager, ai_provider_manager, metrics_collector).await?;
