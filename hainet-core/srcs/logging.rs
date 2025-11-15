@@ -11,8 +11,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 /// Finds the workspace root from the current directory by looking for a Cargo.toml with a [workspace] table.
 fn find_workspace_root() -> Result<PathBuf> {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let mut current_dir = PathBuf::from(manifest_dir);
+    let mut current_dir = env::current_dir()?;
     loop {
         let cargo_toml_path = current_dir.join("Cargo.toml");
         if cargo_toml_path.exists() {
