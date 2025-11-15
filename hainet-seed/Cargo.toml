@@ -54,6 +54,8 @@ base64 = "0.22"
 # System info
 num_cpus = "1.16"
 
+hainet-core = { path = "../hainet-core" }
+
 [dev-dependencies]
 tempfile = "3.0"
 tokio-test = "0.4"

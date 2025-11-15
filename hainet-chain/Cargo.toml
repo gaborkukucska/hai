@@ -40,6 +40,8 @@ rand = { workspace = true }
 sled = { workspace = true }
 async-trait = "0.1.80"
 
+hainet-core = { path = "../hainet-core" }
+
 [dev-dependencies]
 tempfile = "3.0"
 tokio-test = "0.4"
