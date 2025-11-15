@@ -54,6 +54,8 @@ sha3 = { workspace = true }
 # Project management system dependencies
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
 
+hainet-core = { path = "../hainet-core" }
+
 [dev-dependencies]
 tempfile = "3.0"
 tokio-test = "0.4"

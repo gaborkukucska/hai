@@ -347,34 +347,10 @@ impl ServerHandler for FilesServer {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Create logs directory
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hainet-files");
-    let logs_dir = data_dir.join("logs");
-    std::fs::create_dir_all(&logs_dir)?;
-    
-    // Create log file with timestamp
-    let log_file = logs_dir.join(format!(
-        "hainet-files-{}.log",
-        chrono::Local::now().format("%Y%m%d-%H%M%S")
-    ));
-    
-    // Initialize tracing with file appender
-    use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{fmt, EnvFilter};
-    
-    let file_appender = tracing_appender::rolling::never(&logs_dir, log_file.file_name().unwrap());
-    let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
-    
-    tracing_subscriber::registry()
-        .with(fmt::layer().with_writer(std::io::stderr))
-        .with(fmt::layer().with_writer(file_writer).with_ansi(false))
-        .with(EnvFilter::new("hainet_files=debug,rmcp=info"))
-        .init();
+    // Initialize logging
+    let _guard = hainet_core::logging::initialize_logging("hainet-files", "debug")?;
 
     info!("🗂️  Starting HAI-Net Files MCP Server (rmcp SDK)");
-    info!("📝 Logs being written to: {}", log_file.display());
 
     // Initialize storage (use temp directory for now)
     let storage_path = std::env::temp_dir().join("hainet-files-cas");
@@ -385,7 +361,7 @@ async fn main() -> Result<()> {
     // Run the server with stdio transport
     use rmcp::service::ServiceExt;
     let running_service = server.serve(rmcp::transport::io::stdio()).await?;
-    
+
     // Keep the service running until it's terminated
     running_service.waiting().await?;
 

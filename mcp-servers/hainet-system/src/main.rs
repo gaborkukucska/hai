@@ -456,11 +456,8 @@ impl ServerHandler for SystemServer {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter("hainet_system=debug,rmcp=info")
-        .with_writer(std::io::stderr)
-        .init();
+    // Initialize logging
+    let _guard = hainet_core::logging::initialize_logging("hainet-system", "debug")?;
 
     info!("🔧 Starting HAI-Net System Management MCP Server");
 

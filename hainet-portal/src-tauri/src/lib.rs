@@ -123,6 +123,10 @@ async fn list_tts_voices(state: State<'_, AppState>) -> Result<Vec<String>, Stri
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize logging
+    let _guard = hainet_core::logging::initialize_logging("hainet-portal", "debug")
+        .expect("Failed to initialize logging");
+
   // Initialize Admin AI Bridge before building Tauri app
   let runtime = tokio::runtime::Runtime::new()
       .expect("Failed to create Tokio runtime");
@@ -187,55 +191,28 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .setup(|app| {
-      // Create logs directory
-      let data_dir = dirs::data_dir()
-          .expect("Failed to get data directory")
-          .join("hainet-portal");
-      let logs_dir = data_dir.join("logs");
-      std::fs::create_dir_all(&logs_dir)
-          .expect("Failed to create logs directory");
-      
-      // Configure logging to file AND stdout
-      let log_file = logs_dir.join(format!(
-          "hainet-portal-{}.log",
-          chrono::Local::now().format("%Y%m%d-%H%M%S")
-      ));
-      
-      app.handle().plugin(
-        tauri_plugin_log::Builder::default()
-          .level(log::LevelFilter::Debug)  // Always debug level
-          .target(tauri_plugin_log::Target::new(
-            tauri_plugin_log::TargetKind::LogDir { file_name: Some(log_file.file_name().unwrap().to_str().unwrap().to_string()) }
-          ))
-          .target(tauri_plugin_log::Target::new(
-            tauri_plugin_log::TargetKind::Stdout
-          ))
-          .build(),
-      )?;
-      
-      log::info!("HAI-Net Portal initialized successfully");
-      log::info!("Logs being written to: {}", log_file.display());
-      
-      // Get metrics collector and storage from managed state
-      let metrics_for_broadcast = app.state::<MetricsState>().inner().clone();
-      let metrics_for_snapshot = app.state::<MetricsState>().inner().clone();
-      let storage_for_snapshot = app.state::<MetricsStorageState>().inner().clone();
-      
-      // Start metrics broadcast service for real-time updates
-      metrics_handler::start_metrics_broadcast(
-          app.handle().clone(),
-          metrics_for_broadcast
-      );
-      log::info!("Metrics broadcast service started");
-      
-      // Start metrics snapshot recording task for historical analytics
-      metrics_handler::start_metrics_snapshot_task(
-          metrics_for_snapshot,
-          storage_for_snapshot
-      );
-      log::info!("Metrics snapshot recording service started");
-      
-      Ok(())
+        tracing::info!("HAI-Net Portal initialized successfully");
+
+        // Get metrics collector and storage from managed state
+        let metrics_for_broadcast = app.state::<MetricsState>().inner().clone();
+        let metrics_for_snapshot = app.state::<MetricsState>().inner().clone();
+        let storage_for_snapshot = app.state::<MetricsStorageState>().inner().clone();
+
+        // Start metrics broadcast service for real-time updates
+        metrics_handler::start_metrics_broadcast(
+            app.handle().clone(),
+            metrics_for_broadcast
+        );
+        tracing::info!("Metrics broadcast service started");
+
+        // Start metrics snapshot recording task for historical analytics
+        metrics_handler::start_metrics_snapshot_task(
+            metrics_for_snapshot,
+            storage_for_snapshot
+        );
+        tracing::info!("Metrics snapshot recording service started");
+
+        Ok(())
     })
     .manage(AppState {
         admin_bridge: Arc::new(RwLock::new(admin_bridge)),

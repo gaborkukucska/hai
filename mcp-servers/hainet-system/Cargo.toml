@@ -28,6 +28,8 @@ clap = { version = "4.0", features = ["derive"] }
 regex = "1.10"
 chrono = "0.4"
 
+hainet-core = { path = "../../hainet-core" }
+
 [[bin]]
 name = "hainet-system"
 path = "src/main.rs"
