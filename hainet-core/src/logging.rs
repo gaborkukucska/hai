@@ -9,21 +9,23 @@ use toml::Value;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
-/// Finds the workspace root from the current directory by looking for a Cargo.toml with a [workspace] table.
+/// Finds the workspace root from the running executable's location.
 fn find_workspace_root() -> Result<PathBuf> {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let mut current_dir = PathBuf::from(manifest_dir);
+    let exe_path = env::current_exe()?;
+    let mut current_dir = exe_path.parent().expect("Executable must be in a directory.").to_path_buf();
+
     loop {
         let cargo_toml_path = current_dir.join("Cargo.toml");
         if cargo_toml_path.exists() {
             let toml_content = fs::read_to_string(&cargo_toml_path)?;
-            let toml: Value = toml::from_str(&toml_content)?;
-            if toml.get("workspace").is_some() {
-                return Ok(current_dir);
+            if let Ok(toml) = toml::from_str::<Value>(&toml_content) {
+                if toml.get("workspace").is_some() {
+                    return Ok(current_dir);
+                }
             }
         }
         if !current_dir.pop() {
-            bail!("Could not find workspace root");
+            bail!("Could not find workspace root by traversing up from executable path.");
         }
     }
 }
