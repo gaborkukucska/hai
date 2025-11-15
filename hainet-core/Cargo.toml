@@ -12,6 +12,7 @@ description = "HAI-Net Core Daemon - Main networking and coordination service"
 [dependencies]
 chrono = "0.4"
 tracing-appender = "0.2"
+toml = "0.8"
 # Workspace dependencies
 tokio = { workspace = true }
 serde = { workspace = true }

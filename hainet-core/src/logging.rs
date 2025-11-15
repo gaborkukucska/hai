@@ -1,10 +1,34 @@
 //! <!-- # START OF FILE hainet-core/src/logging.rs -->
 //! Centralized logging for the HAI-Net framework.
 
-use anyhow::{Context, Result};
-use std::path::PathBuf;
+use anyhow::{bail, Context, Result};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use toml::Value;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
+
+/// Finds the workspace root from the running executable's location.
+fn find_workspace_root() -> Result<PathBuf> {
+    let exe_path = env::current_exe()?;
+    let mut current_dir = exe_path.parent().expect("Executable must be in a directory.").to_path_buf();
+
+    loop {
+        let cargo_toml_path = current_dir.join("Cargo.toml");
+        if cargo_toml_path.exists() {
+            let toml_content = fs::read_to_string(&cargo_toml_path)?;
+            if let Ok(toml) = toml::from_str::<Value>(&toml_content) {
+                if toml.get("workspace").is_some() {
+                    return Ok(current_dir);
+                }
+            }
+        }
+        if !current_dir.pop() {
+            bail!("Could not find workspace root by traversing up from executable path.");
+        }
+    }
+}
 
 /// Initializes the logging system for a HAI-Net application.
 ///
@@ -34,10 +58,10 @@ pub fn initialize_logging(
     app_name: &str,
     default_level: &str,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard> {
-    // Assume the binary is run from the workspace root.
-    let logs_dir = PathBuf::from("logs");
-    std::fs::create_dir_all(&logs_dir)
-        .context("Failed to create central logs directory")?;
+    let workspace_root =
+        find_workspace_root().context("Failed to find workspace root for logging")?;
+    let logs_dir = workspace_root.join("logs");
+    std::fs::create_dir_all(&logs_dir).context("Failed to create central logs directory")?;
 
     let log_file_name = format!(
         "{}-{}.log",
@@ -49,12 +73,20 @@ pub fn initialize_logging(
     let file_appender = tracing_appender::rolling::never(&logs_dir, &log_file_name);
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("{app_name}={default_level},rmcp=info")));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(format!(
+            "hainet={0},app={0},rmcp=info",
+            default_level
+        ))
+    });
 
     tracing_subscriber::registry()
         .with(fmt::layer().with_writer(std::io::stderr)) // Log to stderr
-        .with(fmt::layer().with_writer(file_writer).with_ansi(false)) // Log to file
+        .with(
+            fmt::layer()
+                .with_writer(file_writer)
+                .with_ansi(false),
+        ) // Log to file
         .with(env_filter)
         .init();
 
