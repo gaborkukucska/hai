@@ -64,6 +64,9 @@ pub struct WorkerAgent {
     /// AI provider manager for dynamic model selection
     ai_provider_manager: Arc<AIProviderManager>,
     
+    /// User settings manager for model preferences
+    user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>,
+
     /// Maximum retry attempts for failed operations (deprecated - use execution_strategy.max_retries)
     max_retries: usize,
     
@@ -137,6 +140,7 @@ impl WorkerAgent {
             project_manager,
             mcp_client,
             ai_provider_manager,
+            user_settings: None, // Workers don't have user settings in new() - use from_template() instead
             max_retries: 3, // Kept for backward compatibility
             learner: WorkerLearner::new(), // Default 100 outcome capacity
             execution_strategy: ExecutionStrategy::default(), // 5s timeout, 3 retries, 1.5x backoff
@@ -154,6 +158,7 @@ impl WorkerAgent {
         project_manager: Arc<RwLock<ProjectManager>>,
         mcp_client: Arc<RwLock<MCPClientManager>>,
         ai_provider_manager: Arc<AIProviderManager>,
+        user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>,
     ) -> Self {
         let id = AgentId::new(AgentType::Worker, template.name.clone());
         
@@ -190,6 +195,7 @@ impl WorkerAgent {
             project_manager,
             mcp_client,
             ai_provider_manager,
+            user_settings, // Accept user_settings from PM
             max_retries: 3, // Kept for backward compatibility
             learner: WorkerLearner::new(),
             execution_strategy: ExecutionStrategy::default(),
@@ -574,10 +580,31 @@ impl WorkerAgent {
             ..Default::default()
         };
 
+        // Load user preference for Worker agent if available
+        let preferred_family = if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            match settings.get_model_preference("worker").await {
+                Ok(Some(family)) => {
+                    tracing::info!("✅ Loaded user preference for Worker: family='{}'", family);
+                    Some(family)
+                },
+                Ok(None) => {
+                    tracing::debug!("No user preference set for Worker agent");
+                    None
+                },
+                Err(e) => {
+                    tracing::error!("Failed to load user preference for Worker: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
         let selection_context = SelectionContext::for_worker();
         let selected_model = self
             .ai_provider_manager
-            .select_model_for_agent(selection_context)
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
             .await
             .context("Failed to select a model for planning")?;
 
@@ -588,9 +615,17 @@ impl WorkerAgent {
             &selected_model.model_id
         };
         
-        let response = client.generate(model_name, &planning_prompt, options)
-            .await
-            .context("Failed to generate execution plan with LLM")?;
+        // Add timeout wrapper to prevent indefinite hanging
+        tracing::info!("[DIAGNOSTIC] Worker {} calling LLM for planning (model: {})", self.id.name, model_name);
+        let llm_timeout = tokio::time::Duration::from_secs(60); // 60s timeout for LLM generation
+        let response = tokio::time::timeout(
+            llm_timeout,
+            client.generate(model_name, &planning_prompt, options)
+        )
+        .await
+        .context(format!("LLM generation timed out after {:?}", llm_timeout))?
+        .context("Failed to generate execution plan with LLM")?;
+        tracing::info!("[DIAGNOSTIC] Worker {} received LLM response ({} chars)", self.id.name, response.text.len());
         
         self.parse_execution_plan(&response.text)
     }
@@ -796,10 +831,28 @@ impl WorkerAgent {
             ..Default::default()
         };
 
+        // Load user preference for Worker agent if available
+        let preferred_family = if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            match settings.get_model_preference("worker").await {
+                Ok(Some(family)) => {
+                    tracing::debug!("Loaded user preference for Worker: family='{}'", family);
+                    Some(family)
+                },
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::error!("Failed to load user preference for Worker: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
         let selection_context = SelectionContext::for_worker();
         let selected_model = self
             .ai_provider_manager
-            .select_model_for_agent(selection_context)
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
             .await
             .context("Failed to select a model for planning")?;
         
@@ -1333,10 +1386,28 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
             ..Default::default()
         };
         
+        // Load user preference for Worker agent if available
+        let preferred_family = if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            match settings.get_model_preference("worker").await {
+                Ok(Some(family)) => {
+                    tracing::debug!("Loaded user preference for Worker (tool selection): family='{}'", family);
+                    Some(family)
+                },
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::error!("Failed to load user preference for Worker: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
         let selection_context = SelectionContext::for_worker();
         let selected_model = self
             .ai_provider_manager
-            .select_model_for_agent(selection_context)
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
             .await
             .context("Failed to select model for tool selection")?;
         
@@ -1443,10 +1514,28 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
             ..Default::default()
         };
         
+        // Load user preference for Worker agent if available
+        let preferred_family = if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            match settings.get_model_preference("worker").await {
+                Ok(Some(family)) => {
+                    tracing::debug!("Loaded user preference for Worker (execution planning): family='{}'", family);
+                    Some(family)
+                },
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::error!("Failed to load user preference for Worker: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
         let selection_context = SelectionContext::for_worker();
         let selected_model = self
             .ai_provider_manager
-            .select_model_for_agent(selection_context)
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
             .await
             .context("Failed to select model for execution planning")?;
         
@@ -1457,10 +1546,17 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
             &selected_model.model_id
         };
         
-        let response = client
-            .generate(model_name, &execution_prompt, options)
-            .await
-            .context("Failed to generate execution plan")?;
+        // Add timeout wrapper to prevent indefinite hanging
+        tracing::info!("[DIAGNOSTIC] Worker {} calling LLM for execution planning (model: {})", self.id.name, model_name);
+        let llm_timeout = tokio::time::Duration::from_secs(60); // 60s timeout for LLM generation
+        let response = tokio::time::timeout(
+            llm_timeout,
+            client.generate(model_name, &execution_prompt, options)
+        )
+        .await
+        .context(format!("LLM generation timed out after {:?}", llm_timeout))?
+        .context("Failed to generate execution plan")?;
+        tracing::info!("[DIAGNOSTIC] Worker {} received LLM execution plan ({} chars)", self.id.name, response.text.len());
         
         parse_execution_plan(&response.text)
             .context("Failed to parse execution plan")

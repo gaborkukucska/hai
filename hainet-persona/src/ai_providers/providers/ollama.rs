@@ -121,6 +121,9 @@ impl ProviderClient for OllamaClient {
                 top_p: options.top_p,
                 stop: options.stop,
             }),
+            // Keep model loaded for 10 minutes to avoid constant reloading
+            // when multiple workers use the same model sequentially
+            keep_alive: Some("10m".to_string()),
         };
 
         let response = self
@@ -220,6 +223,10 @@ struct OllamaGenerateRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<OllamaOptions>,
+    /// Keep model loaded in memory for this duration (e.g., "5m", "10m", "1h")
+    /// This prevents frequent reloading when multiple requests use the same model
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep_alive: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

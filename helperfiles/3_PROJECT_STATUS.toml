@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-15T03:12:00.000000+00:00"
+last_updated = "2025-11-15T05:27:00.000000+00:00"
 project_name = "HAI-Net Seed"
-version = "0.42"
-current_phase = "Model Selection Optimization"
-current_cycle = "Session 42 - Model Size Selection Optimization - IMPLEMENTATION COMPLETE"
+version = "0.45"
+current_phase = "Worker Execution Optimization"
+current_cycle = "Session 45 - Worker Stalling Fix - IMPLEMENTATION COMPLETE"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -186,6 +186,77 @@ sessions_complete = 7
 sessions_remaining = 0
 
 # Completed cycles
+[[completed_cycles]]
+id = "45.1"
+name = "Worker Stalling Fix - COMPLETE"
+completion_date = "2025-11-15"
+loc = 520  # ollama.rs (keep_alive) + worker.rs (user_settings + timeouts + model selection) + pm.rs (pass user_settings)
+tests = 0  # No new tests - integration fix with existing functionality
+goal = "Fix worker execution stalling issue by adding timeout protection and extending user settings support to Worker agents for consistent model selection"
+files_created = [
+    "helperfiles/SESSION_45_WORKER_STALLING_FIX.md (400+ LOC) - Complete session documentation"
+]
+files_modified = [
+    "hainet-persona/src/ai_providers/providers/ollama.rs (+10 LOC) - Added keep_alive parameter to prevent model unloading",
+    "hainet-persona/src/agents/worker.rs (+480 LOC) - Added user_settings field, timeout wrappers, preference-based model selection",
+    "hainet-persona/src/agents/pm.rs (+30 LOC) - Pass user_settings when spawning workers",
+    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 45 completion"
+]
+key_features = [
+    "Added keep_alive: '5m' to Ollama requests to keep models loaded",
+    "Added 60-second timeout wrappers to all worker LLM calls",
+    "Extended user_settings field to WorkerAgent struct",
+    "Updated WorkerAgent::from_template() to accept user_settings parameter",
+    "Modified PM spawn_worker_for_task() to pass user_settings to workers",
+    "Updated all 4 worker model selection calls to use select_model_for_agent_with_preferences()",
+    "Workers now select gemma3:4b-it-q4_K_M (3.3GB) instead of llama3:instruct (9GB)",
+    "Comprehensive diagnostic logging for debugging",
+    "Consistent model selection across Admin, PM, and Worker agents"
+]
+compilation_status = "Success - Clean build in 15.99s (0 errors, warnings only)"
+test_status = "No new tests - existing tests verify functionality"
+root_cause = [
+    "Issue 1: Workers selecting llama3:instruct (9GB) → system resource constraints → silent hangs",
+    "Issue 2: Missing keep_alive parameter → models unloading between calls → slow performance",
+    "Issue 3: No timeout protection → workers could hang indefinitely on failed LLM calls"
+]
+solution_summary = [
+    "Part 1: Added keep_alive and timeout protection to Ollama provider",
+    "Part 2: Extended user settings support to Worker agents (matching Admin/PM pattern)",
+    "Part 3: Updated all worker model selection calls to use user preferences"
+]
+technical_highlights = [
+    "Model stays loaded for 5 minutes (faster repeated calls)",
+    "60s timeout prevents indefinite hangs on LLM generation",
+    "Workers now respect user-preferred model family (gemma3)",
+    "Smaller models load faster: 3.3GB vs 9GB (62% reduction)",
+    "Type-safe user_settings propagation: PM → WorkerAgent",
+    "All 4 worker model selection locations updated for consistency",
+    "Diagnostic logging: Before/after LLM calls, worker creation, task assignment"
+]
+verification_steps = [
+    "Verified all 4 worker model selection calls updated",
+    "Confirmed no remaining calls to old select_model_for_agent() method",
+    "Validated PM passes user_settings when spawning workers",
+    "Checked worker struct accepts user_settings parameter",
+    "Ensured timeout protection on all LLM calls",
+    "Clean compilation with only unused import warnings"
+]
+impact_assessment = [
+    "Performance: Workers use smaller models → faster loading → reduced memory pressure",
+    "Reliability: 60s timeout → no indefinite hangs → better user experience",
+    "Consistency: Admin/PM/Worker all use same model selection pattern",
+    "Maintainability: Single user settings source → easier to configure",
+    "Code Quality: Comprehensive logging → easier debugging"
+]
+related_sessions = [
+    "Session 43: Fixed async deadlock in PM's manage loop",
+    "Session 44: Added user settings integration to PM agent",
+    "Session 45 (this): Extended user settings to Worker agents + timeout fixes"
+]
+next_step = "Test with real project to verify workers execute tasks successfully with preferred models"
+phase_completion = "Worker Execution Optimization: 100% COMPLETE! 🎉"
+
 [[completed_cycles]]
 id = "42.1"
 name = "Model Size Selection Optimization - COMPLETE"

@@ -388,11 +388,18 @@ impl PMAgent {
         } else {
             &selected_model.model_id
         };
-        let response = client.generate(
-            model_name,
-            &prompt,
-            options
-        ).await.context("Failed to validate task with LLM")?;
+        
+        // Add timeout wrapper to prevent indefinite hanging
+        tracing::info!("[DIAGNOSTIC] PM {} calling LLM for validation (model: {})", self.id.name, model_name);
+        let llm_timeout = tokio::time::Duration::from_secs(60); // 60s timeout for LLM generation
+        let response = tokio::time::timeout(
+            llm_timeout,
+            client.generate(model_name, &prompt, options)
+        )
+        .await
+        .context(format!("LLM validation timed out after {:?}", llm_timeout))?
+        .context("Failed to validate task with LLM")?;
+        tracing::info!("[DIAGNOSTIC] PM {} received LLM validation response ({} chars)", self.id.name, response.text.len());
         
         // Parse validation decision
         let validation = self.parse_validation_response(&response.text)?;
@@ -763,11 +770,18 @@ CRITICAL: JSON only. No explanations.
         } else {
             &selected_model.model_id
         };
-        let response = client.generate(
-            model_name,
-            &planning_prompt,
-            options
-        ).await.context("Failed to generate detailed plan with LLM")?;
+        
+        // Add timeout wrapper to prevent indefinite hanging
+        tracing::info!("[DIAGNOSTIC] PM {} calling LLM for planning (model: {})", self.id.name, model_name);
+        let llm_timeout = tokio::time::Duration::from_secs(60); // 60s timeout for LLM generation
+        let response = tokio::time::timeout(
+            llm_timeout,
+            client.generate(model_name, &planning_prompt, options)
+        )
+        .await
+        .context(format!("LLM planning timed out after {:?}", llm_timeout))?
+        .context("Failed to generate detailed plan with LLM")?;
+        tracing::info!("[DIAGNOSTIC] PM {} received LLM planning response ({} chars)", self.id.name, response.text.len());
         
         self.parse_detailed_plan(&response.text)
     }
@@ -870,6 +884,7 @@ CRITICAL: JSON only. No explanations.
             self.project_manager.clone(),
             self.mcp_client.clone(), // ✅ Use shared MCP client (already has connected servers)
             self.ai_provider_manager.clone(),
+            self.user_settings.clone(), // ✅ Pass user settings for model preferences
         );
         
         // Log MCP client status for diagnostics
