@@ -70,24 +70,27 @@ pub fn initialize_logging(
     );
     let log_file_path = logs_dir.join(&log_file_name);
 
-    let file_appender = tracing_appender::rolling::never(&logs_dir, &log_file_name);
+    let file_appender = tracing_appender::rolling::never(logs_dir, &log_file_name);
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
+    let app_crate_name = app_name.replace('-', "_");
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new(format!(
-            "hainet={0},app={0},rmcp=info",
-            default_level
+            "{app}={level},hainet={level},rmcp=info",
+            app = app_crate_name,
+            level = default_level
         ))
     });
 
+    let stderr_layer = fmt::layer().with_writer(std::io::stderr);
+    let file_layer = fmt::layer()
+        .with_writer(file_writer)
+        .with_ansi(false);
+
     tracing_subscriber::registry()
-        .with(fmt::layer().with_writer(std::io::stderr)) // Log to stderr
-        .with(
-            fmt::layer()
-                .with_writer(file_writer)
-                .with_ansi(false),
-        ) // Log to file
         .with(env_filter)
+        .with(stderr_layer)
+        .with(file_layer)
         .init();
 
     tracing::info!(
