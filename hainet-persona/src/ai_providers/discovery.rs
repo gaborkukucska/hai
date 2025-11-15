@@ -74,7 +74,7 @@ impl ProviderDiscovery {
         }
     }
 
-    /// Scan all providers (localhost + LAN)
+    /// Scan all providers (localhost + all accessible subnets)
     pub async fn scan_all(&self) -> Result<Vec<DiscoveredProvider>> {
         info!("Starting provider discovery scan");
 
@@ -84,13 +84,189 @@ impl ProviderDiscovery {
         let localhost_providers = self.scan_localhost().await?;
         providers.extend(localhost_providers);
 
-        // TODO: Scan LAN with mDNS (defer to integration phase)
-        // let lan_providers = self.scan_lan().await?;
-        // providers.extend(lan_providers);
+        // Automatically discover and scan all accessible subnets
+        info!("Auto-discovering accessible subnets...");
+        let subnets = self.discover_all_subnets();
+        
+        for subnet in subnets {
+            info!("Discovered subnet: {}", subnet);
+            if let Ok(subnet_providers) = self.scan_subnet(&subnet).await {
+                providers.extend(subnet_providers);
+            }
+        }
+
+        // Also support manual override via environment variable
+        // Format: HAINET_EXTRA_SUBNETS="192.168.2.0/24,10.0.0.0/24"
+        if let Ok(extra_subnets) = std::env::var("HAINET_EXTRA_SUBNETS") {
+            for subnet in extra_subnets.split(',') {
+                let subnet = subnet.trim();
+                if !subnet.is_empty() {
+                    info!("Scanning extra subnet (manual override): {}", subnet);
+                    if let Ok(subnet_providers) = self.scan_subnet(subnet).await {
+                        providers.extend(subnet_providers);
+                    }
+                }
+            }
+        }
 
         info!("Discovery complete: {} providers found", providers.len());
 
         Ok(providers)
+    }
+
+    /// Discover all accessible subnets on all network interfaces
+    fn discover_all_subnets(&self) -> Vec<String> {
+        let mut subnets = Vec::new();
+        
+        // Use the `if-addrs` crate functionality or manual approach
+        // For simplicity, we'll use a manual approach with system commands
+        
+        #[cfg(target_os = "linux")]
+        {
+            // On Linux, parse `ip addr` output
+            if let Ok(output) = std::process::Command::new("ip")
+                .args(&["addr", "show"])
+                .output()
+            {
+                if let Ok(stdout) = String::from_utf8(output.stdout) {
+                    subnets.extend(self.parse_ip_addr_output(&stdout));
+                }
+            }
+        }
+        
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Fallback: try to get network interfaces manually
+            // Use local IP derivation as fallback
+            if let Ok(local_ip) = self.get_local_ip() {
+                let subnet = self.derive_subnet(&local_ip);
+                subnets.push(subnet);
+            }
+        }
+        
+        // Deduplicate subnets
+        subnets.sort();
+        subnets.dedup();
+        
+        // Filter out loopback
+        subnets.retain(|s| !s.starts_with("127."));
+        
+        subnets
+    }
+    
+    /// Parse `ip addr` output to extract subnets (Linux)
+    #[cfg(target_os = "linux")]
+    fn parse_ip_addr_output(&self, output: &str) -> Vec<String> {
+        let mut subnets = Vec::new();
+        
+        for line in output.lines() {
+            let line = line.trim();
+            
+            // Look for lines like: "inet 192.168.1.100/24 brd ..."
+            if line.starts_with("inet ") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let addr_with_prefix = parts[1];
+                    
+                    // Parse "192.168.1.100/24"
+                    if let Some((ip_str, prefix_str)) = addr_with_prefix.split_once('/') {
+                        // Parse IP octets
+                        let octets: Vec<&str> = ip_str.split('.').collect();
+                        if octets.len() == 4 {
+                            // Only handle /24 subnets for now
+                            if prefix_str == "24" {
+                                let subnet = format!("{}.{}.{}.0/24", octets[0], octets[1], octets[2]);
+                                subnets.push(subnet);
+                            }
+                            // Handle /16 subnets
+                            else if prefix_str == "16" {
+                                let subnet = format!("{}.{}.0.0/16", octets[0], octets[1]);
+                                subnets.push(subnet);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        subnets
+    }
+
+    /// Scan a specific subnet for AI providers
+    async fn scan_subnet(&self, subnet: &str) -> Result<Vec<DiscoveredProvider>> {
+        info!("Scanning subnet {} for AI providers (common ports)", subnet);
+
+        let mut providers = Vec::new();
+
+        // Parse subnet (e.g., "192.168.1.0/24")
+        let parts: Vec<&str> = subnet.split('/').collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid subnet format: {}", subnet));
+        }
+
+        let base_ip_parts: Vec<&str> = parts[0].split('.').collect();
+        if base_ip_parts.len() != 4 {
+            return Err(anyhow::anyhow!("Invalid IP format: {}", parts[0]));
+        }
+
+        let prefix = format!("{}.{}.{}", base_ip_parts[0], base_ip_parts[1], base_ip_parts[2]);
+
+        // Scan common provider ports on each IP in subnet
+        // For /24 subnet, scan IPs 1-254 (skip 0 and 255)
+        // Only scan a subset for performance (e.g., every 10th IP + common ones)
+        let scan_ips: Vec<u8> = vec![
+            1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 
+            100, 110, 120, 130, 140, 150, 160, 170, 180, 190,
+            200, 210, 220, 230, 240, 250
+        ];
+
+        for last_octet in scan_ips {
+            let ip = format!("{}.{}", prefix, last_octet);
+            
+            for (provider_type, port) in &self.localhost_ports {
+                let endpoint = format!("http://{}:{}", ip, port);
+                
+                // Quick probe with short timeout to avoid blocking
+                match tokio::time::timeout(
+                    Duration::from_millis(500),
+                    self.probe_provider(*provider_type, &endpoint)
+                ).await {
+                    Ok(Ok(provider)) if provider.available => {
+                        info!("✓ Found {} at {} ({} models)", 
+                            provider_type, endpoint, provider.models.len());
+                        providers.push(provider);
+                    }
+                    _ => {
+                        // Silently skip unavailable endpoints
+                    }
+                }
+            }
+        }
+
+        Ok(providers)
+    }
+
+    /// Get local IP address (excluding loopback)
+    fn get_local_ip(&self) -> Result<String> {
+        use std::net::UdpSocket;
+        
+        // Connect to a public DNS server to determine local IP
+        // This doesn't actually send data, just binds to local interface
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        socket.connect("8.8.8.8:80")?;
+        let local_addr = socket.local_addr()?;
+        
+        Ok(local_addr.ip().to_string())
+    }
+
+    /// Derive /24 subnet from IP address
+    fn derive_subnet(&self, ip: &str) -> String {
+        let parts: Vec<&str> = ip.split('.').collect();
+        if parts.len() == 4 {
+            format!("{}.{}.{}.0/24", parts[0], parts[1], parts[2])
+        } else {
+            "192.168.1.0/24".to_string() // Fallback
+        }
     }
 
     /// Scan localhost ports for AI providers

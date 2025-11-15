@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -550,21 +550,57 @@ impl MCPClientManager {
 
     /// Start all enabled servers from the default configuration
     pub async fn start_default_servers(&self) -> Result<Vec<(String, Result<()>)>> {
-        // Look for config in the standard location
-        let config_path = std::env::current_dir()
-            .unwrap_or_default()
-            .join("hainet-persona")
-            .join("mcp-servers.toml");
-        
+        // Try multiple strategies to find the config file
+        let config_path = Self::find_config_file();
+
         if !config_path.exists() {
             warn!(
                 "MCP server configuration not found at: {}",
                 config_path.display()
             );
+            warn!("Tried paths: current_dir/hainet-persona/mcp-servers.toml, home/.hainet/mcp-servers.toml, /home/tom/hai/hainet-persona/mcp-servers.toml");
             return Ok(Vec::new());
         }
-        
+
+        info!("Using MCP config from: {}", config_path.display());
         self.start_from_config(config_path).await
+    }
+
+    /// Find MCP server configuration file using multiple strategies
+    fn find_config_file() -> PathBuf {
+        // Strategy 1: Current directory (for running via cargo run from project root)
+        let current_dir_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("hainet-persona")
+            .join("mcp-servers.toml");
+        if current_dir_path.exists() {
+            return current_dir_path;
+        }
+
+        // Strategy 2: Home directory ~/.hainet/mcp-servers.toml (for installed binaries)
+        if let Some(home) = dirs::home_dir() {
+            let home_path = home.join(".hainet").join("mcp-servers.toml");
+            if home_path.exists() {
+                return home_path;
+            }
+        }
+
+        // Strategy 3: Hardcoded project path (fallback for development)
+        let project_path = PathBuf::from("/home/tom/hai/hainet-persona/mcp-servers.toml");
+        if project_path.exists() {
+            return project_path;
+        }
+
+        // Strategy 4: Environment variable override
+        if let Ok(custom_path) = std::env::var("HAINET_MCP_CONFIG") {
+            let env_path = PathBuf::from(custom_path);
+            if env_path.exists() {
+                return env_path;
+            }
+        }
+
+        // Default to current_dir strategy for error reporting
+        current_dir_path
     }
 }
 

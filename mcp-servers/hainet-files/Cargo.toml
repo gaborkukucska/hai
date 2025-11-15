@@ -7,6 +7,9 @@ authors = ["HAI-Net Contributors"]
 description = "MCP server for file operations with content-addressed storage"
 
 [dependencies]
+dirs = "5.0"
+chrono = "0.4"
+tracing-appender = "0.2"
 # Workspace dependencies
 tokio = { workspace = true }
 serde = { workspace = true }

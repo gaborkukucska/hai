@@ -10,6 +10,9 @@ authors.workspace = true
 description = "HAI-Net Bridge - Secure gateway to external internet services"
 
 [dependencies]
+dirs = "5.0"
+chrono = "0.4"
+tracing-appender = "0.2"
 # Workspace dependencies
 tokio = { workspace = true }
 serde = { workspace = true }

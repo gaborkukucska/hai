@@ -10,6 +10,8 @@ authors.workspace = true
 description = "HAI-Net Seed - AI-guided installer and bootstrap system"
 
 [dependencies]
+chrono = "0.4"
+tracing-appender = "0.2"
 # Workspace dependencies
 tokio = { workspace = true }
 serde = { workspace = true }

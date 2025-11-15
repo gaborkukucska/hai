@@ -23,13 +23,35 @@ use hainet_persona::ai_providers::AIProviderManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter("hainet_persona=debug,info")
+    // Create logs directory
+    let data_dir = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("hainet-persona");
+    let logs_dir = data_dir.join("logs");
+    std::fs::create_dir_all(&logs_dir)?;
+    
+    // Create log file with timestamp
+    let log_file = logs_dir.join(format!(
+        "hainet-persona-{}.log",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+    
+    // Initialize tracing with file appender
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{fmt, EnvFilter};
+    
+    let file_appender = tracing_appender::rolling::never(&logs_dir, log_file.file_name().unwrap());
+    let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
+    
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stdout))  // Log to stdout
+        .with(fmt::layer().with_writer(file_writer).with_ansi(false))  // Log to file (no ANSI colors)
+        .with(EnvFilter::new("hainet_persona=debug,info"))
         .init();
 
     info!("🤖 HAI-Net Persona starting up...");
     info!("📋 Version: {}", env!("CARGO_PKG_VERSION"));
+    info!("📝 Logs being written to: {}", log_file.display());
     info!("🧠 Multi-agent AI system initializing...");
 
     // Load configuration

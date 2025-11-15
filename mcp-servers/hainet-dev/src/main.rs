@@ -738,13 +738,34 @@ impl ServerHandler for DevServer {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter("hainet_dev=debug,rmcp=info")
-        .with_writer(std::io::stderr)
+    // Create logs directory
+    let data_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("hainet-dev");
+    let logs_dir = data_dir.join("logs");
+    std::fs::create_dir_all(&logs_dir)?;
+    
+    // Create log file with timestamp
+    let log_file = logs_dir.join(format!(
+        "hainet-dev-{}.log",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+    
+    // Initialize tracing with file appender
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{fmt, EnvFilter};
+    
+    let file_appender = tracing_appender::rolling::never(&logs_dir, log_file.file_name().unwrap());
+    let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
+    
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(fmt::layer().with_writer(file_writer).with_ansi(false))
+        .with(EnvFilter::new("hainet_dev=debug,rmcp=info"))
         .init();
 
     info!("🛠️  Starting HAI-Net Development Tools MCP Server");
+    info!("📝 Logs being written to: {}", log_file.display());
 
     let server = DevServer::new();
 

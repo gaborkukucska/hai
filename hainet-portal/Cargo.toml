@@ -10,6 +10,9 @@ authors.workspace = true
 description = "HAI-Net Portal - Chat interface for AI interaction"
 
 [dependencies]
+dirs = "5.0"
+chrono = "0.4"
+tracing-appender = "0.2"
 # Workspace dependencies
 tokio = { workspace = true }
 serde = { workspace = true }

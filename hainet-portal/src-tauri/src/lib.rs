@@ -187,15 +187,34 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .setup(|app| {
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
+      // Create logs directory
+      let data_dir = dirs::data_dir()
+          .expect("Failed to get data directory")
+          .join("hainet-portal");
+      let logs_dir = data_dir.join("logs");
+      std::fs::create_dir_all(&logs_dir)
+          .expect("Failed to create logs directory");
+      
+      // Configure logging to file AND stdout
+      let log_file = logs_dir.join(format!(
+          "hainet-portal-{}.log",
+          chrono::Local::now().format("%Y%m%d-%H%M%S")
+      ));
+      
+      app.handle().plugin(
+        tauri_plugin_log::Builder::default()
+          .level(log::LevelFilter::Debug)  // Always debug level
+          .target(tauri_plugin_log::Target::new(
+            tauri_plugin_log::TargetKind::LogDir { file_name: Some(log_file.file_name().unwrap().to_str().unwrap().to_string()) }
+          ))
+          .target(tauri_plugin_log::Target::new(
+            tauri_plugin_log::TargetKind::Stdout
+          ))
+          .build(),
+      )?;
       
       log::info!("HAI-Net Portal initialized successfully");
+      log::info!("Logs being written to: {}", log_file.display());
       
       // Get metrics collector and storage from managed state
       let metrics_for_broadcast = app.state::<MetricsState>().inner().clone();
