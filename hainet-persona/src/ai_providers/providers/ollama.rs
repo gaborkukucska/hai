@@ -110,7 +110,7 @@ impl ProviderClient for OllamaClient {
 
         let start = Instant::now();
 
-        let request = OllamaGenerateRequest {
+        let request = OllamaRequest {
             model: model.to_string(),
             prompt: prompt.to_string(),
             system: options.system,
@@ -145,7 +145,7 @@ impl ProviderClient for OllamaClient {
             );
         }
 
-        let generate_response: OllamaGenerateResponse = response
+        let generate_response: OllamaResponse = response
             .json()
             .await
             .context("Failed to parse Ollama generation response")?;
@@ -214,39 +214,42 @@ struct OllamaModelDetails {
     quantization_level: String,
 }
 
-#[derive(Debug, Serialize)]
-struct OllamaGenerateRequest {
-    model: String,
-    prompt: String,
+/// Ollama generation request (exposed for request queue)
+#[derive(Debug, Clone, Serialize)]
+pub struct OllamaRequest {
+    pub model: String,
+    pub prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
-    stream: bool,
+    pub system: Option<String>,
+    pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    options: Option<OllamaOptions>,
+    pub options: Option<OllamaOptions>,
     /// Keep model loaded in memory for this duration (e.g., "5m", "10m", "1h")
     /// This prevents frequent reloading when multiple requests use the same model
     #[serde(skip_serializing_if = "Option::is_none")]
-    keep_alive: Option<String>,
+    pub keep_alive: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct OllamaOptions {
+/// Ollama generation options (exposed for request queue)
+#[derive(Debug, Clone, Serialize)]
+pub struct OllamaOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
+    pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    num_predict: Option<i32>,
+    pub num_predict: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f32>,
+    pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stop: Option<Vec<String>>,
+    pub stop: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize)]
-struct OllamaGenerateResponse {
-    response: String,
-    done: bool,
+/// Ollama generation response (exposed for request queue)
+#[derive(Debug, Clone, Deserialize)]
+pub struct OllamaResponse {
+    pub response: String,
+    pub done: bool,
     #[serde(default)]
-    eval_count: Option<usize>,
+    pub eval_count: Option<usize>,
 }
 
 #[cfg(test)]

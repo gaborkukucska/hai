@@ -1,0 +1,31 @@
+# Ollama Load Balancing Configuration
+#
+# This file configures multiple Ollama API endpoints for distributed
+# request processing with automatic failover and load balancing.
+
+[load_balancing]
+# Strategy for distributing requests across endpoints
+# Options: "LeastLoaded", "RoundRobin", "ModelAffinity"
+strategy = "LeastLoaded"
+
+# Request timeout in seconds
+request_timeout_secs = 120
+
+# Health check interval in seconds
+health_check_interval_secs = 30
+
+# Primary endpoint (localhost)
+[endpoints.primary]
+url = "http://localhost:11434"
+max_concurrent = 3
+
+# Additional endpoints can be added here
+# Example for secondary local instance:
+# [endpoints.secondary]
+# url = "http://localhost:11435"
+# max_concurrent = 2
+
+# Example for remote GPU server:
+# [endpoints.gpu_server]
+# url = "http://192.168.1.100:11434"
+# max_concurrent = 5

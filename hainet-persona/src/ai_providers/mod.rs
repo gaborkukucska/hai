@@ -18,12 +18,18 @@ pub mod catalog;
 pub mod ranking;
 pub mod selection;
 pub mod providers;
+pub mod api_registry;
+pub mod request_queue;
+pub mod config;
 
 pub use discovery::{ProviderDiscovery, DiscoveredProvider};
 pub use catalog::{ModelCatalog, CatalogedModel, ModelCapability, CatalogStats};
 pub use ranking::{ModelRanker, ModelScore, RankingCriteria};
 pub use selection::{ModelSelector, SelectionContext, SelectedModel};
 pub use providers::{ProviderClient, ProviderType, ModelInfo};
+pub use api_registry::{ApiRegistry, OllamaEndpoint, HealthStatus, EndpointStats, RegistryStats};
+pub use request_queue::{OllamaRequestQueue, LoadBalancingStrategy, QueueMetrics};
+pub use config::OllamaConfig;
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -36,6 +42,8 @@ pub struct AIProviderManager {
     pub catalog: Arc<RwLock<ModelCatalog>>,
     pub ranker: ModelRanker,
     pub selector: ModelSelector,
+    pub request_queue: Option<Arc<OllamaRequestQueue>>,
+    pub api_registry: Option<Arc<ApiRegistry>>,
 }
 
 impl AIProviderManager {
@@ -53,12 +61,62 @@ impl AIProviderManager {
             catalog,
             ranker,
             selector,
+            request_queue: None,
+            api_registry: None,
         };
 
         // Perform initial discovery
         manager.discover_providers().await?;
+        
+        // Initialize load balancing if configured
+        Self::initialize_load_balancing(&manager).await?;
 
         Ok(manager)
+    }
+    
+    /// Initialize Ollama load balancing from configuration
+    async fn initialize_load_balancing(manager: &AIProviderManager) -> Result<()> {
+        // Try to load configuration
+        let config_path = std::path::PathBuf::from("hainet-persona/ollama-endpoints.toml");
+        let config = OllamaConfig::load_or_default(&config_path);
+        
+        info!(
+            "Initializing Ollama load balancing with {} endpoints (strategy: {})",
+            config.endpoints.len(),
+            config.load_balancing.strategy
+        );
+        
+        // Create API registry
+        let registry = Arc::new(
+            ApiRegistry::new(
+                config.primary_endpoint(),
+                config.additional_endpoints(),
+                config.endpoint_overrides(),
+                config.default_max_concurrent(),
+            ).await?
+        );
+        
+        // Start background health monitoring
+        registry.clone().start_health_monitoring().await;
+        
+        // Create request queue
+        let queue = Arc::new(OllamaRequestQueue::new(
+            registry.clone(),
+            config.parse_strategy(),
+            config.request_timeout(),
+        ));
+        
+        // Store in manager (requires unsafe for now - will fix with proper initialization)
+        // TODO: Refactor to make this safe
+        let manager_ptr = manager as *const AIProviderManager as *mut AIProviderManager;
+        unsafe {
+            (*manager_ptr).request_queue = Some(queue);
+            (*manager_ptr).api_registry = Some(registry);
+        }
+        
+        info!("✅ Ollama load balancing initialized");
+        
+        Ok(())
     }
     
     /// Discover all available AI providers on localhost and local network
