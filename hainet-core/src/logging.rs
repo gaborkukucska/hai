@@ -84,20 +84,21 @@ pub fn initialize_logging(
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new(format!(
             "{app}={level},hainet_core={level},rmcp=info",
+            "{app}={level},hainet={level},rmcp=info",
             app = app_crate_name,
             level = default_level
         ))
     });
 
-    // Stderr layer
     let stderr_layer = fmt::layer().with_writer(std::io::stderr);
-
-    // File layer
-    let file_layer = fmt::layer().with_writer(file_writer).with_ansi(false);
+    let file_layer = fmt::layer()
+        .with_writer(file_writer)
+        .with_ansi(false);
 
     tracing_subscriber::registry()
-        .with(stderr_layer.with_filter(env_filter.clone()))
-        .with(file_layer.with_filter(env_filter))
+        .with(env_filter)
+        .with(stderr_layer)
+        .with(file_layer)
         .init();
 
     tracing::info!(
