@@ -652,8 +652,15 @@ impl WorkerAgent {
         .await
         .context(format!("LLM generation timed out after {:?}", llm_timeout))?
         .context("Failed to generate execution plan with LLM")?;
-        tracing::info!("[DIAGNOSTIC] Worker {} received LLM response ({} chars)", self.id.name, response.text.len());
         
+        tracing::debug!(
+            target: "llm_messages",
+            "[WORKER PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
+            model_name,
+            response.text.len(),
+            response.text
+        );
+
         self.parse_execution_plan(&response.text)
     }
     
@@ -1594,8 +1601,15 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
         .await
         .context(format!("LLM generation timed out after {:?}", llm_timeout))?
         .context("Failed to generate execution plan")?;
-        tracing::info!("[DIAGNOSTIC] Worker {} received LLM execution plan ({} chars)", self.id.name, response.text.len());
         
+        tracing::debug!(
+            target: "llm_messages",
+            "[WORKER DISCOVERY PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
+            model_name,
+            response.text.len(),
+            response.text
+        );
+
         parse_execution_plan(&response.text)
             .context("Failed to parse execution plan")
     }

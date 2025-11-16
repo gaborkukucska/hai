@@ -399,7 +399,13 @@ impl PMAgent {
         .await
         .context(format!("LLM validation timed out after {:?}", llm_timeout))?
         .context("Failed to validate task with LLM")?;
-        tracing::info!("[DIAGNOSTIC] PM {} received LLM validation response ({} chars)", self.id.name, response.text.len());
+        tracing::debug!(
+            target: "llm_messages",
+            "[PM VALIDATION RESPONSE] Model: {}, Response ({} chars):\n{}",
+            model_name,
+            response.text.len(),
+            response.text
+        );
         
         // Parse validation decision
         let validation = self.parse_validation_response(&response.text)?;
@@ -781,8 +787,15 @@ CRITICAL: JSON only. No explanations.
         .await
         .context(format!("LLM planning timed out after {:?}", llm_timeout))?
         .context("Failed to generate detailed plan with LLM")?;
-        tracing::info!("[DIAGNOSTIC] PM {} received LLM planning response ({} chars)", self.id.name, response.text.len());
         
+        tracing::debug!(
+            target: "llm_messages",
+            "[PM PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
+            model_name,
+            response.text.len(),
+            response.text
+        );
+
         self.parse_detailed_plan(&response.text)
     }
     
