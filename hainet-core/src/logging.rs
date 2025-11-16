@@ -83,7 +83,6 @@ pub fn initialize_logging(
     let app_crate_name = app_name.replace('-', "_");
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new(format!(
-            "{app}={level},hainet_core={level},rmcp=info",
             "{app}={level},hainet={level},rmcp=info",
             app = app_crate_name,
             level = default_level

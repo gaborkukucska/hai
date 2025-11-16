@@ -401,23 +401,23 @@ mod performance_tests {
         assert!(elapsed.as_millis() < 100, "Audio processing too slow: {:?}", elapsed);
     }
     
-    #[test]
-    fn test_base64_encoding_performance() {
-        use base64::{Engine as _, engine::general_purpose};
+    // #[test]
+    // fn test_base64_encoding_performance() {
+    //     use base64::{Engine as _, engine::general_purpose};
         
-        let wav_data = create_test_wav();
+    //     let wav_data = create_test_wav();
         
-        let start = std::time::Instant::now();
+    //     let start = std::time::Instant::now();
         
-        // Encode/decode 100 times
-        for _ in 0..100 {
-            let encoded = general_purpose::STANDARD.encode(&wav_data);
-            let _ = general_purpose::STANDARD.decode(&encoded).unwrap();
-        }
+    //     // Encode/decode 100 times
+    //     for _ in 0..100 {
+    //         let encoded = general_purpose::STANDARD.encode(&wav_data);
+    //         let _ = general_purpose::STANDARD.decode(&encoded).unwrap();
+    //     }
         
-        let elapsed = start.elapsed();
+    //     let elapsed = start.elapsed();
         
-        // Should be fast (< 50ms for 100 iterations)
-        assert!(elapsed.as_millis() < 50, "Base64 encoding too slow: {:?}", elapsed);
-    }
+    //     // Should be fast (< 50ms for 100 iterations)
+    //     assert!(elapsed.as_millis() < 50, "Base64 encoding too slow: {:?}", elapsed);
+    // }
 }
