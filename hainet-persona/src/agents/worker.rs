@@ -84,6 +84,11 @@ pub struct WorkerAgent {
     
     /// Session task list - tracks progress within session
     session_tasks: SessionTaskList,
+    
+    /// Current project name (for file operation sandboxing)
+    /// Workers are sandboxed to /sandbox/projects/{project_name}/
+    /// None means no sandboxing (used by Admin agents)
+    current_project_name: Option<String>,
 }
 
 impl WorkerAgent {
@@ -147,6 +152,7 @@ impl WorkerAgent {
             tool_selector: ToolSelector::new(fallback_tools),
             self_correction_enabled: true,
             session_tasks: SessionTaskList::new(),
+            current_project_name: None, // No project until task is assigned
         }
     }
     
@@ -202,6 +208,7 @@ impl WorkerAgent {
             tool_selector: ToolSelector::new(fallback_tools),
             self_correction_enabled: true,
             session_tasks: SessionTaskList::new(),
+            current_project_name: None, // No project until task is assigned
         }
     }
     
@@ -240,6 +247,23 @@ impl WorkerAgent {
         self.session_tasks.add_task(
             task.title.clone(), 
             Some(task.description.clone())
+        );
+        
+        // Extract project name for file operation sandboxing
+        // Workers are sandboxed to /sandbox/projects/{project_name}/
+        let project_title = {
+            let pm = self.project_manager.read().await;
+            let project = pm.get_project(&task.project_id).await?
+                .ok_or_else(|| anyhow::anyhow!("Project not found: {}", task.project_id))?;
+            project.title.clone()
+        };
+        
+        self.current_project_name = Some(project_title.clone());
+        
+        tracing::info!(
+            "Worker {} assigned to project '{}' (sandboxed file access)",
+            self.id.name,
+            project_title
         );
         
         tracing::debug!(
@@ -616,8 +640,11 @@ impl WorkerAgent {
         };
         
         // Add timeout wrapper to prevent indefinite hanging
+        // Use execution_strategy timeout (default 120s for complex tasks)
         tracing::info!("[DIAGNOSTIC] Worker {} calling LLM for planning (model: {})", self.id.name, model_name);
-        let llm_timeout = tokio::time::Duration::from_secs(60); // 60s timeout for LLM generation
+        let llm_timeout = tokio::time::Duration::from_millis(
+            (self.execution_strategy.base_timeout_ms * 2) as u64 // 2x base timeout for LLM calls
+        );
         let response = tokio::time::timeout(
             llm_timeout,
             client.generate(model_name, &planning_prompt, options)
@@ -1109,8 +1136,16 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
         
         let (server, tool) = (parts[0], parts[1]);
         
+        // Add project_name to params for sandboxing (Session 52)
+        let mut params = step.params.clone();
+        if let Some(ref project_name) = self.current_project_name {
+            if let Some(obj) = params.as_object_mut() {
+                obj.insert("project_name".to_string(), serde_json::Value::String(project_name.clone()));
+            }
+        }
+        
         let mcp_client = self.mcp_client.read().await;
-        let result = mcp_client.call_tool(server, tool, step.params.clone()).await?;
+        let result = mcp_client.call_tool(server, tool, params).await?;
         
         Ok(result.to_string())
     }
@@ -1547,8 +1582,11 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
         };
         
         // Add timeout wrapper to prevent indefinite hanging
+        // Use execution_strategy timeout (default 120s for complex tasks)
         tracing::info!("[DIAGNOSTIC] Worker {} calling LLM for execution planning (model: {})", self.id.name, model_name);
-        let llm_timeout = tokio::time::Duration::from_secs(60); // 60s timeout for LLM generation
+        let llm_timeout = tokio::time::Duration::from_millis(
+            (self.execution_strategy.base_timeout_ms * 2) as u64 // 2x base timeout for LLM calls
+        );
         let response = tokio::time::timeout(
             llm_timeout,
             client.generate(model_name, &execution_prompt, options)
@@ -1693,8 +1731,16 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
         
         let (server, tool) = (parts[0], parts[1]);
         
+        // Add project_name to params for sandboxing (Session 52)
+        let mut params = step.params.clone();
+        if let Some(ref project_name) = self.current_project_name {
+            if let Some(obj) = params.as_object_mut() {
+                obj.insert("project_name".to_string(), serde_json::Value::String(project_name.clone()));
+            }
+        }
+        
         let mcp_client = self.mcp_client.read().await;
-        let result = mcp_client.call_tool(server, tool, step.params.clone()).await?;
+        let result = mcp_client.call_tool(server, tool, params).await?;
         
         Ok(result.to_string())
     }

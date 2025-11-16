@@ -540,6 +540,12 @@ impl MCPClientManager {
             cmd.current_dir(working_dir);
         }
         
+        // Set environment variables if specified
+        for (key, value) in &config.env {
+            cmd.env(key, value);
+            debug!("Setting env var for '{}': {}={}", server_id, key, value);
+        }
+        
         // Set up stdio
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());

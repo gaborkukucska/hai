@@ -1,31 +1,46 @@
-# Ollama Load Balancing Configuration
-#
-# This file configures multiple Ollama API endpoints for distributed
-# request processing with automatic failover and load balancing.
+# HAI-Net Multi-API Load Balancing Configuration
+# This file configures multiple Ollama endpoints for load balancing and failover
+# Last updated: 2025-11-16
 
 [load_balancing]
-# Strategy for distributing requests across endpoints
-# Options: "LeastLoaded", "RoundRobin", "ModelAffinity"
+# Strategy: LeastLoaded (default), RoundRobin, ModelAffinity
 strategy = "LeastLoaded"
 
-# Request timeout in seconds
+# Request timeout in seconds (default: 120)
 request_timeout_secs = 120
 
-# Health check interval in seconds
+# Health check interval in seconds (default: 30)
 health_check_interval_secs = 30
 
-# Primary endpoint (localhost)
+# Endpoints Configuration
+# Each endpoint can have different concurrency limits based on hardware
+
 [endpoints.primary]
 url = "http://localhost:11434"
 max_concurrent = 3
+description = "Primary Ollama instance on default port"
 
-# Additional endpoints can be added here
-# Example for secondary local instance:
+# Example: Additional endpoints for multi-device mesh
+# Uncomment and configure as needed
+
 # [endpoints.secondary]
 # url = "http://localhost:11435"
 # max_concurrent = 2
+# description = "Secondary Ollama instance on alternate port"
 
-# Example for remote GPU server:
-# [endpoints.gpu_server]
-# url = "http://192.168.1.100:11434"
+# [endpoints.gpu_node]
+# url = "http://10.0.0.11:11434"
 # max_concurrent = 5
+# description = "High-performance GPU node on mesh network"
+
+# [endpoints.laptop]
+# url = "http://10.0.0.20:11434"
+# max_concurrent = 2
+# description = "Laptop node for lightweight tasks"
+
+# Configuration Notes:
+# - max_concurrent: Number of simultaneous requests per endpoint
+# - Set based on available VRAM/RAM (e.g., 3 for 16GB systems, 5 for 32GB+)
+# - Health checks run automatically every 30 seconds
+# - Unhealthy endpoints are skipped automatically
+# - LeastLoaded strategy distributes requests to least-busy endpoint

@@ -280,10 +280,11 @@ pub struct ExecutionStrategy {
 }
 
 impl ExecutionStrategy {
-    /// Create default strategy (5s timeout, 3 retries, 1.5x backoff)
+    /// Create default strategy (60s timeout for complex tasks, 3 retries, 1.5x backoff)
+    /// Note: LLM calls use 2x this timeout (120s) to allow for complex code generation
     pub fn default() -> Self {
         Self {
-            base_timeout_ms: 5000,
+            base_timeout_ms: 60000, // 60s base, 120s for LLM calls (2x multiplier)
             max_retries: 3,
             backoff_multiplier: 1.5,
         }

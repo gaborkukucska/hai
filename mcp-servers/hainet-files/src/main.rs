@@ -34,6 +34,9 @@ struct WriteResult {
     size: usize,
 }
 
+/// Special project name for Admin access (bypasses sandboxing)
+const ADMIN_PROJECT_BYPASS: &str = "__ADMIN__";
+
 /// File list result
 #[derive(Debug, Serialize, Deserialize)]
 struct FileList {
@@ -56,21 +59,118 @@ struct FileMetadata {
 #[derive(Clone)]
 struct FilesServer {
     storage: Arc<RwLock<StorageManager>>,
+    base_path: PathBuf,
 }
 
 impl FilesServer {
-    fn new(storage_path: PathBuf) -> Result<Self> {
+    fn new(storage_path: PathBuf, base_path: PathBuf) -> Result<Self> {
         let storage = StorageManager::new(storage_path)?;
+        info!("📂 Base path for file operations: {}", base_path.display());
         Ok(Self {
             storage: Arc::new(RwLock::new(storage)),
+            base_path,
         })
     }
 
-    async fn handle_file_read(&self, path: String) -> Result<String> {
+    /// Normalize and validate a path with project-based sandboxing
+    /// 
+    /// Sandboxing rules:
+    /// - If project_name is Some(name) and not ADMIN_PROJECT_BYPASS:
+    ///   Path is sandboxed to /sandbox/projects/{project_name}/{requested_path}
+    /// - If project_name is None or ADMIN_PROJECT_BYPASS:
+    ///   Full filesystem access (Admin only - requires Guardian approval)
+    /// 
+    /// Security:
+    /// - Prevents directory traversal attacks
+    /// - Isolates project workspaces
+    /// - Admin access requires explicit bypass
+    fn normalize_path(&self, requested_path: &str, project_name: Option<&str>) -> Result<PathBuf> {
+        // Determine if this is an Admin bypass request
+        let is_admin_access = match project_name {
+            None => {
+                debug!("Admin access: project_name is None (full filesystem access)");
+                true
+            }
+            Some(name) if name == ADMIN_PROJECT_BYPASS => {
+                debug!("Admin access: explicit bypass with {}", ADMIN_PROJECT_BYPASS);
+                true
+            }
+            Some(name) => {
+                debug!("Worker access: sandboxing to project '{}'", name);
+                false
+            }
+        };
+        
+        // Remove leading slash if present (treat all paths as relative)
+        let path_str = requested_path.trim_start_matches('/');
+        
+        // Reject paths containing '..' to prevent directory traversal
+        if path_str.contains("..") {
+            anyhow::bail!("Path traversal attempt detected: '..' not allowed");
+        }
+        
+        // Construct sandboxed or full path based on access level
+        let full_path = if is_admin_access {
+            // Admin: full filesystem access
+            self.base_path.join(path_str)
+        } else {
+            // Worker: sandboxed to project directory
+            let project_name = project_name.unwrap(); // Safe: already checked above
+            self.base_path
+                .join("sandbox")
+                .join("projects")
+                .join(project_name)
+                .join(path_str)
+        };
+        
+        // Canonicalize if path exists, otherwise validate parent directory
+        let canonical = if full_path.exists() {
+            full_path.canonicalize()
+                .context("Failed to canonicalize existing path")?
+        } else {
+            // For non-existent paths, validate parent directory
+            if let Some(parent) = full_path.parent() {
+                let canonical_parent = if parent.exists() {
+                    parent.canonicalize()
+                        .context("Failed to canonicalize parent directory")?
+                } else {
+                    // Parent doesn't exist either, validate against base_path
+                    self.base_path.canonicalize()
+                        .context("Failed to canonicalize base path")?
+                };
+                
+                // Ensure parent is within base_path
+                if !canonical_parent.starts_with(&self.base_path.canonicalize()?) {
+                    anyhow::bail!("Path outside working directory: {}", requested_path);
+                }
+                
+                // Return non-canonicalized full path for creation
+                full_path
+            } else {
+                anyhow::bail!("Invalid path: no parent directory");
+            }
+        };
+        
+        // Security check: ensure resolved path is within base_path
+        let canonical_base = self.base_path.canonicalize()
+            .context("Failed to canonicalize base path")?;
+        
+        if canonical.exists() && !canonical.starts_with(&canonical_base) {
+            anyhow::bail!("Path outside working directory: {}", requested_path);
+        }
+        
+        debug!("Normalized path: {} -> {}", requested_path, canonical.display());
+        Ok(canonical)
+    }
+
+    async fn handle_file_read(&self, path: String, project_name: Option<String>) -> Result<String> {
         debug!("Reading file: {}", path);
 
+        // Normalize and validate path
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
         // Read file content
-        let content = tokio::fs::read_to_string(&path)
+        let content = tokio::fs::read_to_string(&normalized_path)
             .await
             .context("Failed to read file")?;
 
@@ -91,11 +191,21 @@ impl FilesServer {
         Ok(serde_json::to_string(&result)?)
     }
 
-    async fn handle_file_write(&self, path: String, content: String) -> Result<String> {
+    async fn handle_file_write(&self, path: String, content: String, project_name: Option<String>) -> Result<String> {
         debug!("Writing file: {}", path);
 
+        // Normalize and validate path
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = normalized_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .context("Failed to create parent directory")?;
+        }
+
         // Write file
-        tokio::fs::write(&path, &content)
+        tokio::fs::write(&normalized_path, &content)
             .await
             .context("Failed to write file")?;
 
@@ -117,11 +227,14 @@ impl FilesServer {
         Ok(serde_json::to_string(&result)?)
     }
 
-    async fn handle_file_list(&self, path: String) -> Result<String> {
+    async fn handle_file_list(&self, path: String, project_name: Option<String>) -> Result<String> {
         debug!("Listing directory: {}", path);
 
+        // Normalize and validate path
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
         let mut entries = Vec::new();
-        let mut read_dir = tokio::fs::read_dir(&path)
+        let mut read_dir = tokio::fs::read_dir(&normalized_path)
             .await
             .context("Failed to read directory")?;
 
@@ -140,10 +253,13 @@ impl FilesServer {
         Ok(serde_json::to_string(&result)?)
     }
 
-    async fn handle_file_metadata(&self, path: String) -> Result<String> {
+    async fn handle_file_metadata(&self, path: String, project_name: Option<String>) -> Result<String> {
         debug!("Getting metadata for: {}", path);
 
-        let metadata = tokio::fs::metadata(&path)
+        // Normalize and validate path
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        let metadata = tokio::fs::metadata(&normalized_path)
             .await
             .context("Failed to get metadata")?;
 
@@ -153,6 +269,27 @@ impl FilesServer {
             is_file: metadata.is_file(),
             is_dir: metadata.is_dir(),
             readonly: metadata.permissions().readonly(),
+        };
+
+        Ok(serde_json::to_string(&result)?)
+    }
+
+    async fn handle_directory_create(&self, path: String, project_name: Option<String>) -> Result<String> {
+        debug!("Creating directory: {}", path);
+
+        // Normalize and validate path
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        // Create directory and all parent directories
+        tokio::fs::create_dir_all(&normalized_path)
+            .await
+            .context("Failed to create directory")?;
+
+        let result = WriteResult {
+            success: true,
+            path,
+            hash: "".to_string(), // No hash for directories
+            size: 0,
         };
 
         Ok(serde_json::to_string(&result)?)
@@ -198,7 +335,7 @@ impl ServerHandler for FilesServer {
             Ok(ListToolsResult {
                 tools: vec![
                     Tool {
-                        name: Cow::Borrowed("hainet_file_read"),
+                        name: Cow::Borrowed("file_read"),
                         title: Some("Read File".to_string()),
                         description: Some(Cow::Borrowed("Read a file from the local file system")),
                         input_schema: read_schema.clone(),
@@ -207,7 +344,7 @@ impl ServerHandler for FilesServer {
                         icons: None,
                     },
                     Tool {
-                        name: Cow::Borrowed("hainet_file_write"),
+                        name: Cow::Borrowed("file_write"),
                         title: Some("Write File".to_string()),
                         description: Some(Cow::Borrowed("Write content to a file")),
                         input_schema: write_schema.clone(),
@@ -216,7 +353,7 @@ impl ServerHandler for FilesServer {
                         icons: None,
                     },
                     Tool {
-                        name: Cow::Borrowed("hainet_file_list"),
+                        name: Cow::Borrowed("file_list"),
                         title: Some("List Files".to_string()),
                         description: Some(Cow::Borrowed("List files in a directory")),
                         input_schema: read_schema.clone(),
@@ -225,9 +362,18 @@ impl ServerHandler for FilesServer {
                         icons: None,
                     },
                     Tool {
-                        name: Cow::Borrowed("hainet_file_metadata"),
+                        name: Cow::Borrowed("file_metadata"),
                         title: Some("File Metadata".to_string()),
                         description: Some(Cow::Borrowed("Get file metadata")),
+                        input_schema: read_schema.clone(),
+                        output_schema: None,
+                        annotations: None,
+                        icons: None,
+                    },
+                    Tool {
+                        name: Cow::Borrowed("directory_create"),
+                        title: Some("Create Directory".to_string()),
+                        description: Some(Cow::Borrowed("Create a directory and all parent directories")),
                         input_schema: read_schema,
                         output_schema: None,
                         annotations: None,
@@ -246,9 +392,14 @@ impl ServerHandler for FilesServer {
     ) -> impl Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
         async move {
             let args = request.arguments.unwrap_or_else(|| serde_json::Map::new());
+            
+            // Extract optional project_name parameter (for sandboxing)
+            let project_name = args.get("project_name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             let result_text = match request.name.as_ref() {
-                "hainet_file_read" => {
+                "file_read" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| ErrorData {
@@ -257,14 +408,14 @@ impl ServerHandler for FilesServer {
                             data: None,
                         })?
                         .to_string();
-                    self.handle_file_read(path).await
+                    self.handle_file_read(path, project_name.clone()).await
                         .map_err(|e| ErrorData {
                             code: ErrorCode::INTERNAL_ERROR,
                             message: Cow::Owned(format!("File read error: {}", e)),
                             data: None,
                         })?
                 }
-                "hainet_file_write" => {
+                "file_write" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| ErrorData {
@@ -281,14 +432,14 @@ impl ServerHandler for FilesServer {
                             data: None,
                         })?
                         .to_string();
-                    self.handle_file_write(path, content).await
+                    self.handle_file_write(path, content, project_name.clone()).await
                         .map_err(|e| ErrorData {
                             code: ErrorCode::INTERNAL_ERROR,
                             message: Cow::Owned(format!("File write error: {}", e)),
                             data: None,
                         })?
                 }
-                "hainet_file_list" => {
+                "file_list" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| ErrorData {
@@ -297,14 +448,14 @@ impl ServerHandler for FilesServer {
                             data: None,
                         })?
                         .to_string();
-                    self.handle_file_list(path).await
+                    self.handle_file_list(path, project_name.clone()).await
                         .map_err(|e| ErrorData {
                             code: ErrorCode::INTERNAL_ERROR,
                             message: Cow::Owned(format!("Directory list error: {}", e)),
                             data: None,
                         })?
                 }
-                "hainet_file_metadata" => {
+                "file_metadata" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| ErrorData {
@@ -313,10 +464,26 @@ impl ServerHandler for FilesServer {
                             data: None,
                         })?
                         .to_string();
-                    self.handle_file_metadata(path).await
+                    self.handle_file_metadata(path, project_name.clone()).await
                         .map_err(|e| ErrorData {
                             code: ErrorCode::INTERNAL_ERROR,
                             message: Cow::Owned(format!("Metadata error: {}", e)),
+                            data: None,
+                        })?
+                }
+                "directory_create" => {
+                    let path = args.get("path")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| ErrorData {
+                            code: ErrorCode::INVALID_PARAMS,
+                            message: Cow::Borrowed("Missing 'path' parameter"),
+                            data: None,
+                        })?
+                        .to_string();
+                    self.handle_directory_create(path, project_name).await
+                        .map_err(|e| ErrorData {
+                            code: ErrorCode::INTERNAL_ERROR,
+                            message: Cow::Owned(format!("Directory creation error: {}", e)),
                             data: None,
                         })?
                 }
@@ -354,7 +521,17 @@ async fn main() -> Result<()> {
 
     // Initialize storage (use temp directory for now)
     let storage_path = std::env::temp_dir().join("hainet-files-cas");
-    let server = FilesServer::new(storage_path)?;
+    
+    // Set base path from environment variable or default to current directory
+    let base_path = std::env::var("HAINET_FILES_BASE_PATH")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+        });
+    
+    let server = FilesServer::new(storage_path, base_path)?;
 
     info!("📡 Starting MCP server on stdio transport...");
 

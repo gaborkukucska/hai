@@ -137,3 +137,6 @@ pnpm-lock.yaml
 # Documentation drafts
 /docs/drafts/
 *.draft.md
+
+# Other
+/helperfiles/archived/

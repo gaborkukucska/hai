@@ -38,6 +38,8 @@ command = "cargo"
 args = ["run", "--package", "hainet-files", "--release"]
 enabled = true
 working_dir = "/home/tom/hai"
+# Environment variables
+env = { HAINET_FILES_BASE_PATH = "/home/tom/hai" }
 
 # Additional servers can be added here following the same pattern
 # [servers.your-server]

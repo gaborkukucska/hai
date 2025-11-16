@@ -759,6 +759,19 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ## MCP Servers (Phase 5 - In Progress)
 
+### mcp-servers/hainet-files/src/main.rs (Session 51 - Enhanced) ✅
+- `FilesServer::new(storage_path, base_path)` - Create file operations MCP server with CAS integration and base path configuration
+- `FilesServer::normalize_path(requested_path)` - **NEW:** Normalize and validate paths relative to base_path with security checks
+- `FilesServer::handle_file_read(path)` - Read file content (now with path normalization) and store in content-addressed storage
+- `FilesServer::handle_file_write(path, content)` - Write file content (now with path normalization + parent dir creation) and store in CAS
+- `FilesServer::handle_file_list(path)` - List files in a directory (now with path normalization)
+- `FilesServer::handle_file_metadata(path)` - Get file metadata (now with path normalization)
+- **MCP Tools:** `file_read`, `file_write`, `file_list`, `file_metadata`
+- **Environment Variables:** `HAINET_FILES_BASE_PATH` - Base path for all file operations (defaults to current directory)
+- **Security Features:** Directory traversal prevention (`..` blocked), canonicalization, boundary enforcement
+- **Target User:** Worker AI agents for file-based task execution
+- **Status:** ✅ Complete - Session 49: Tool names fixed, Session 51: Path normalization added (~140 LOC)
+
 ### mcp-servers/hainet-system/src/main.rs (Phase 5.2 - Complete)
 - `SystemServer::new()` - Create system management MCP server
 - `SystemServer::handle_system_status()` - Get CPU, RAM, disk, uptime, OS info
@@ -786,9 +799,10 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ## MCP Tool Client (Phase 5 - Session 38 Phase 2 Complete)
 
-### hainet-persona/src/tools/mcp/client.rs
+### hainet-persona/src/tools/mcp/client.rs (Session 51 - Enhanced)
 - `MCPClientManager::new()` - Initialize MCP client manager
 - `MCPClientManager::start_server(name, command)` - Start an MCP server and connect to it
+- `MCPClientManager::start_server_from_config(server_id, config)` - **Enhanced:** Now passes environment variables from config to server process
 - `MCPClientManager::call_tool(server, tool, args)` - Execute a tool on a specific server
 - `MCPClientManager::list_tools(server)` - List all tools from a server
 - `MCPClientManager::list_resources(server)` - List resources from a server
@@ -799,6 +813,12 @@ This file tracks the core functions/methods defined within the framework, catego
 - `MCPClientManager::shutdown_all()` - Shutdown all servers
 - `MCPClientManager::start_from_config(path)` - Load and start servers from config file
 - `MCPClientManager::start_default_servers()` - Start all enabled servers from default config
+
+### hainet-persona/src/tools/mcp/config.rs (Session 51 - Enhanced)
+- `ServerConfig` struct - **Enhanced:** Now includes `env: HashMap<String, String>` field for environment variables
+- `MCPServersConfig::load_from_file(path)` - Load configuration from TOML file
+- `MCPServersConfig::enabled_servers()` - Get enabled servers only
+- `MCPServersConfig::get_server(id)` - Get specific server configuration by ID
 
 ### Discovery-Based Tool Loading (Session 38 Phase 2 - Complete) ✅
 - `MCPClientManager::get_tool_metadata(tool_identifier)` - **Lazy-load metadata for a specific tool**

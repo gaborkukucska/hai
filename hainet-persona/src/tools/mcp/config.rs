@@ -31,6 +31,10 @@ pub struct ServerConfig {
     /// Optional working directory for the server process
     #[serde(default)]
     pub working_dir: Option<PathBuf>,
+    
+    /// Optional environment variables to set for the server process
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 fn default_enabled() -> bool {
@@ -84,6 +88,7 @@ mod tests {
             args: vec!["-y".to_string(), "test-server".to_string()],
             enabled: true,
             working_dir: None,
+            env: HashMap::new(),
         };
         
         assert_eq!(config.name, "Test Server");

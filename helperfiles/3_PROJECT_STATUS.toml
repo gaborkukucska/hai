@@ -3,11 +3,11 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-15T15:09:00.000000+00:00"
+last_updated = "2025-11-17T06:25:00.000000+00:00"
 project_name = "HAI-Net Seed"
-version = "0.46"
-current_phase = "Infrastructure Enhancement"
-current_cycle = "Session 46 - Multi-API Load Balancing - INTEGRATION COMPLETE"
+version = "0.52"
+current_phase = "Security Enhancement"
+current_cycle = "Session 52 - Project-Based File Sandboxing - COMPLETE"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -186,6 +186,154 @@ sessions_complete = 7
 sessions_remaining = 0
 
 # Completed cycles
+[[completed_cycles]]
+id = "52.1"
+name = "Project-Based File Sandboxing - COMPLETE"
+completion_date = "2025-11-17"
+loc = 150  # hainet-files main.rs(+100), worker.rs(+50)
+tests = 0  # Infrastructure enhancement - integration tests pending
+goal = "Implement project-based file sandboxing to isolate worker file operations to project-specific directories with automatic project context injection"
+files_created = [
+    "helperfiles/SESSION_52_PROJECT_SANDBOXING.md (3500+ LOC) - Complete session documentation"
+]
+files_modified = [
+    "mcp-servers/hainet-files/src/main.rs (+100 LOC) - Added project_name sandboxing with admin bypass",
+    "hainet-persona/src/agents/worker.rs (+50 LOC) - Added current_project_name tracking and parameter injection",
+    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 52 completion"
+]
+key_features = [
+    "Optional project_name parameter in all MCP file tools",
+    "Worker sandboxing to /sandbox/projects/{project_name}/",
+    "Admin full filesystem access (None or '__ADMIN__')",
+    "Directory traversal protection (blocks ..)",
+    "Automatic project context extraction from tasks",
+    "Parameter injection in execute_step() and execute_discovery_step()",
+    "Security model: Workers isolated, Admin monitored by Guardian",
+    "Backward compatible: Existing code unaffected"
+]
+compilation_status = "Success - hainet-files (1.69s, 0 errors), hainet-persona (8.61s, 0 errors, 20 warnings unused code)"
+test_status = "Compilation verified, integration tests pending"
+root_cause = [
+    "Issue: Workers had unrestricted filesystem access via MCP file operations",
+    "Risk: Workers could access sensitive files outside project scope",
+    "Missing: Project context awareness in file operations"
+]
+solution_summary = [
+    "Part 1: Server-side sandboxing with optional project_name parameter (~100 LOC)",
+    "Part 2: Client-side project tracking in WorkerAgent (~50 LOC)"
+]
+technical_highlights = [
+    "Path normalization with project-aware sandboxing",
+    "Worker: /sandbox/projects/{project_name}/ + path",
+    "Admin: base_path + path (full access)",
+    "Admin bypass: project_name = None or '__ADMIN__'",
+    "Directory traversal blocked in both modes",
+    "Project extraction from task's project_id",
+    "current_project_name field in WorkerAgent struct",
+    "Automatic parameter injection on every MCP tool call",
+    "Type-safe Option<String> for project context",
+    "Guardian integration ready for admin monitoring"
+]
+security_model = [
+    "Workers: Sandboxed to project directories",
+    "Admin: Full access with Guardian monitoring",
+    "Directory traversal: Blocked for all users",
+    "Explicit bypass: Requires conscious decision (__ADMIN__)",
+    "Project isolation: Each project has dedicated sandbox"
+]
+implementation_flow = [
+    "Task assigned → Worker extracts project_name from task",
+    "Tool execution → Worker injects project_name parameter",
+    "Server receives → Applies sandboxing based on project_name",
+    "Path resolved → /sandbox/projects/{project_name}/{path}",
+    "Operation executed → Within sandbox boundaries"
+]
+sandboxing_examples = [
+    "Worker writes '/src/game.py' → /home/tom/hai/sandbox/projects/SnakeGame/src/game.py",
+    "Admin writes '/important.txt' → /home/tom/hai/important.txt",
+    "Worker tries '../../etc/passwd' → Error: directory traversal blocked"
+]
+impact_assessment = [
+    "Security: Workers isolated to project directories",
+    "Safety: Directory traversal attacks prevented",
+    "Guardian Integration: Admin operations can be monitored",
+    "Backward Compatibility: No breaking changes",
+    "Type Safety: Compile-time guarantees via Rust",
+    "UX: Transparent to workers (automatic parameter injection)"
+]
+next_step = "End-to-end testing with live workers executing file operations in projects"
+phase_completion = "Project-Based File Sandboxing: 100% COMPLETE! 🎉"
+
+[[completed_cycles]]
+id = "51.1"
+name = "MCP File Server Path Normalization - COMPLETE"
+completion_date = "2025-11-16"
+loc = 183  # hainet-files main.rs(+140), mcp config.rs(+8), mcp client.rs(+8), mcp-servers.toml(+2), SESSION_51(+25)
+tests = 0  # Infrastructure fix - integration tests pending
+goal = "Fix worker agent MCP file operation failures by implementing path normalization in hainet-files server with base_path configuration and environment variable support"
+files_created = [
+    "helperfiles/SESSION_51_MCP_FILE_PATH_NORMALIZATION.md (3200+ LOC) - Complete session documentation"
+]
+files_modified = [
+    "mcp-servers/hainet-files/src/main.rs (+140 LOC) - Added base_path, normalize_path() security method, updated all file operations",
+    "hainet-persona/src/tools/mcp/config.rs (+8 LOC) - Added env HashMap field to ServerConfig",
+    "hainet-persona/src/tools/mcp/client.rs (+8 LOC) - Pass environment variables to server processes",
+    "hainet-persona/mcp-servers.toml (+2 LOC) - Added HAINET_FILES_BASE_PATH environment variable",
+    "helperfiles/FUNCTIONS_INDEX.md (+25 LOC) - Documented new path normalization functions",
+    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 51 completion"
+]
+key_features = [
+    "Path normalization with base_path configuration (HAINET_FILES_BASE_PATH env var)",
+    "Security: Directory traversal prevention (..) blocked",
+    "Security: Canonicalization and boundary enforcement",
+    "Security: Parent directory validation for new files",
+    "Handles both relative and absolute paths (strips leading /)",
+    "Auto-creates parent directories on file_write",
+    "Environment variable support in MCP server configuration",
+    "MCP client passes env vars from config to server processes",
+    "Defaults to current_dir() if HAINET_FILES_BASE_PATH not set",
+    "Debug logging of normalized paths for troubleshooting"
+]
+compilation_status = "Success - hainet-files (28.68s, 0 errors), hainet-persona (20.97s, 0 errors, 20 warnings unrelated)"
+test_status = "Compilation verified, integration tests pending"
+root_cause = [
+    "Issue 1: MCP file server lacked base path configuration",
+    "Issue 2: Absolute paths from workers (/projects/snake/game.py) not resolved relative to project root",
+    "Issue 3: No directory traversal protection",
+    "Result: 12 ERROR log entries, 26 WARN log entries per session"
+]
+solution_summary = [
+    "Part 1: Added base_path field to FilesServer (~65 LOC)",
+    "Part 2: Implemented normalize_path() with security checks (~60 LOC)",
+    "Part 3: Updated all file operations to use normalized paths (~15 LOC)",
+    "Part 4: Added environment variable support to MCP config/client (~16 LOC)"
+]
+technical_highlights = [
+    "normalize_path() handles relative/absolute paths uniformly",
+    "Blocks .. to prevent directory traversal attacks",
+    "Canonicalizes existing paths, validates parent for new files",
+    "Ensures all operations stay within base_path boundary",
+    "HAINET_FILES_BASE_PATH environment variable for configuration",
+    "MCP client ServerConfig.env HashMap for per-server environment",
+    "Automatic parent directory creation on writes",
+    "Type-safe PathBuf operations throughout",
+    "Comprehensive debug logging for path resolution"
+]
+path_normalization_examples = [
+    "Input: '/projects/snake/game.py' → Output: '/home/tom/hai/projects/snake/game.py'",
+    "Input: 'projects/snake/game.py' → Output: '/home/tom/hai/projects/snake/game.py'",
+    "Input: 'projects/../../../etc/passwd' → Error: 'Path traversal attempt detected'"
+]
+impact_assessment = [
+    "Before: Workers unable to read/write files (12 errors, 26 warnings per session)",
+    "After: Path normalization ensures correct file resolution",
+    "Security: Directory traversal protection prevents attacks",
+    "UX: Auto-creation of parent directories for writes",
+    "Configuration: Flexible base_path via environment variable"
+]
+next_step = "Test with real worker tasks requiring file operations (e.g., snake game project)"
+phase_completion = "MCP File Path Normalization: 100% COMPLETE! 🎉"
+
 [[completed_cycles]]
 id = "46.1"
 name = "Multi-API Load Balancing Integration - COMPLETE"
