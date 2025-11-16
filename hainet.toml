@@ -27,7 +27,7 @@ temperature = 0.5
 top_p = 0.9
 top_k = 40
 repeat_penalty = 1.1
-max_tokens = 2048
+max_tokens = 4096
 
 # Prompt assembly options
 include_tool_feedback = true
@@ -53,7 +53,7 @@ include_json_schema = true
 # PM needs lower temperature for structured output
 temperature = 0.3
 top_p = 0.9
-max_tokens = 2048
+max_tokens = 4096
 include_syntax_examples = true
 include_json_schema = true
 
@@ -63,7 +63,7 @@ include_json_schema = true
 temperature = 0.1
 top_p = 0.8
 repeat_penalty = 1.15
-max_tokens = 1024
+max_tokens = 2048
 include_tool_feedback = true
 include_syntax_examples = false
 include_json_schema = false
@@ -74,7 +74,7 @@ include_json_schema = false
 temperature = 0.2
 top_p = 0.9
 model_size = "7b"  # Guardian gets larger model for better reasoning
-max_tokens = 2048
+max_tokens = 4096
 include_tool_feedback = false
 include_syntax_examples = false
 include_json_schema = true
@@ -85,10 +85,10 @@ include_json_schema = true
 enabled = true
 
 # Trigger optimization after N operations
-trigger_threshold = 100
+trigger_threshold = 50
 
 # Number of operations to analyze in measurement window
-measurement_window = 100
+measurement_window = 50
 
 # Target success rate for agents (0.0-1.0)
 success_rate_threshold = 0.85

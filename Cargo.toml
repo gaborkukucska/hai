@@ -20,8 +20,8 @@ exclude = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/hai-net/hai-net"
-homepage = "https://hai-net.org"
+repository = "https://github.com/gaborkukucska/hai"
+homepage = "https://hai-net.com"
 authors = ["HAI-Net Contributors"]
 description = "HAI-Net: Decentralized AI Network Framework"
 
