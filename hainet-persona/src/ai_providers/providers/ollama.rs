@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, warn, trace};
 
 /// Ollama client for local inference
 #[derive(Clone)]
@@ -108,6 +108,19 @@ impl ProviderClient for OllamaClient {
         let url = format!("{}/api/generate", self.base_url);
         debug!("Generating with Ollama model: {}", model);
 
+        // Log raw prompt at TRACE level for debugging LLM interactions
+        trace!(
+            target: "llm_messages",
+            "[OLLAMA REQUEST] Model: {}, Prompt ({} chars):\n{}\nSystem: {:?}\nOptions: temp={:?}, max_tokens={:?}, top_p={:?}",
+            model,
+            prompt.len(),
+            prompt,
+            options.system,
+            options.temperature,
+            options.max_tokens,
+            options.top_p
+        );
+
         let start = Instant::now();
 
         let request = OllamaRequest {
@@ -156,6 +169,18 @@ impl ProviderClient for OllamaClient {
             "Generation complete in {}ms ({} tokens)",
             latency_ms,
             generate_response.eval_count.unwrap_or(0)
+        );
+
+        // Log raw response at TRACE level for debugging LLM interactions
+        trace!(
+            target: "llm_messages",
+            "[OLLAMA RESPONSE] Model: {}, Response ({} chars):\n{}\nTokens: {:?}, Latency: {}ms, Done: {}",
+            model,
+            generate_response.response.len(),
+            generate_response.response,
+            generate_response.eval_count,
+            latency_ms,
+            generate_response.done
         );
 
         Ok(GenerationResponse {

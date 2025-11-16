@@ -9,6 +9,7 @@ use crate::ai_providers::{AIProviderManager, SelectionContext};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tracing::trace;
 
 /// Guardian-specific Ollama client with JSON-structured output parsing
 #[derive(Clone)]
@@ -45,6 +46,16 @@ JSON response:"#,
             text
         );
 
+        // Log Guardian PII analysis request at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN PII REQUEST] Analyzing text ({} chars):\n{}\nPrompt ({} chars):\n{}",
+            text.len(),
+            text,
+            prompt.len(),
+            prompt
+        );
+
         let options = crate::ai_providers::providers::GenerationOptions {
             temperature: Some(0.1),
             max_tokens: Some(512),
@@ -72,9 +83,28 @@ JSON response:"#,
             .await
             .context("Failed to generate PII analysis")?;
 
+        // Log Guardian PII analysis response at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN PII RESPONSE] Raw response ({} chars):\n{}",
+            response.text.len(),
+            response.text
+        );
+
         // Parse JSON response
-        self.parse_json_response::<PiiAnalysisResult>(&response.text)
-            .context("Failed to parse PII analysis JSON")
+        let result = self.parse_json_response::<PiiAnalysisResult>(&response.text)
+            .context("Failed to parse PII analysis JSON")?;
+
+        // Log parsed result
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN PII RESULT] Parsed: contains_pii={}, types={:?}, risk={:?}",
+            result.contains_pii,
+            result.pii_types,
+            result.risk_level
+        );
+
+        Ok(result)
     }
 
     /// Analyze text for bias
@@ -94,6 +124,16 @@ Text to analyze:
 
 JSON response:"#,
             text
+        );
+
+        // Log Guardian bias analysis request at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN BIAS REQUEST] Analyzing text ({} chars):\n{}\nPrompt ({} chars):\n{}",
+            text.len(),
+            text,
+            prompt.len(),
+            prompt
         );
 
         let options = crate::ai_providers::providers::GenerationOptions {
@@ -123,8 +163,27 @@ JSON response:"#,
             .await
             .context("Failed to generate bias analysis")?;
 
-        self.parse_json_response::<BiasAnalysisResult>(&response.text)
-            .context("Failed to parse bias analysis JSON")
+        // Log Guardian bias analysis response at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN BIAS RESPONSE] Raw response ({} chars):\n{}",
+            response.text.len(),
+            response.text
+        );
+
+        let result = self.parse_json_response::<BiasAnalysisResult>(&response.text)
+            .context("Failed to parse bias analysis JSON")?;
+
+        // Log parsed result
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN BIAS RESULT] Parsed: contains_bias={}, types={:?}, severity={:?}",
+            result.contains_bias,
+            result.bias_types,
+            result.severity
+        );
+
+        Ok(result)
     }
 
     /// Analyze text for harmful content
@@ -145,6 +204,16 @@ Text to analyze:
 
 JSON response:"#,
             text
+        );
+
+        // Log Guardian harm analysis request at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN HARM REQUEST] Analyzing text ({} chars):\n{}\nPrompt ({} chars):\n{}",
+            text.len(),
+            text,
+            prompt.len(),
+            prompt
         );
 
         let options = crate::ai_providers::providers::GenerationOptions {
@@ -174,8 +243,29 @@ JSON response:"#,
             .await
             .context("Failed to generate harm analysis")?;
 
-        self.parse_json_response::<HarmAnalysisResult>(&response.text)
-            .context("Failed to parse harm analysis JSON")
+        // Log Guardian harm analysis response at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN HARM RESPONSE] Raw response ({} chars):\n{}",
+            response.text.len(),
+            response.text
+        );
+
+        let result = self.parse_json_response::<HarmAnalysisResult>(&response.text)
+            .context("Failed to parse harm analysis JSON")?;
+
+        // Log parsed result
+        trace!(
+            target: "llm_messages",
+            "[GUARDIAN HARM RESULT] Parsed: contains_harm={}, types={:?}, toxicity={}, intent={:?}, risk={:?}",
+            result.contains_harm,
+            result.harm_types,
+            result.toxicity_score,
+            result.intent,
+            result.risk_level
+        );
+
+        Ok(result)
     }
 
     /// Parse JSON response from LLM, handling markdown code blocks

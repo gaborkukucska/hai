@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::trace;
 
 use super::{Agent, AgentContext, IntentParser, TaskPlanner, AgentStateMachine};
 use super::pm::PMAgent;
@@ -428,14 +429,46 @@ impl AdminAgent {
         } else {
             &selected_model.model_id
         };
+        // Log Admin planning request at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[ADMIN PLANNING REQUEST] Model: {}, Attempt: {}, User input ({} chars):\n{}\nPrompt ({} chars):\n{}",
+            model_name,
+            attempt,
+            user_input.len(),
+            user_input,
+            planning_prompt.len(),
+            planning_prompt
+        );
+
         let response = client.generate(
             model_name,
             &planning_prompt,
             options
         ).await.context("Failed to generate project plan with LLM")?;
         
+        // Log Admin planning response at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[ADMIN PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}\nTokens: {:?}, Latency: {}ms",
+            model_name,
+            response.text.len(),
+            response.text,
+            response.tokens_generated,
+            response.latency_ms
+        );
+        
         // Parse JSON response
         let plan = self.parse_project_plan(&response.text)?;
+        
+        // Log parsed plan result
+        trace!(
+            target: "llm_messages",
+            "[ADMIN PLANNING RESULT] Parsed successfully: title='{}', tasks={}, overview_len={}",
+            plan.title,
+            plan.initial_tasks.len(),
+            plan.overview.len()
+        );
         
         Ok(plan)
     }
@@ -778,11 +811,31 @@ impl AdminAgent {
         } else {
             &selected_model.model_id
         };
+        // Log Admin conversation request at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[ADMIN CONVERSATION REQUEST] Model: {}, User input ({} chars):\n{}",
+            model_name,
+            user_input.len(),
+            user_input
+        );
+
         let response = client.generate(
             model_name,
             user_input,
             options
         ).await.context("Failed to generate conversational response")?;
+        
+        // Log Admin conversation response at TRACE level
+        trace!(
+            target: "llm_messages",
+            "[ADMIN CONVERSATION RESPONSE] Model: {}, Response ({} chars):\n{}\nTokens: {:?}, Latency: {}ms",
+            model_name,
+            response.text.len(),
+            response.text,
+            response.tokens_generated,
+            response.latency_ms
+        );
         
         Ok(response.text)
     }
