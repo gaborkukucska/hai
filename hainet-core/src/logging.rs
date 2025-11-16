@@ -4,20 +4,27 @@
 use anyhow::{bail, Context, Result};
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use toml::Value;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::filter::EnvFilter;
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 /// Finds the workspace root from the running executable's location.
 fn find_workspace_root() -> Result<PathBuf> {
     let exe_path = env::current_exe()?;
-    let mut current_dir = exe_path.parent().expect("Executable must be in a directory.").to_path_buf();
+    let mut current_dir = exe_path
+        .parent()
+        .expect("Executable must be in a directory.")
+        .to_path_buf();
 
     loop {
         let cargo_toml_path = current_dir.join("Cargo.toml");
         if cargo_toml_path.exists() {
-            let toml_content = fs::read_to_string(&cargo_toml_path)?;
+            let toml_content =
+                fs::read_to_string(&cargo_toml_path).context("Failed to read Cargo.toml")?;
             if let Ok(toml) = toml::from_str::<Value>(&toml_content) {
                 if toml.get("workspace").is_some() {
                     return Ok(current_dir);
@@ -76,6 +83,7 @@ pub fn initialize_logging(
     let app_crate_name = app_name.replace('-', "_");
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new(format!(
+            "{app}={level},hainet_core={level},rmcp=info",
             "{app}={level},hainet={level},rmcp=info",
             app = app_crate_name,
             level = default_level
