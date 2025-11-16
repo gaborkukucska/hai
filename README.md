@@ -1,6 +1,6 @@
 <!-- # START OF FILE README.md -->
 <!-- # IT IS CRITICAL THAT ALL AIs and LLMs FOLLOW THE DEVELOPMENT INSTRUCTIONS IN THE `helperfiles/0_DEVELOPMENT_RULES.md` FILE WHEN FURTHER DEVELOPING THIS FRAMEWORK!!! -->
-# WARNING!!! Experimental, proof of concept, NOT production ready framework, test it at your own discgression!
+# WARNING!!! Experimental, proof of concept, NOT production ready framework, test it at your own discretion!
 
 This framework is develped entirely by various LLMs guided by an amateur citizen engineer and is in constant further amateur development :D
 
