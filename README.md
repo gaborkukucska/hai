@@ -1,5 +1,10 @@
 <!-- # START OF FILE README.md -->
 <!-- # IT IS CRITICAL THAT ALL AIs and LLMs FOLLOW THE DEVELOPMENT INSTRUCTIONS IN THE `helperfiles/0_DEVELOPMENT_RULES.md` FILE WHEN FURTHER DEVELOPING THIS FRAMEWORK!!! -->
+# WARNING!!! Experimental, proof of concept, NOT production ready framework, test it at your own discgression!
+
+This framework is develped entirely by various LLMs guided by an amateur citizen engineer and is in constant further amateur development :D
+
+With all that in mind, here is the one and only seed framework of HAI-Net. More info at [HAI-Net.com](https://hai-net.com)
 
 # 🌐 HAI-Net: Human-AI Network Framework
 
@@ -195,7 +200,7 @@ Manually install HAI-Net on each device following single-device instructions, th
 ```toml
 [network]
 role = "master"  # Or "slave"
-master_ip = "192.168.1.10"  # IP of master node (slaves only)
+master_ip = "192.168.0.1"  # IP of master node (slaves only)
 ```
 
 **📖 Detailed Instructions:**  
