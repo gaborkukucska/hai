@@ -152,7 +152,9 @@ pub fn run() {
       
       // Initialize MetricsStorage with database path
       let metrics_storage_path = data_dir.join("metrics_history.db");
-      let metrics_storage = MetricsStorage::new(metrics_storage_path)
+      let metrics_storage = MetricsStorage::new(
+          &format!("sqlite://{}?mode=rwc", metrics_storage_path.display())
+      )
           .await
           .expect("Failed to initialize MetricsStorage");
       

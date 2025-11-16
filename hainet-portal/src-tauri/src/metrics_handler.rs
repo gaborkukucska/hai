@@ -439,7 +439,9 @@ pub fn start_metrics_broadcast(app_handle: AppHandle, metrics_collector: Arc<RwL
 #[cfg(test)]
 mod tests {
     use super::*;
+	use hainet_persona::messaging::AgentId;
     use hainet_persona::agents::metrics::{MetricsCollector, OperationResult};
+    use hainet_persona::messaging::AgentType;
     
     async fn create_test_collector() -> Arc<RwLock<MetricsCollector>> {
         let collector = MetricsCollector::new("sqlite::memory:").await.unwrap();
@@ -451,7 +453,7 @@ mod tests {
         for i in 0..5 {
             let result = OperationResult {
                 agent_type: AgentType::Admin,
-                agent_id: crate::agents::AgentId::new(AgentType::Admin, "test".to_string()),
+                agent_id: AgentId::new(AgentType::Admin, "test".to_string()),
                 config_hash: "test_hash".to_string(),
                 operation_type: "test_op".to_string(),
                 success: true,

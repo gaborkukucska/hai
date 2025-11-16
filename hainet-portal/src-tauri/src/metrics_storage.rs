@@ -88,17 +88,10 @@ pub struct MetricsStorage {
 
 impl MetricsStorage {
     /// Create new metrics storage with SQLite backend
-    pub async fn new(db_path: PathBuf) -> Result<Self, String> {
-        // Ensure parent directory exists
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create metrics directory: {}", e))?;
-        }
-
-        let db_url = format!("sqlite:{}", db_path.display());
+    pub async fn new(db_url: &str) -> Result<Self, String> {
         info!("Initializing metrics storage: {}", db_url);
 
-        let pool = SqlitePool::connect(&db_url)
+        let pool = SqlitePool::connect(db_url)
             .await
             .map_err(|e| format!("Failed to connect to metrics database: {}", e))?;
 
@@ -383,7 +376,8 @@ mod tests {
 
     async fn create_test_storage() -> MetricsStorage {
         let temp_path = std::env::temp_dir().join(format!("test_metrics_{}.db", uuid::Uuid::new_v4()));
-        MetricsStorage::new(temp_path).await.unwrap()
+        let db_url = format!("sqlite://{}?mode=rwc", temp_path.display());
+        MetricsStorage::new(&db_url).await.unwrap()
     }
 
     #[tokio::test]
