@@ -11,6 +11,7 @@ use super::{GenerationOptions, GenerationResponse, ModelInfo, ProviderClient, Pr
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::time::Instant;
 use tracing::{debug, warn, trace};
 
@@ -108,19 +109,6 @@ impl ProviderClient for OllamaClient {
         let url = format!("{}/api/generate", self.base_url);
         debug!("Generating with Ollama model: {}", model);
 
-        // Log raw prompt at TRACE level for debugging LLM interactions
-        trace!(
-            target: "llm_messages",
-            "[OLLAMA REQUEST] Model: {}, Prompt ({} chars):\n{}\nSystem: {:?}\nOptions: temp={:?}, max_tokens={:?}, top_p={:?}",
-            model,
-            prompt.len(),
-            prompt,
-            options.system,
-            options.temperature,
-            options.max_tokens,
-            options.top_p
-        );
-
         let start = Instant::now();
 
         let request = OllamaRequest {
@@ -134,16 +122,26 @@ impl ProviderClient for OllamaClient {
                 top_p: options.top_p,
                 stop: options.stop,
             }),
-            // Keep model loaded for 10 minutes to avoid constant reloading
-            // when multiple workers use the same model sequentially
             keep_alive: Some("10m".to_string()),
         };
+
+        // Log the full request body for debugging
+        if let Ok(request_body) = serde_json::to_string_pretty(&request) {
+            debug!(
+                target: "llm_messages",
+                "[OLLAMA REQUEST] Sending request to {}:\n{}",
+                url,
+                request_body
+            );
+        } else {
+            warn!("Failed to serialize Ollama request for logging");
+        }
 
         let response = self
             .client
             .post(&url)
             .json(&request)
-            .timeout(std::time::Duration::from_secs(120)) // Longer timeout for inference
+            .timeout(std::time::Duration::from_secs(120))
             .send()
             .await
             .context("Failed to send generation request to Ollama")?;
@@ -158,10 +156,19 @@ impl ProviderClient for OllamaClient {
             );
         }
 
-        let generate_response: OllamaResponse = response
-            .json()
-            .await
-            .context("Failed to parse Ollama generation response")?;
+        let response_text = response.text().await.context("Failed to read Ollama response text")?;
+
+        // Log the full response body for debugging
+        debug!(
+            target: "llm_messages",
+            "[OLLAMA RESPONSE] Raw response from {}:\n{}",
+            url,
+            response_text
+        );
+
+        let generate_response: OllamaResponse = serde_json::from_str(&response_text)
+            .context("Failed to parse Ollama generation response from text")?;
+
 
         let latency_ms = start.elapsed().as_millis() as u64;
 
@@ -169,18 +176,6 @@ impl ProviderClient for OllamaClient {
             "Generation complete in {}ms ({} tokens)",
             latency_ms,
             generate_response.eval_count.unwrap_or(0)
-        );
-
-        // Log raw response at TRACE level for debugging LLM interactions
-        trace!(
-            target: "llm_messages",
-            "[OLLAMA RESPONSE] Model: {}, Response ({} chars):\n{}\nTokens: {:?}, Latency: {}ms, Done: {}",
-            model,
-            generate_response.response.len(),
-            generate_response.response,
-            generate_response.eval_count,
-            latency_ms,
-            generate_response.done
         );
 
         Ok(GenerationResponse {
