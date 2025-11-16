@@ -12,29 +12,61 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 
-/// Finds the workspace root from the running executable's location.
+/// Finds the workspace root or falls back to a sensible default.
 fn find_workspace_root() -> Result<PathBuf> {
+    // First try to find workspace root from executable location
     let exe_path = env::current_exe()?;
     let mut current_dir = exe_path
         .parent()
         .expect("Executable must be in a directory.")
         .to_path_buf();
 
+    // Try traversing up from executable path
+    let original_dir = current_dir.clone();
     loop {
         let cargo_toml_path = current_dir.join("Cargo.toml");
         if cargo_toml_path.exists() {
             let toml_content =
                 fs::read_to_string(&cargo_toml_path).context("Failed to read Cargo.toml")?;
             if let Ok(toml) = toml::from_str::<Value>(&toml_content) {
-                if toml.get("workspace").is_some() {
-                    return Ok(current_dir);
+                // Check if this is a real workspace with members (not just an empty workspace table)
+                if let Some(workspace) = toml.get("workspace") {
+                    if workspace.get("members").is_some() {
+                        return Ok(current_dir);
+                    }
                 }
             }
         }
         if !current_dir.pop() {
-            bail!("Could not find workspace root by traversing up from executable path.");
+            break;
         }
     }
+
+    // If we couldn't find a workspace (e.g., running from /usr/local/bin/),
+    // fall back to current working directory if it looks like a workspace
+    if let Ok(cwd) = env::current_dir() {
+        let cargo_toml_path = cwd.join("Cargo.toml");
+        if cargo_toml_path.exists() {
+            if let Ok(toml_content) = fs::read_to_string(&cargo_toml_path) {
+                if let Ok(toml) = toml::from_str::<Value>(&toml_content) {
+                    if let Some(workspace) = toml.get("workspace") {
+                        if workspace.get("members").is_some() {
+                            return Ok(cwd);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Last resort: use /var/log/hainet/ for system-wide installations
+    // This handles cases where binaries are installed in /usr/local/bin/ or similar
+    let system_log_dir = PathBuf::from("/var/log/hainet");
+    if original_dir.starts_with("/usr") || original_dir.starts_with("/opt") {
+        return Ok(system_log_dir);
+    }
+
+    bail!("Could not find workspace root. Not in a workspace directory, and not a system installation.");
 }
 
 /// Initializes the logging system for a HAI-Net application.

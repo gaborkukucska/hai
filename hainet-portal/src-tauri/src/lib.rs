@@ -30,6 +30,8 @@ use hainet_persona::agents::metrics::MetricsCollector;
 struct AppState {
     admin_bridge: Arc<RwLock<AdminBridge>>,
     tts_handler: Arc<RwLock<TTSHandler>>,
+    /// Keep the log guard alive for the lifetime of the application
+    _log_guard: tracing_appender::non_blocking::WorkerGuard,
 }
 
 /// Metrics collector state
@@ -123,8 +125,8 @@ async fn list_tts_voices(state: State<'_, AppState>) -> Result<Vec<String>, Stri
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize logging
-    let _guard = hainet_core::logging::initialize_logging("hainet-portal", "debug")
+    // Initialize logging - MUST keep guard alive for file logging to work!
+    let log_guard = hainet_core::logging::initialize_logging("hainet-portal", "debug")
         .expect("Failed to initialize logging");
 
   // Initialize Admin AI Bridge before building Tauri app
@@ -219,6 +221,7 @@ pub fn run() {
     .manage(AppState {
         admin_bridge: Arc::new(RwLock::new(admin_bridge)),
         tts_handler: Arc::new(RwLock::new(tts_handler)),
+        _log_guard: log_guard, // Keep logger alive for app lifetime
     })
     .manage(metrics_state)
     .manage(metrics_storage_state)
