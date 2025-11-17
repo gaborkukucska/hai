@@ -919,26 +919,27 @@ AVAILABLE MCP TOOLS:
 {}
 
 INSTRUCTIONS:
-1. Break the task into concrete, executable steps
-2. Each step must use ONE MCP tool with specific parameters
-3. Steps can have dependencies on previous steps
-4. Be specific with file paths, parameters, and expected outputs
+1. Break the task into concrete, executable steps.
+2. Each step must use ONE MCP tool with specific parameters.
+3. Steps can have dependencies on previous steps.
+4. Be specific with file paths, parameters, and expected outputs.
+5. **If the task is to set up a new project, your first step MUST be to create a file or directory using `hainet-files::file_write`. Do not attempt to read files that do not exist.**
 
 RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
 {{
   "steps": [
     {{
       "step_number": 1,
-      "tool": "hainet-files::file_read",
-      "params": {{ "path": "/path/to/file" }},
-      "description": "Read configuration file",
+      "tool": "hainet-files::file_write",
+      "params": {{ "path": "src/main.rs", "content": "// Project entry point" }},
+      "description": "Create the main source file for the new project.",
       "depends_on": []
     }},
     {{
       "step_number": 2,
-      "tool": "hainet-files::file_write",
-      "params": {{ "path": "/output/file", "content": "result" }},
-      "description": "Write processed output",
+      "tool": "hainet-files::file_read",
+      "params": {{ "path": "src/main.rs" }},
+      "description": "Read the newly created file to verify its content.",
       "depends_on": [1]
     }}
   ]
