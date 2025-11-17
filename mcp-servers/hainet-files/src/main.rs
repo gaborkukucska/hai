@@ -87,12 +87,8 @@ impl FilesServer {
     fn normalize_path(&self, requested_path: &str, project_name: Option<&str>) -> Result<PathBuf> {
         // Determine if this is an Admin bypass request
         let is_admin_access = match project_name {
-            None => {
-                debug!("Admin access: project_name is None (full filesystem access)");
-                true
-            }
-            Some(name) if name == ADMIN_PROJECT_BYPASS => {
-                debug!("Admin access: explicit bypass with {}", ADMIN_PROJECT_BYPASS);
+            None | Some(ADMIN_PROJECT_BYPASS) => {
+                debug!("Admin access granted for path: {}", requested_path);
                 true
             }
             Some(name) => {
@@ -100,67 +96,49 @@ impl FilesServer {
                 false
             }
         };
-        
-        // Remove leading slash if present (treat all paths as relative)
-        let path_str = requested_path.trim_start_matches('/');
-        
-        // Reject paths containing '..' to prevent directory traversal
-        if path_str.contains("..") {
-            anyhow::bail!("Path traversal attempt detected: '..' not allowed");
+
+        // Clean and validate the requested path to prevent traversal attacks
+        let mut components = Vec::new();
+        let path_buf = PathBuf::from(requested_path);
+        for component in path_buf.components() {
+            match component {
+                std::path::Component::Normal(part) => components.push(part),
+                std::path::Component::RootDir | std::path::Component::ParentDir | std::path::Component::CurDir => {
+                    // Ignore these components to prevent traversal
+                }
+                _ => {}
+            }
         }
-        
-        // Construct sandboxed or full path based on access level
-        let full_path = if is_admin_access {
-            // Admin: full filesystem access
-            self.base_path.join(path_str)
+        let safe_suffix: PathBuf = components.iter().collect();
+
+        // Get the canonical (absolute, resolved) base path for security checks
+        let canonical_base = self.base_path.canonicalize()
+            .context("Failed to canonicalize base path")?;
+
+        // Construct the final path based on access level
+        let final_path = if is_admin_access {
+            canonical_base.join(safe_suffix)
         } else {
-            // Worker: sandboxed to project directory
-            let project_name = project_name.unwrap(); // Safe: already checked above
-            self.base_path
+            // Safe to unwrap here because is_admin_access is false
+            let project_name = project_name.unwrap();
+            canonical_base
                 .join("sandbox")
                 .join("projects")
                 .join(project_name)
-                .join(path_str)
+                .join(safe_suffix)
         };
-        
-        // Canonicalize if path exists, otherwise validate parent directory
-        let canonical = if full_path.exists() {
-            full_path.canonicalize()
-                .context("Failed to canonicalize existing path")?
-        } else {
-            // For non-existent paths, validate parent directory
-            if let Some(parent) = full_path.parent() {
-                let canonical_parent = if parent.exists() {
-                    parent.canonicalize()
-                        .context("Failed to canonicalize parent directory")?
-                } else {
-                    // Parent doesn't exist either, validate against base_path
-                    self.base_path.canonicalize()
-                        .context("Failed to canonicalize base path")?
-                };
-                
-                // Ensure parent is within base_path
-                if !canonical_parent.starts_with(&self.base_path.canonicalize()?) {
-                    anyhow::bail!("Path outside working directory: {}", requested_path);
-                }
-                
-                // Return non-canonicalized full path for creation
-                full_path
-            } else {
-                anyhow::bail!("Invalid path: no parent directory");
-            }
-        };
-        
-        // Security check: ensure resolved path is within base_path
-        let canonical_base = self.base_path.canonicalize()
-            .context("Failed to canonicalize base path")?;
-        
-        if canonical.exists() && !canonical.starts_with(&canonical_base) {
-            anyhow::bail!("Path outside working directory: {}", requested_path);
+
+        // Final security check: ensure the fully constructed path is within the base directory.
+        // This is the most critical step to prevent any form of directory traversal.
+        if !final_path.starts_with(&canonical_base) {
+            anyhow::bail!(
+                "Security violation: Attempted to access path '{}' outside of the designated working directory.",
+                final_path.display()
+            );
         }
-        
-        debug!("Normalized path: {} -> {}", requested_path, canonical.display());
-        Ok(canonical)
+
+        debug!("Normalized path: {} -> {}", requested_path, final_path.display());
+        Ok(final_path)
     }
 
     async fn handle_file_read(&self, path: String, project_name: Option<String>) -> Result<String> {
