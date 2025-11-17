@@ -31,11 +31,6 @@ impl OllamaClient {
         }
     }
 
-    /// Create client with default localhost endpoint
-    pub fn localhost() -> Self {
-        Self::new("http://localhost:11434".to_string())
-    }
-
     /// Get endpoint URL
     pub fn endpoint(&self) -> &str {
         &self.base_url
@@ -278,7 +273,7 @@ mod tests {
 
     #[test]
     fn test_ollama_client_creation() {
-        let client = OllamaClient::localhost();
+        let client = OllamaClient::new("http://localhost:11434".to_string());
         assert_eq!(client.endpoint(), "http://localhost:11434");
     }
 
@@ -290,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_provider_type() {
-        let client = OllamaClient::localhost();
+        let client = OllamaClient::new("http://localhost:11434".to_string());
         assert_eq!(client.provider_type(), ProviderType::Ollama);
     }
 

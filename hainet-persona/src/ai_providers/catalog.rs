@@ -321,17 +321,7 @@ pub struct CatalogStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn create_test_model(name: &str, size_gb: f32) -> ModelInfo {
-        ModelInfo {
-            name: name.to_string(),
-            provider_type: ProviderType::Ollama,
-            endpoint: "http://localhost:11434".to_string(),
-            size_gb,
-            context_length: 4096,
-            specialization: ModelSpecialization::General,
-        }
-    }
+    use crate::test_utils::create_test_model_info;
 
     #[test]
     fn test_catalog_creation() {
@@ -342,7 +332,7 @@ mod tests {
     #[test]
     fn test_add_model() {
         let mut catalog = ModelCatalog::new();
-        let model = create_test_model("gemma3:4b-it-q4_K_M", 3.3);
+        let model = create_test_model_info("gemma3:4b-it-q4_K_M", 3.3);
         
         catalog.add_model(model);
         assert_eq!(catalog.model_count(), 1);
@@ -351,7 +341,7 @@ mod tests {
     #[test]
     fn test_capability_inference() {
         let mut catalog = ModelCatalog::new();
-        let model = create_test_model("gemma3:4b-it-q4_K_M", 3.3);
+        let model = create_test_model_info("gemma3:4b-it-q4_K_M", 3.3);
         
         catalog.add_model(model);
         
@@ -369,7 +359,7 @@ mod tests {
     #[test]
     fn test_availability_tracking() {
         let mut catalog = ModelCatalog::new();
-        let model = create_test_model("test-model", 3.0);
+        let model = create_test_model_info("test-model", 3.0);
         catalog.add_model(model);
         
         let model_id = "Ollama::test-model";
@@ -386,7 +376,7 @@ mod tests {
     #[test]
     fn test_performance_metrics_update() {
         let mut catalog = ModelCatalog::new();
-        let model = create_test_model("test-model", 3.0);
+        let model = create_test_model_info("test-model", 3.0);
         catalog.add_model(model);
         
         let model_id = "Ollama::test-model";
@@ -407,8 +397,8 @@ mod tests {
     #[test]
     fn test_catalog_stats() {
         let mut catalog = ModelCatalog::new();
-        catalog.add_model(create_test_model("model1", 3.0));
-        catalog.add_model(create_test_model("model2", 5.0));
+        catalog.add_model(create_test_model_info("model1", 3.0));
+        catalog.add_model(create_test_model_info("model2", 5.0));
         
         let stats = catalog.get_stats();
         assert_eq!(stats.total_models, 2);
