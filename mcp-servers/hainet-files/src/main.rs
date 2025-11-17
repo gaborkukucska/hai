@@ -100,18 +100,18 @@ impl FilesServer {
                 false
             }
         };
-        
+
         // Remove leading slash if present (treat all paths as relative)
         let path_str = requested_path.trim_start_matches('/');
-        
+
         // Reject paths containing '..' to prevent directory traversal
         if path_str.contains("..") {
             anyhow::bail!("Path traversal attempt detected: '..' not allowed");
         }
-        
+
         // Construct sandboxed or full path based on access level
-        let full_path = if is_admin_access {
-            // Admin: full filesystem access
+        let resolved_path = if is_admin_access {
+            // Admin: full filesystem access relative to base_path
             self.base_path.join(path_str)
         } else {
             // Worker: sandboxed to project directory
@@ -122,45 +122,40 @@ impl FilesServer {
                 .join(project_name)
                 .join(path_str)
         };
-        
-        // Canonicalize if path exists, otherwise validate parent directory
-        let canonical = if full_path.exists() {
-            full_path.canonicalize()
-                .context("Failed to canonicalize existing path")?
-        } else {
-            // For non-existent paths, validate parent directory
-            if let Some(parent) = full_path.parent() {
-                let canonical_parent = if parent.exists() {
-                    parent.canonicalize()
-                        .context("Failed to canonicalize parent directory")?
-                } else {
-                    // Parent doesn't exist either, validate against base_path
-                    self.base_path.canonicalize()
-                        .context("Failed to canonicalize base path")?
-                };
-                
-                // Ensure parent is within base_path
-                if !canonical_parent.starts_with(&self.base_path.canonicalize()?) {
-                    anyhow::bail!("Path outside working directory: {}", requested_path);
-                }
-                
-                // Return non-canonicalized full path for creation
-                full_path
-            } else {
-                anyhow::bail!("Invalid path: no parent directory");
-            }
-        };
-        
-        // Security check: ensure resolved path is within base_path
+
+        // Get the canonical base path for security checks
         let canonical_base = self.base_path.canonicalize()
             .context("Failed to canonicalize base path")?;
-        
-        if canonical.exists() && !canonical.starts_with(&canonical_base) {
-            anyhow::bail!("Path outside working directory: {}", requested_path);
+
+        // Security check: Ensure the resolved path is within the canonical base path.
+        // This prevents directory traversal attacks even if the path doesn't exist yet.
+        // We achieve this by resolving the path without canonicalizing the final component.
+        let mut final_path = if let Some(parent) = resolved_path.parent() {
+            if parent.exists() {
+                parent.canonicalize()
+                    .context("Failed to canonicalize parent path")?
+            } else {
+                // If the parent doesn't exist, we can't canonicalize it.
+                // We trust create_dir_all to handle creation, but we must still
+                // ensure the constructed path starts with the base path.
+                parent.to_path_buf()
+            }
+        } else {
+            // If there's no parent, it means we're at the root of the path,
+            // which should be the base path itself.
+            self.base_path.clone()
+        };
+
+        if let Some(file_name) = resolved_path.file_name() {
+            final_path.push(file_name);
         }
-        
-        debug!("Normalized path: {} -> {}", requested_path, canonical.display());
-        Ok(canonical)
+
+        if !final_path.starts_with(&canonical_base) {
+            anyhow::bail!("Resolved path is outside the working directory: {}", requested_path);
+        }
+
+        debug!("Normalized path: {} -> {}", requested_path, final_path.display());
+        Ok(final_path)
     }
 
     async fn handle_file_read(&self, path: String, project_name: Option<String>) -> Result<String> {
