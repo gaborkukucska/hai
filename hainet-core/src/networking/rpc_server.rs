@@ -83,7 +83,7 @@ impl RPCServer {
             ServicePayload::STT { .. } => "stt",
             ServicePayload::TTS { .. } => "tts",
             ServicePayload::Storage { .. } => "storage",
-            ServicePayload::MCP { .. } => "mcp",
+            ServicePayload::Heartbeat => "heartbeat",
         };
 
         // Update per-service stats
@@ -248,15 +248,11 @@ mod tests {
     #[tokio::test]
     async fn test_request_handling() {
         let server = RPCServer::new("127.0.0.1:8080".to_string());
-        server.register_handler("mcp".to_string(), create_echo_handler()).await;
+        server.register_handler("heartbeat".to_string(), create_echo_handler()).await;
 
         let peer = PeerId::random();
         let message = MeshMessage::new_request(
-            ServicePayload::MCP {
-                server: "test".to_string(),
-                tool: "test_tool".to_string(),
-                arguments: serde_json::json!({}),
-            },
+            ServicePayload::Heartbeat,
             peer,
         );
 
@@ -291,15 +287,11 @@ mod tests {
     #[tokio::test]
     async fn test_expired_message() {
         let server = RPCServer::new("127.0.0.1:8080".to_string());
-        server.register_handler("mcp".to_string(), create_echo_handler()).await;
+        server.register_handler("heartbeat".to_string(), create_echo_handler()).await;
 
         let peer = PeerId::random();
         let message = MeshMessage::new_request_with_ttl(
-            ServicePayload::MCP {
-                server: "test".to_string(),
-                tool: "test".to_string(),
-                arguments: serde_json::json!({}),
-            },
+            ServicePayload::Heartbeat,
             peer,
             std::time::Duration::from_millis(1),
         );
@@ -342,15 +334,11 @@ mod tests {
     #[tokio::test]
     async fn test_stats_reset() {
         let server = RPCServer::new("127.0.0.1:8080".to_string());
-        server.register_handler("mcp".to_string(), create_echo_handler()).await;
+        server.register_handler("heartbeat".to_string(), create_echo_handler()).await;
 
         let peer = PeerId::random();
         let message = MeshMessage::new_request(
-            ServicePayload::MCP {
-                server: "test".to_string(),
-                tool: "test".to_string(),
-                arguments: serde_json::json!({}),
-            },
+            ServicePayload::Heartbeat,
             peer,
         );
 

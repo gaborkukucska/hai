@@ -59,12 +59,8 @@ pub enum ServicePayload {
         #[serde(with = "serde_bytes")]
         data: Option<Vec<u8>>,
     },
-    /// MCP tool call request
-    MCP {
-        server: String,
-        tool: String,
-        arguments: serde_json::Value,
-    },
+    /// Heartbeat message
+    Heartbeat,
 }
 
 /// Response payload wrapper
@@ -138,11 +134,7 @@ impl MeshMessage {
         Self {
             id: Uuid::new_v4(),
             message_type: MessageType::Heartbeat,
-            payload: ServicePayload::MCP {
-                server: "heartbeat".to_string(),
-                tool: "ping".to_string(),
-                arguments: serde_json::json!({}),
-            },
+            payload: ServicePayload::Heartbeat,
             sender,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -277,11 +269,7 @@ mod tests {
     #[test]
     fn test_message_serialization() {
         let peer = create_test_peer();
-        let payload = ServicePayload::MCP {
-            server: "hainet-files".to_string(),
-            tool: "read_file".to_string(),
-            arguments: serde_json::json!({"path": "/test.txt"}),
-        };
+        let payload = ServicePayload::Heartbeat;
 
         let message = MeshMessage::new_request(payload, peer);
         let json = message.to_json().unwrap();
@@ -294,11 +282,7 @@ mod tests {
     #[test]
     fn test_ttl_expiration() {
         let peer = create_test_peer();
-        let payload = ServicePayload::MCP {
-            server: "test".to_string(),
-            tool: "test".to_string(),
-            arguments: serde_json::json!({}),
-        };
+        let payload = ServicePayload::Heartbeat;
 
         let message = MeshMessage::new_request_with_ttl(
             payload,
