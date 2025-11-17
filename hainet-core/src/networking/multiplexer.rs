@@ -243,11 +243,7 @@ mod tests {
     fn create_test_message() -> MeshMessage {
         let peer = PeerId::random();
         MeshMessage::new_request(
-            ServicePayload::MCP {
-                server: "test".to_string(),
-                tool: "test".to_string(),
-                arguments: serde_json::json!({}),
-            },
+            ServicePayload::Heartbeat,
             peer,
         )
     }
@@ -355,11 +351,7 @@ mod tests {
         
         let peer = PeerId::random();
         let message = MeshMessage::new_request_with_ttl(
-            ServicePayload::MCP {
-                server: "test".to_string(),
-                tool: "test".to_string(),
-                arguments: serde_json::json!({}),
-            },
+            ServicePayload::Heartbeat,
             peer,
             Duration::from_millis(1),
         );

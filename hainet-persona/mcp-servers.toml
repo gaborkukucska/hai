@@ -49,3 +49,10 @@ env = { HAINET_FILES_BASE_PATH = "/home/tom/hai" }
 # args = ["arg1", "arg2"]
 # enabled = true/false
 # working_dir = "/optional/working/directory" (optional)
+
+[servers.hainet-mcp]
+name = "HAI-Net MCP"
+description = "Core HAI-Net MCP server"
+command = "cargo"
+args = ["run", "--package", "hainet-mcp-server", "--release"]
+enabled = true
