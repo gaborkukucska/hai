@@ -292,31 +292,10 @@ pub struct ScoreBreakdown {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai_providers::catalog::{CatalogedModel, PerformanceMetrics};
-    use crate::ai_providers::discovery::{ModelSpecialization, ProviderType};
+    use crate::ai_providers::catalog::ModelCapability;
     use crate::ai_providers::selection::{ModelSizePreference, SelectionContext};
     use crate::prompts::types::AgentType;
-
-    fn create_test_model(name: &str, size_gb: f32, capabilities: Vec<ModelCapability>) -> CatalogedModel {
-        CatalogedModel {
-            id: format!("Ollama::{}", name),
-            name: name.to_string(),
-            provider_type: ProviderType::Ollama,
-            endpoint: "http://localhost:11434".to_string(),
-            size_gb,
-            context_length: 4096,
-            specialization: ModelSpecialization::General,
-            capabilities,
-            performance_metrics: PerformanceMetrics {
-                avg_latency_ms: 150.0,
-                tokens_per_second: 20.0,
-                success_rate: 0.95,
-                total_requests: 100,
-            },
-            availability_score: 1.0,
-            last_used: None,
-        }
-    }
+    use crate::test_utils::create_test_cataloged_model;
 
     #[test]
     fn test_ranker_creation() {
@@ -327,7 +306,7 @@ mod tests {
     #[test]
     fn test_capability_scoring() {
         let ranker = ModelRanker::new();
-        let model = create_test_model(
+        let model = create_test_cataloged_model(
             "test-model",
             3.0,
             vec![ModelCapability::GeneralConversation, ModelCapability::SafetyAnalysis],
@@ -354,7 +333,7 @@ mod tests {
     #[test]
     fn test_missing_required_capability() {
         let ranker = ModelRanker::new();
-        let model = create_test_model("test-model", 3.0, vec![ModelCapability::GeneralConversation]);
+        let model = create_test_cataloged_model("test-model", 3.0, vec![ModelCapability::GeneralConversation]);
 
         let context = SelectionContext {
             agent_type: AgentType::Admin,
@@ -378,8 +357,8 @@ mod tests {
     fn test_efficiency_scoring() {
         let ranker = ModelRanker::new();
 
-        let small_model = create_test_model("small", 3.0, vec![]);
-        let large_model = create_test_model("large", 15.0, vec![]);
+        let small_model = create_test_cataloged_model("small", 3.0, vec![]);
+        let large_model = create_test_cataloged_model("large", 15.0, vec![]);
 
         let context_prefer_small = SelectionContext {
             agent_type: AgentType::Admin,

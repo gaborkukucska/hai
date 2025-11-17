@@ -556,12 +556,14 @@ mod tests {
         assert!(guardian.min_acceptable_score() > worker.min_acceptable_score());
     }
 
+    use crate::test_utils::TEST_OLLAMA_ENDPOINT;
+
     #[test]
     fn test_inference_url_generation() {
         let selected = SelectedModel {
             model_id: "Ollama::gemma3:4b-it-q4_K_M".to_string(),
             model_name: "gemma3:4b-it-q4_K_M".to_string(),
-            endpoint: "http://localhost:11434".to_string(),
+            endpoint: TEST_OLLAMA_ENDPOINT.to_string(),
             provider_type: crate::ai_providers::discovery::ProviderType::Ollama,
             score: 0.95,
             rank: 1,
@@ -570,7 +572,7 @@ mod tests {
 
         assert_eq!(
             selected.inference_url(),
-            "http://localhost:11434/api/generate"
+            format!("{}/api/generate", TEST_OLLAMA_ENDPOINT)
         );
     }
 
