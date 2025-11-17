@@ -247,7 +247,7 @@ impl ProviderDiscovery {
     }
 
     /// Get local IP address (excluding loopback)
-    fn get_local_ip(&self) -> Result<String> {
+    fn _get_local_ip(&self) -> Result<String> {
         use std::net::UdpSocket;
         
         // Connect to a public DNS server to determine local IP
@@ -260,7 +260,7 @@ impl ProviderDiscovery {
     }
 
     /// Derive /24 subnet from IP address
-    fn derive_subnet(&self, ip: &str) -> String {
+    fn _derive_subnet(&self, ip: &str) -> String {
         let parts: Vec<&str> = ip.split('.').collect();
         if parts.len() == 4 {
             format!("{}.{}.{}.0/24", parts[0], parts[1], parts[2])

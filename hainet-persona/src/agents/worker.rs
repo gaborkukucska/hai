@@ -19,7 +19,7 @@ use super::templates::WorkerTemplate;
 use super::worker_intelligence::{WorkerLearner, ExecutionStrategy, ToolSelector, ErrorCategory, TaskOutcome};
 use super::session_tasks::SessionTaskList;
 use super::worker_discovery::{
-    DiscoveryContext, DiscoveryExecutionPlan, DiscoveryExecutionStep,
+    DiscoveryExecutionPlan, DiscoveryExecutionStep,
     parse_tool_selection, parse_execution_plan, format_tool_list, format_tool_metadata,
 };
 use serde_json::json;
@@ -50,10 +50,10 @@ pub struct WorkerAgent {
     state_machine: AgentStateMachine,
     
     /// Message bus for communication
-    message_bus: Arc<RwLock<MessageBus>>,
+    _message_bus: Arc<RwLock<MessageBus>>,
     
     /// Prompt manager for generating prompts
-    prompt_manager: Arc<RwLock<PromptManager>>,
+    _prompt_manager: Arc<RwLock<PromptManager>>,
     
     /// Project manager for task updates
     project_manager: Arc<RwLock<ProjectManager>>,
@@ -68,7 +68,7 @@ pub struct WorkerAgent {
     user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>,
 
     /// Maximum retry attempts for failed operations (deprecated - use execution_strategy.max_retries)
-    max_retries: usize,
+    _max_retries: usize,
     
     /// Worker intelligence - historical learning
     learner: WorkerLearner,
@@ -140,13 +140,13 @@ impl WorkerAgent {
             template,
             current_task: None,
             state_machine: AgentStateMachine::new(),
-            message_bus,
-            prompt_manager,
+            _message_bus: message_bus,
+            _prompt_manager: prompt_manager,
             project_manager,
             mcp_client,
             ai_provider_manager,
             user_settings: None, // Workers don't have user settings in new() - use from_template() instead
-            max_retries: 3, // Kept for backward compatibility
+            _max_retries: 3, // Kept for backward compatibility
             learner: WorkerLearner::new(), // Default 100 outcome capacity
             execution_strategy: ExecutionStrategy::default(), // 5s timeout, 3 retries, 1.5x backoff
             tool_selector: ToolSelector::new(fallback_tools),
@@ -196,13 +196,13 @@ impl WorkerAgent {
             template,
             current_task: None,
             state_machine: AgentStateMachine::new(),
-            message_bus,
-            prompt_manager,
+            _message_bus: message_bus,
+            _prompt_manager: prompt_manager,
             project_manager,
             mcp_client,
             ai_provider_manager,
             user_settings, // Accept user_settings from PM
-            max_retries: 3, // Kept for backward compatibility
+            _max_retries: 3, // Kept for backward compatibility
             learner: WorkerLearner::new(),
             execution_strategy: ExecutionStrategy::default(),
             tool_selector: ToolSelector::new(fallback_tools),
@@ -298,7 +298,7 @@ impl WorkerAgent {
         )?;
         
         // Execute with discovery-based approach
-        let start_time = SystemTime::now();
+        let _start_time = SystemTime::now();
         let result = self.execute_with_discovery(&task).await;
         
         match result {
@@ -683,7 +683,7 @@ impl WorkerAgent {
             let result = loop {
                 retry_count += 1;
                 
-                match self.execute_step(step).await {
+                match self._execute_step(step).await {
                     Ok(result) => {
                         // Record successful step
                         let duration_ms = step_start.elapsed()
@@ -855,7 +855,7 @@ impl WorkerAgent {
     }
     
     /// Plan task execution using LLM (original method for backward compatibility)
-    async fn plan_task_execution(&self, task_description: &str) -> Result<ExecutionPlan> {
+    async fn _plan_task_execution(&self, task_description: &str) -> Result<ExecutionPlan> {
         let planning_prompt = self.generate_planning_prompt(task_description);
         
         let options = GenerationOptions {
@@ -1101,7 +1101,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     }
     
     /// Execute plan with retry logic (original method for backward compatibility)
-    async fn execute_with_retries(&self, plan: &ExecutionPlan) -> Result<Vec<String>> {
+    async fn _execute_with_retries(&self, plan: &ExecutionPlan) -> Result<Vec<String>> {
         let mut deliverables = Vec::new();
         
         for (idx, step) in plan.steps.iter().enumerate() {
@@ -1112,18 +1112,18 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
             let result = loop {
                 attempts += 1;
                 
-                match self.execute_step(step).await {
+                match self._execute_step(step).await {
                     Ok(result) => break result,
-                    Err(e) if attempts < self.max_retries => {
+                    Err(e) if attempts < self._max_retries => {
                         tracing::warn!("Worker {} step failed (attempt {}/{}): {}",
-                                       self.id.name, attempts, self.max_retries, e);
+                                       self.id.name, attempts, self._max_retries, e);
                         tokio::time::sleep(tokio::time::Duration::from_millis(500 * attempts as u64)).await;
                         continue;
                     }
                     Err(e) => {
                         return Err(anyhow::anyhow!(
                             "Step {} failed after {} attempts: {}", 
-                            idx + 1, self.max_retries, e
+                            idx + 1, self._max_retries, e
                         ));
                     }
                 }
@@ -1136,7 +1136,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     }
     
     /// Execute single step with MCP tool
-    async fn execute_step(&self, step: &ExecutionStep) -> Result<String> {
+    async fn _execute_step(&self, step: &ExecutionStep) -> Result<String> {
         // Parse tool name: "server::tool_name"
         let parts: Vec<&str> = step.tool.split("::").collect();
         if parts.len() != 2 {
@@ -1160,13 +1160,13 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     }
     
     /// Execute file-related task using hainet-files MCP server
-    async fn execute_file_task(&self, task_description: &str) -> Result<Vec<String>> {
+    async fn _execute_file_task(&self, task_description: &str) -> Result<Vec<String>> {
         let mcp_client = self.mcp_client.read().await;
         
         // Simple task parsing - in production this would use LLM
         // For now, support basic file operations
         if task_description.contains("read") || task_description.contains("get") {
-            let path = self.extract_path_from_task(task_description);
+            let path = self._extract_path_from_task(task_description);
             
             let result = mcp_client.call_tool(
                 "hainet-files",
@@ -1176,7 +1176,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
             
             Ok(vec![format!("Read file: {}", result)])
         } else if task_description.contains("write") || task_description.contains("create") {
-            let path = self.extract_path_from_task(task_description);
+            let path = self._extract_path_from_task(task_description);
             let content = "Generated content"; // Would be LLM-generated
             
             let result = mcp_client.call_tool(
@@ -1187,7 +1187,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
             
             Ok(vec![format!("Wrote file: {}", result)])
         } else if task_description.contains("list") {
-            let path = self.extract_path_from_task(task_description);
+            let path = self._extract_path_from_task(task_description);
             
             let result = mcp_client.call_tool(
                 "hainet-files",
@@ -1202,10 +1202,10 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     }
     
     /// Execute generic task - tries to auto-detect task type
-    async fn execute_generic_task(&self, task_description: &str) -> Result<Vec<String>> {
+    async fn _execute_generic_task(&self, task_description: &str) -> Result<Vec<String>> {
         // Try file operations first
         if task_description.contains("file") || task_description.contains("directory") {
-            return self.execute_file_task(task_description).await;
+            return self._execute_file_task(task_description).await;
         }
         
         // Default fallback
@@ -1213,7 +1213,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     }
     
     /// Extract file path from task description (simplified NLP)
-    fn extract_path_from_task(&self, task_description: &str) -> String {
+    fn _extract_path_from_task(&self, task_description: &str) -> String {
         // Very simple path extraction - would use LLM in production
         if let Some(start) = task_description.find("/") {
             let remaining = &task_description[start..];

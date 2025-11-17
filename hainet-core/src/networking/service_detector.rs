@@ -4,17 +4,16 @@
 //! Automatically discovers Ollama, Whisper, Piper, and MCP servers running
 //! across the mesh network and registers them with the ServiceRegistry.
 
-use anyhow::{Result, Context};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use libp2p::PeerId;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use tokio::time::{timeout, Duration};
 
 use super::service_manager::{ServiceInfo, ServiceType};
 use super::service_registry::ServiceRegistry;
-use super::peer_discovery::DeviceCapabilities;
-use super::mesh_coordinator::{MeshCoordinator, SpecializedRole};
+use super::mesh_coordinator::MeshCoordinator;
 
 /// Discovered service information
 #[derive(Debug, Clone)]
@@ -63,9 +62,9 @@ pub struct ServiceDetector {
     /// Service registry for registration
     service_registry: Arc<ServiceRegistry>,
     /// Detection configuration
-    config: DetectorConfig,
+    _config: DetectorConfig,
     /// HTTP client for probing services
-    http_client: reqwest::Client,
+    _http_client: reqwest::Client,
     /// Discovered services cache
     discovered_services: Arc<RwLock<Vec<DiscoveredService>>>,
 }
@@ -95,8 +94,8 @@ impl ServiceDetector {
         Self {
             mesh_coordinator,
             service_registry,
-            config,
-            http_client,
+            _config: config,
+            _http_client: http_client,
             discovered_services: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -105,7 +104,7 @@ impl ServiceDetector {
     pub async fn discover_all(&self) -> Result<Vec<DiscoveredService>> {
         info!("Starting service discovery across mesh network...");
 
-        let mut all_services = Vec::new();
+        let all_services = Vec::new();
 
         // Get all role assignments from mesh coordinator
         let role_assignments = self.mesh_coordinator.get_all_assignments().await;
@@ -133,16 +132,16 @@ impl ServiceDetector {
     }
 
     /// Probe for Ollama LLM service
-    async fn probe_ollama(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
-        let endpoint = format!("http://{}:{}", ip, self.config.ollama_port);
+    async fn _probe_ollama(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
+        let endpoint = format!("http://{}:{}", ip, self._config.ollama_port);
         debug!("Probing Ollama at {}", endpoint);
 
         // Try to fetch Ollama's /api/tags endpoint (lists available models)
         let tags_url = format!("{}/api/tags", endpoint);
 
         match timeout(
-            self.config.probe_timeout,
-            self.http_client.get(&tags_url).send(),
+            self._config.probe_timeout,
+            self._http_client.get(&tags_url).send(),
         )
         .await
         {
@@ -186,16 +185,16 @@ impl ServiceDetector {
     }
 
     /// Probe for Whisper STT service
-    async fn probe_whisper(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
-        let endpoint = format!("http://{}:{}", ip, self.config.whisper_port);
+    async fn _probe_whisper(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
+        let endpoint = format!("http://{}:{}", ip, self._config.whisper_port);
         debug!("Probing Whisper at {}", endpoint);
 
         // Try to fetch Whisper's health endpoint
         let health_url = format!("{}/health", endpoint);
 
         match timeout(
-            self.config.probe_timeout,
-            self.http_client.get(&health_url).send(),
+            self._config.probe_timeout,
+            self._http_client.get(&health_url).send(),
         )
         .await
         {
@@ -222,16 +221,16 @@ impl ServiceDetector {
     }
 
     /// Probe for Piper TTS service
-    async fn probe_piper(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
-        let endpoint = format!("http://{}:{}", ip, self.config.piper_port);
+    async fn _probe_piper(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
+        let endpoint = format!("http://{}:{}", ip, self._config.piper_port);
         debug!("Probing Piper at {}", endpoint);
 
         // Try to fetch Piper's health endpoint
         let health_url = format!("{}/health", endpoint);
 
         match timeout(
-            self.config.probe_timeout,
-            self.http_client.get(&health_url).send(),
+            self._config.probe_timeout,
+            self._http_client.get(&health_url).send(),
         )
         .await
         {
@@ -258,7 +257,7 @@ impl ServiceDetector {
     }
 
     /// Probe for MCP servers
-    async fn probe_mcp_servers(&self, peer_id: PeerId, ip: &str) -> Vec<DiscoveredService> {
+    async fn _probe_mcp_servers(&self, peer_id: PeerId, ip: &str) -> Vec<DiscoveredService> {
         debug!("Probing MCP servers at {}", ip);
 
         // MCP servers typically run via stdio, but we check for HTTP-based MCP servers
@@ -276,8 +275,8 @@ impl ServiceDetector {
             let health_url = format!("{}/health", endpoint);
 
             match timeout(
-                self.config.probe_timeout,
-                self.http_client.get(&health_url).send(),
+                self._config.probe_timeout,
+                self._http_client.get(&health_url).send(),
             )
             .await
             {

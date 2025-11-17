@@ -10,7 +10,6 @@ use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::Layer;
 
 /// Finds the workspace root or falls back to a sensible default.
 fn find_workspace_root() -> Result<PathBuf> {

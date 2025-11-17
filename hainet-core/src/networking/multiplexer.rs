@@ -4,14 +4,14 @@
 use super::mesh_message::{MeshMessage, MeshResponse};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tokio::sync::{oneshot, RwLock};
 use uuid::Uuid;
 
 /// Pending request state
 struct PendingRequest {
     message: MeshMessage,
-    started_at: SystemTime,
+    _started_at: SystemTime,
     response_tx: oneshot::Sender<Result<MeshResponse, String>>,
 }
 
@@ -75,7 +75,7 @@ impl RequestMultiplexer {
         let request_id = message.id;
         let pending_request = PendingRequest {
             message,
-            started_at: SystemTime::now(),
+            _started_at: SystemTime::now(),
             response_tx: tx,
         };
 

@@ -5,7 +5,7 @@
 //! for the HAI-Net mesh network. It manages the mesh topology and coordinates
 //! role negotiations between devices.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use libp2p::PeerId;
@@ -87,7 +87,7 @@ impl ElectionResult {
 /// Mesh topology coordinator
 pub struct MeshCoordinator {
     local_peer_id: PeerId,
-    local_capabilities: DeviceCapabilities,
+    _local_capabilities: DeviceCapabilities,
     state: Arc<RwLock<MeshState>>,
     current_master: Arc<RwLock<Option<PeerId>>>,
     role_assignments: Arc<RwLock<HashMap<PeerId, RoleAssignment>>>,
@@ -105,7 +105,7 @@ impl MeshCoordinator {
     ) -> Self {
         Self {
             local_peer_id,
-            local_capabilities,
+            _local_capabilities: local_capabilities,
             state: Arc::new(RwLock::new(MeshState::Initializing)),
             current_master: Arc::new(RwLock::new(None)),
             role_assignments: Arc::new(RwLock::new(HashMap::new())),

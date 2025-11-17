@@ -143,12 +143,12 @@ pub enum Article {
 /// Constitutional compliance checker
 pub struct ConstitutionalChecker {
     /// Rules for each article
-    articles: Vec<Article>,
+    _articles: Vec<Article>,
 }
 
 impl ConstitutionalChecker {
     pub fn new(articles: Vec<Article>) -> Self {
-        Self { articles }
+        Self { _articles: articles }
     }
     
     /// Check if action complies with specific article
@@ -378,7 +378,7 @@ pub struct GuardianAgent {
     interceptor: Arc<GuardianInterceptor>,
     
     /// Constitutional checker
-    constitutional_checker: ConstitutionalChecker,
+    _constitutional_checker: ConstitutionalChecker,
     
     /// Scheduler for periodic tasks
     scheduler: Arc<RwLock<GuardianScheduler>>,
@@ -412,7 +412,7 @@ impl GuardianAgent {
             config,
             guardian_system,
             interceptor,
-            constitutional_checker,
+            _constitutional_checker: constitutional_checker,
             scheduler: Arc::new(RwLock::new(GuardianScheduler::new())),
             metrics,
         }
@@ -453,7 +453,7 @@ impl GuardianAgent {
     }
     
     /// Start the Guardian agent with message monitoring
-    pub async fn start(&mut self, mut monitoring_rx: mpsc::Receiver<Message>) -> Result<()> {
+    pub async fn start(&mut self, monitoring_rx: mpsc::Receiver<Message>) -> Result<()> {
         info!("Starting Guardian agent: {}", self.agent_id);
         
         // Transition from Startup to Monitoring
@@ -538,14 +538,14 @@ impl GuardianAgent {
         GuardianAgentHandle {
             agent_id: self.agent_id.clone(),
             state: Arc::clone(&self.state),
-            guardian_system: Arc::clone(&self.guardian_system),
+            _guardian_system: Arc::clone(&self.guardian_system),
             interceptor: Arc::clone(&self.interceptor),
             metrics: Arc::clone(&self.metrics),
         }
     }
     
     /// Run audit workflow (scheduled task)
-    async fn run_audit_workflow(&self) -> Result<AuditReport> {
+    async fn _run_audit_workflow(&self) -> Result<AuditReport> {
         info!("Running scheduled audit workflow");
         
         // TODO: Implement actual audit logic
@@ -562,7 +562,7 @@ impl GuardianAgent {
     }
     
     /// Run learning workflow (scheduled task)
-    async fn run_learning_workflow(&self) -> Result<LearningReport> {
+    async fn _run_learning_workflow(&self) -> Result<LearningReport> {
         info!("Running scheduled learning workflow");
         
         // TODO: Implement actual learning logic
@@ -579,7 +579,7 @@ impl GuardianAgent {
     }
     
     /// Run reporting workflow (scheduled/triggered task)
-    async fn run_reporting_workflow(&self, _trigger: ReportTrigger) -> Result<ComplianceReport> {
+    async fn _run_reporting_workflow(&self, _trigger: ReportTrigger) -> Result<ComplianceReport> {
         info!("Running reporting workflow");
         
         // Get stats from interceptor
@@ -651,7 +651,7 @@ impl GuardianAgent {
 struct GuardianAgentHandle {
     agent_id: AgentId,
     state: Arc<RwLock<GuardianState>>,
-    guardian_system: Arc<GuardianSystem>,
+    _guardian_system: Arc<GuardianSystem>,
     interceptor: Arc<GuardianInterceptor>,
     metrics: Arc<MetricsCollector>,
 }

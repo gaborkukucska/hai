@@ -1,11 +1,10 @@
 //! <!-- # START OF FILE hainet-core/src/networking/coordinator.rs -->
 use super::{discovery::DiscoveryBehaviour, peer::PeerBehaviour};
 use libp2p::{
-    core::upgrade,
     futures::StreamExt,
     identity, noise,
     swarm::SwarmEvent,
-    tcp, yamux, PeerId, Swarm, Transport,
+    yamux, PeerId, Swarm,
 };
 use libp2p_swarm_derive::NetworkBehaviour;
 use std::error::Error;

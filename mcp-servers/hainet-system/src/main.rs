@@ -3,7 +3,7 @@
 //! Provides system management tools for Admin AI agent.
 //! Tools enable monitoring, service management, and health checks.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
 use rmcp::service::RequestContext;

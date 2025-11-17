@@ -6,7 +6,6 @@ use tracing::info;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use hainet_seed::SeedService;
-use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "hainet-seed")]

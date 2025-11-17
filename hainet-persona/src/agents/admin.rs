@@ -24,7 +24,7 @@ use super::{Agent, AgentContext, IntentParser, TaskPlanner, AgentStateMachine};
 use super::pm::PMAgent;
 use super::llm_config::AgentLLMConfig;
 use super::metrics::{MetricsCollector, OperationResult};
-use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
+use super::session_tasks::{SessionTaskList};
 use crate::config::HaiNetConfig;
 use crate::messaging::{AgentId, Message};
 use crate::prompts::{AgentType, AgentState, PromptContext};
@@ -52,7 +52,7 @@ pub struct AdminAgent {
     intent_parser: IntentParser,
     
     /// Task planner for breaking down requests
-    task_planner: TaskPlanner,
+    _task_planner: TaskPlanner,
     
     /// State machine managing agent lifecycle
     state_machine: AgentStateMachine,
@@ -70,7 +70,7 @@ pub struct AdminAgent {
     running: bool,
     
     /// Configuration
-    config: HaiNetConfig,
+    _config: HaiNetConfig,
     
     /// LLM configuration for Admin agent
     llm_config: AgentLLMConfig,
@@ -103,13 +103,13 @@ impl AdminAgent {
             id: id.clone(),
             context,
             intent_parser: IntentParser::new(),
-            task_planner: TaskPlanner::new(),
+            _task_planner: TaskPlanner::new(),
             state_machine: AgentStateMachine::new(),
             project_manager,
             ai_provider_manager,
             active_projects: HashMap::new(),
             running: false,
-            config,
+            _config: config,
             llm_config,
             metrics,
             session_tasks: SessionTaskList::new(),

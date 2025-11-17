@@ -12,10 +12,10 @@ use super::cas::{ContentAddressedStore, ContentHash};
 use super::crdt::{NodeId, VectorClock};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Merkle tree node for efficient diff detection
 #[derive(Debug, Clone, Serialize, Deserialize)]

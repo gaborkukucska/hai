@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, warn, debug};
 
-use super::peer_discovery::{DeviceCapabilities, DeviceRole, PeerInfo, PeerStatus};
+use super::peer_discovery::{DeviceCapabilities, PeerInfo, PeerStatus};
 
 /// Maximum number of capability history entries to keep per device
 const MAX_CAPABILITY_HISTORY: usize = 100;

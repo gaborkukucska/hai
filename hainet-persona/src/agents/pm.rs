@@ -24,9 +24,6 @@ use super::pm_intelligence::{
     ProjectOutcome
 };
 use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
-use super::pm_discovery::{
-    parse_project_execution_plan, parse_worker_task_feedback, ProjectExecutionPlan,
-};
 
 /// Project Manager Agent
 /// 
@@ -565,7 +562,7 @@ impl PMAgent {
     }
     
     /// Generate detailed plan using LLM with discovery-based prompting (NEW)
-    async fn generate_detailed_plan_with_discovery(
+    async fn _generate_detailed_plan_with_discovery(
         &self,
         project: &crate::projects::Project,
         existing_tasks: &[crate::projects::Task],

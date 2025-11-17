@@ -15,7 +15,7 @@ use tracing::trace;
 #[derive(Clone)]
 pub struct GuardianOllamaClient {
     ai_provider_manager: Arc<AIProviderManager>,
-    default_model: String,
+    _default_model: String,
 }
 
 impl GuardianOllamaClient {
@@ -23,7 +23,7 @@ impl GuardianOllamaClient {
     pub fn new(ai_provider_manager: Arc<AIProviderManager>, default_model: String) -> Self {
         Self {
             ai_provider_manager,
-            default_model,
+            _default_model: default_model,
         }
     }
 

@@ -13,7 +13,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::time::Instant;
-use tracing::{debug, warn, trace};
+use tracing::{debug, warn};
 
 /// Ollama client for local inference
 #[derive(Clone)]
