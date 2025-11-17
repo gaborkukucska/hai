@@ -55,7 +55,12 @@ impl PromptRenderer {
         // Render the final template with handlebars
         let rendered = self.render_template(&final_prompt, context)?;
 
-        debug!("Rendered prompt with {} characters", rendered.len());
+        debug!(
+            target: "llm_messages",
+            "[PROMPT RENDERED] Final prompt ({} chars):\n---\n{}\n---",
+            rendered.len(),
+            rendered
+        );
         Ok(rendered)
     }
 
