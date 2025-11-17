@@ -1,46 +1,26 @@
-# HAI-Net Multi-API Load Balancing Configuration
-# This file configures multiple Ollama endpoints for load balancing and failover
-# Last updated: 2025-11-16
+# Ollama API Endpoints for HAI-Net Load Balancing
+#
+# This file configures the Ollama endpoints that the AIProviderManager will use
+# to distribute LLM requests. The default strategy is LeastLoaded, which sends
+# requests to the endpoint with the fewest active connections.
 
 [load_balancing]
-# Strategy: LeastLoaded (default), RoundRobin, ModelAffinity
+# Strategy for distributing requests across endpoints.
+# Options: "LeastLoaded", "RoundRobin", "ModelAffinity" (planned)
 strategy = "LeastLoaded"
 
-# Request timeout in seconds (default: 120)
+# Default request timeout in seconds.
 request_timeout_secs = 120
 
-# Health check interval in seconds (default: 30)
+# Interval for background health checks in seconds.
 health_check_interval_secs = 30
 
-# Endpoints Configuration
-# Each endpoint can have different concurrency limits based on hardware
+# === Endpoints ===
+# Define one or more Ollama endpoints below.
 
 [endpoints.primary]
+# URL of the Ollama API endpoint.
 url = "http://localhost:11434"
+
+# Maximum number of concurrent requests for this endpoint.
 max_concurrent = 3
-description = "Primary Ollama instance on default port"
-
-# Example: Additional endpoints for multi-device mesh
-# Uncomment and configure as needed
-
-# [endpoints.secondary]
-# url = "http://localhost:11435"
-# max_concurrent = 2
-# description = "Secondary Ollama instance on alternate port"
-
-# [endpoints.gpu_node]
-# url = "http://10.0.0.11:11434"
-# max_concurrent = 5
-# description = "High-performance GPU node on mesh network"
-
-# [endpoints.laptop]
-# url = "http://10.0.0.20:11434"
-# max_concurrent = 2
-# description = "Laptop node for lightweight tasks"
-
-# Configuration Notes:
-# - max_concurrent: Number of simultaneous requests per endpoint
-# - Set based on available VRAM/RAM (e.g., 3 for 16GB systems, 5 for 32GB+)
-# - Health checks run automatically every 30 seconds
-# - Unhealthy endpoints are skipped automatically
-# - LeastLoaded strategy distributes requests to least-busy endpoint

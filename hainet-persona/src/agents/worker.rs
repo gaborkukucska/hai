@@ -967,6 +967,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
                     tools_desc.push_str("  - file_write(path, content) - Write to file\n");
                     tools_desc.push_str("  - file_list(path) - List directory contents\n");
                     tools_desc.push_str("  - file_metadata(path) - Get file metadata\n");
+                    tools_desc.push_str("  - directory_create(path) - Create a directory\n");
                 }
                 "hainet-system" => {
                     tools_desc.push_str("  - system_status() - Get CPU, RAM, disk usage\n");
