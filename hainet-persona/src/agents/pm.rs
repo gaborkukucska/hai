@@ -932,8 +932,13 @@ CRITICAL: JSON only. No explanations.
         
         // Assign task to worker (lock should be fully released by now)
         worker.assign_task(task_id.clone()).await?;
+
+        // Start the task to transition its state to InProgress
+        let project_manager = self.project_manager.write().await;
+        project_manager.start_task(task_id).await?;
+        drop(project_manager);
         
-        tracing::info!("[DIAGNOSTIC] PM {} assign_task completed successfully", self.id.name);
+        tracing::info!("[DIAGNOSTIC] PM {} assign_task and start_task completed successfully", self.id.name);
         
         tracing::info!("[DIAGNOSTIC] About to spawn worker {} for task {}", worker.id().name, task_id);
         
