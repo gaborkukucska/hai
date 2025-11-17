@@ -87,12 +87,8 @@ impl FilesServer {
     fn normalize_path(&self, requested_path: &str, project_name: Option<&str>) -> Result<PathBuf> {
         // Determine if this is an Admin bypass request
         let is_admin_access = match project_name {
-            None => {
-                debug!("Admin access: project_name is None (full filesystem access)");
-                true
-            }
-            Some(name) if name == ADMIN_PROJECT_BYPASS => {
-                debug!("Admin access: explicit bypass with {}", ADMIN_PROJECT_BYPASS);
+            None | Some(ADMIN_PROJECT_BYPASS) => {
+                debug!("Admin access granted for path: {}", requested_path);
                 true
             }
             Some(name) => {
@@ -114,13 +110,13 @@ impl FilesServer {
             // Admin: full filesystem access relative to base_path
             self.base_path.join(path_str)
         } else {
-            // Worker: sandboxed to project directory
-            let project_name = project_name.unwrap(); // Safe: already checked above
-            self.base_path
+            // Safe to unwrap here because is_admin_access is false
+            let project_name = project_name.unwrap();
+            canonical_base
                 .join("sandbox")
                 .join("projects")
                 .join(project_name)
-                .join(path_str)
+                .join(safe_suffix)
         };
 
         // Get the canonical base path for security checks
