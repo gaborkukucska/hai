@@ -97,27 +97,18 @@ impl FilesServer {
             }
         };
 
-        // Clean and validate the requested path to prevent traversal attacks
-        let mut components = Vec::new();
-        let path_buf = PathBuf::from(requested_path);
-        for component in path_buf.components() {
-            match component {
-                std::path::Component::Normal(part) => components.push(part),
-                std::path::Component::RootDir | std::path::Component::ParentDir | std::path::Component::CurDir => {
-                    // Ignore these components to prevent traversal
-                }
-                _ => {}
-            }
+        // Remove leading slash if present (treat all paths as relative)
+        let path_str = requested_path.trim_start_matches('/');
+
+        // Reject paths containing '..' to prevent directory traversal
+        if path_str.contains("..") {
+            anyhow::bail!("Path traversal attempt detected: '..' not allowed");
         }
-        let safe_suffix: PathBuf = components.iter().collect();
 
-        // Get the canonical (absolute, resolved) base path for security checks
-        let canonical_base = self.base_path.canonicalize()
-            .context("Failed to canonicalize base path")?;
-
-        // Construct the final path based on access level
-        let final_path = if is_admin_access {
-            canonical_base.join(safe_suffix)
+        // Construct sandboxed or full path based on access level
+        let resolved_path = if is_admin_access {
+            // Admin: full filesystem access relative to base_path
+            self.base_path.join(path_str)
         } else {
             // Safe to unwrap here because is_admin_access is false
             let project_name = project_name.unwrap();
@@ -128,13 +119,35 @@ impl FilesServer {
                 .join(safe_suffix)
         };
 
-        // Final security check: ensure the fully constructed path is within the base directory.
-        // This is the most critical step to prevent any form of directory traversal.
+        // Get the canonical base path for security checks
+        let canonical_base = self.base_path.canonicalize()
+            .context("Failed to canonicalize base path")?;
+
+        // Security check: Ensure the resolved path is within the canonical base path.
+        // This prevents directory traversal attacks even if the path doesn't exist yet.
+        // We achieve this by resolving the path without canonicalizing the final component.
+        let mut final_path = if let Some(parent) = resolved_path.parent() {
+            if parent.exists() {
+                parent.canonicalize()
+                    .context("Failed to canonicalize parent path")?
+            } else {
+                // If the parent doesn't exist, we can't canonicalize it.
+                // We trust create_dir_all to handle creation, but we must still
+                // ensure the constructed path starts with the base path.
+                parent.to_path_buf()
+            }
+        } else {
+            // If there's no parent, it means we're at the root of the path,
+            // which should be the base path itself.
+            self.base_path.clone()
+        };
+
+        if let Some(file_name) = resolved_path.file_name() {
+            final_path.push(file_name);
+        }
+
         if !final_path.starts_with(&canonical_base) {
-            anyhow::bail!(
-                "Security violation: Attempted to access path '{}' outside of the designated working directory.",
-                final_path.display()
-            );
+            anyhow::bail!("Resolved path is outside the working directory: {}", requested_path);
         }
 
         debug!("Normalized path: {} -> {}", requested_path, final_path.display());
