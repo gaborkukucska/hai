@@ -24,7 +24,7 @@ use super::{Agent, AgentContext, IntentParser, TaskPlanner, AgentStateMachine};
 use super::pm::PMAgent;
 use super::llm_config::AgentLLMConfig;
 use super::metrics::{MetricsCollector, OperationResult};
-use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
+use super::session_tasks::SessionTaskList;
 use crate::config::HaiNetConfig;
 use crate::messaging::{AgentId, Message};
 use crate::prompts::{AgentType, AgentState, PromptContext};

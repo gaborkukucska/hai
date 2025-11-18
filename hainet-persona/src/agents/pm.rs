@@ -24,9 +24,6 @@ use super::pm_intelligence::{
     ProjectOutcome
 };
 use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
-use super::pm_discovery::{
-    parse_project_execution_plan, parse_worker_task_feedback, ProjectExecutionPlan,
-};
 
 /// Project Manager Agent
 /// 

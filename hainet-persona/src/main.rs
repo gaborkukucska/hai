@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
     
     // Guardian needs Arc<MetricsCollector>, extract from RwLock
     let metrics_for_guardian = {
-        let guard = metrics.read().await;
+        let _guard = metrics.read().await;
         // Create a new Arc pointing to the same MetricsCollector instance
         Arc::new(MetricsCollector::new("hainet_metrics.db").await?)
     };
@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
     
     // Register Guardian for monitoring all messages
     let guardian_rx = {
-        let mut bus = message_bus.write().await;
+        let bus = message_bus.write().await;
         bus.register_guardian_monitor(guardian.id().clone()).await?
     };
     

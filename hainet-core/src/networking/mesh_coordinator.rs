@@ -5,7 +5,7 @@
 //! for the HAI-Net mesh network. It manages the mesh topology and coordinates
 //! role negotiations between devices.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 use libp2p::PeerId;

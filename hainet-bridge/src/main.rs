@@ -5,7 +5,6 @@
 
 use tracing::info;
 use anyhow::Result;
-use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<()> {

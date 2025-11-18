@@ -8,7 +8,7 @@
 //! 3. Loads detailed metadata only for those tools
 //! 4. Generates execution plan with focused context
 
-use anyhow::{Result, Context};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

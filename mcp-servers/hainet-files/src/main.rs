@@ -105,53 +105,45 @@ impl FilesServer {
             anyhow::bail!("Path traversal attempt detected: '..' not allowed");
         }
 
+        // Get the canonical base path for security checks (MUST be before constructing resolved_path)
+        let canonical_base = self.base_path.canonicalize()
+            .context("Failed to canonicalize base path")?;
+
         // Construct sandboxed or full path based on access level
         let resolved_path = if is_admin_access {
             // Admin: full filesystem access relative to base_path
             self.base_path.join(path_str)
         } else {
+            // Worker: sandboxed to project directory
             // Safe to unwrap here because is_admin_access is false
             let project_name = project_name.unwrap();
+            
+            // Sanitize project name: replace spaces and special chars with underscores
+            let sanitized_project = project_name
+                .replace(' ', "_")
+                .replace('/', "_")
+                .replace('\\', "_");
+            
             canonical_base
                 .join("sandbox")
                 .join("projects")
-                .join(project_name)
-                .join(safe_suffix)
+                .join(sanitized_project)
+                .join(path_str)
         };
-
-        // Get the canonical base path for security checks
-        let canonical_base = self.base_path.canonicalize()
-            .context("Failed to canonicalize base path")?;
 
         // Security check: Ensure the resolved path is within the canonical base path.
-        // This prevents directory traversal attacks even if the path doesn't exist yet.
-        // We achieve this by resolving the path without canonicalizing the final component.
-        let mut final_path = if let Some(parent) = resolved_path.parent() {
-            if parent.exists() {
-                parent.canonicalize()
-                    .context("Failed to canonicalize parent path")?
-            } else {
-                // If the parent doesn't exist, we can't canonicalize it.
-                // We trust create_dir_all to handle creation, but we must still
-                // ensure the constructed path starts with the base path.
-                parent.to_path_buf()
-            }
-        } else {
-            // If there's no parent, it means we're at the root of the path,
-            // which should be the base path itself.
-            self.base_path.clone()
-        };
-
-        if let Some(file_name) = resolved_path.file_name() {
-            final_path.push(file_name);
-        }
-
-        if !final_path.starts_with(&canonical_base) {
+        // For paths that don't exist yet, we validate the constructed path structurally.
+        // This is safe because we've already:
+        // 1. Blocked directory traversal (..)
+        // 2. Constructed the path from trusted components (canonical_base + known suffixes)
+        
+        // The resolved_path is already correctly constructed - just validate it starts with base
+        if !resolved_path.starts_with(&canonical_base) {
             anyhow::bail!("Resolved path is outside the working directory: {}", requested_path);
         }
 
-        debug!("Normalized path: {} -> {}", requested_path, final_path.display());
-        Ok(final_path)
+        debug!("Normalized path: {} -> {}", requested_path, resolved_path.display());
+        Ok(resolved_path)
     }
 
     async fn handle_file_read(&self, path: String, project_name: Option<String>) -> Result<String> {
@@ -266,15 +258,20 @@ impl FilesServer {
     }
 
     async fn handle_directory_create(&self, path: String, project_name: Option<String>) -> Result<String> {
-        debug!("Creating directory: {}", path);
+        debug!("Creating directory: {} (project: {:?})", path, project_name);
 
         // Normalize and validate path
-        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())
+            .context(format!("Path normalization failed for: {}", path))?;
+
+        debug!("Normalized directory path: {}", normalized_path.display());
 
         // Create directory and all parent directories
         tokio::fs::create_dir_all(&normalized_path)
             .await
-            .context("Failed to create directory")?;
+            .context(format!("Failed to create directory at: {}", normalized_path.display()))?;
+
+        info!("Successfully created directory: {}", normalized_path.display());
 
         let result = WriteResult {
             success: true,

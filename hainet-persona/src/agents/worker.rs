@@ -19,7 +19,7 @@ use super::templates::WorkerTemplate;
 use super::worker_intelligence::{WorkerLearner, ExecutionStrategy, ToolSelector, ErrorCategory, TaskOutcome};
 use super::session_tasks::SessionTaskList;
 use super::worker_discovery::{
-    DiscoveryContext, DiscoveryExecutionPlan, DiscoveryExecutionStep,
+    DiscoveryExecutionPlan, DiscoveryExecutionStep,
     parse_tool_selection, parse_execution_plan, format_tool_list, format_tool_metadata,
 };
 use serde_json::json;
@@ -923,7 +923,12 @@ INSTRUCTIONS:
 2. Each step must use ONE MCP tool with specific parameters.
 3. Steps can have dependencies on previous steps.
 4. Be specific with file paths, parameters, and expected outputs.
-5. **If the task is to set up a new project, your first step MUST be to create a file or directory using `hainet-files::file_write`. Do not attempt to read files that do not exist.**
+5. **IMPORTANT - Tool Selection:**
+   - Use `hainet-files::directory_create` to create directories
+   - Use `hainet-files::file_write` to create/write files
+   - Use `hainet-files::file_read` to read existing files
+   - Do not attempt to read files that do not exist yet
+   - When setting up a new project, create directories FIRST using directory_create, then create files using file_write
 
 RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
 {{

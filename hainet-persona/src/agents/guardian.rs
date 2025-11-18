@@ -453,7 +453,7 @@ impl GuardianAgent {
     }
     
     /// Start the Guardian agent with message monitoring
-    pub async fn start(&mut self, mut monitoring_rx: mpsc::Receiver<Message>) -> Result<()> {
+    pub async fn start(&mut self, monitoring_rx: mpsc::Receiver<Message>) -> Result<()> {
         info!("Starting Guardian agent: {}", self.agent_id);
         
         // Transition from Startup to Monitoring

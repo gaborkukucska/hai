@@ -4,17 +4,16 @@
 //! Automatically discovers Ollama, Whisper, Piper, and MCP servers running
 //! across the mesh network and registers them with the ServiceRegistry.
 
-use anyhow::{Result, Context};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use libp2p::PeerId;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use tokio::time::{timeout, Duration};
 
 use super::service_manager::{ServiceInfo, ServiceType};
 use super::service_registry::ServiceRegistry;
-use super::peer_discovery::DeviceCapabilities;
-use super::mesh_coordinator::{MeshCoordinator, SpecializedRole};
+use super::mesh_coordinator::MeshCoordinator;
 
 /// Discovered service information
 #[derive(Debug, Clone)]
@@ -105,7 +104,7 @@ impl ServiceDetector {
     pub async fn discover_all(&self) -> Result<Vec<DiscoveredService>> {
         info!("Starting service discovery across mesh network...");
 
-        let mut all_services = Vec::new();
+        let all_services = Vec::new();
 
         // Get all role assignments from mesh coordinator
         let role_assignments = self.mesh_coordinator.get_all_assignments().await;

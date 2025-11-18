@@ -12,9 +12,9 @@
 
 use super::cas::ContentAddressedStore;
 use super::crdt::NodeId;
-use super::distributed::{DistributedConfig, DistributedStorage, NodeCapacity, StorageStats};
+use super::distributed::{DistributedConfig, DistributedStorage, StorageStats};
 use super::sync_protocol::SyncProtocol;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -347,8 +347,20 @@ This file tracks the core functions/methods defined within the framework, catego
 ### hainet-persona/src/agents/pm.rs
 - `PMAgent::new(id, context)` - Create a new PM agent
 
-### hainet-persona/src/agents/worker.rs
-- `WorkerAgent::new(id, context)` - Create a new Worker agent
+### hainet-persona/src/agents/worker.rs (Session 55 - Enhanced)
+- `WorkerAgent::new(id, context, template, user_settings)` - Create a new Worker agent
+- `WorkerAgent::from_template(template_name, context, user_settings)` - Create worker from template (FileWorker, NetworkWorker, ResearchWorker, CodeWorker)
+- `WorkerAgent::plan_task_execution(task)` - **Enhanced Session 55:** Plan task execution with improved tool selection guidance
+  - Updated worker prompt with clear tool selection guide
+  - Explicit guidance: Use `directory_create` for directories, `file_write` for files
+  - Workflow best practice: Create directories FIRST, then files
+  - Prevents reading non-existent files
+- `WorkerAgent::execute_task(task)` - Execute task with MCP tool routing and error handling
+- `WorkerAgent::discover_tools()` - Discover available MCP tools from connected servers
+- `WorkerAgent::execute_step(step)` - Execute individual task step via MCP
+- `WorkerAgent::parse_execution_plan(llm_response)` - Parse LLM response into execution steps
+- **Template Types:** `FileWorker`, `NetworkWorker`, `ResearchWorker`, `CodeWorker`
+- **Status:** ✅ Complete - Session 55: Worker prompt guidance improved (~10 LOC)
 
 ### hainet-persona/src/agents/templates.rs
 - `WorkerTemplate::file_worker()` - Create a FileWorker template
@@ -759,18 +771,26 @@ This file tracks the core functions/methods defined within the framework, catego
 
 ## MCP Servers (Phase 5 - In Progress)
 
-### mcp-servers/hainet-files/src/main.rs (Session 51 - Enhanced) ✅
+### mcp-servers/hainet-files/src/main.rs (Session 55 - Enhanced) ✅
 - `FilesServer::new(storage_path, base_path)` - Create file operations MCP server with CAS integration and base path configuration
-- `FilesServer::normalize_path(requested_path)` - **NEW:** Normalize and validate paths relative to base_path with security checks
-- `FilesServer::handle_file_read(path)` - Read file content (now with path normalization) and store in content-addressed storage
-- `FilesServer::handle_file_write(path, content)` - Write file content (now with path normalization + parent dir creation) and store in CAS
-- `FilesServer::handle_file_list(path)` - List files in a directory (now with path normalization)
-- `FilesServer::handle_file_metadata(path)` - Get file metadata (now with path normalization)
-- **MCP Tools:** `file_read`, `file_write`, `file_list`, `file_metadata`
+- `FilesServer::normalize_path(requested_path, project_name)` - **Enhanced Session 55:** Simplified path validation with structural checks and project name sanitization
+  - Removes canonicalization of non-existent paths
+  - Validates paths structurally (starts_with check)
+  - Sanitizes project names (replaces spaces/slashes with underscores)
+  - Works for both existing and non-existent paths
+  - Maintains security: directory traversal (..) still blocked
+- `FilesServer::handle_file_read(path, project_name)` - Read file content with project sandboxing
+- `FilesServer::handle_file_write(path, content, project_name)` - Write file content with project sandboxing + parent dir creation
+- `FilesServer::handle_directory_create(path, project_name)` - **Enhanced Session 55:** Create directory with improved logging
+- `FilesServer::handle_file_list(path, project_name)` - List files in a directory with project sandboxing
+- `FilesServer::handle_file_metadata(path, project_name)` - Get file metadata with project sandboxing
+- **MCP Tools:** `file_read`, `file_write`, `directory_create`, `file_list`, `file_metadata`
 - **Environment Variables:** `HAINET_FILES_BASE_PATH` - Base path for all file operations (defaults to current directory)
-- **Security Features:** Directory traversal prevention (`..` blocked), canonicalization, boundary enforcement
-- **Target User:** Worker AI agents for file-based task execution
-- **Status:** ✅ Complete - Session 49: Tool names fixed, Session 51: Path normalization added (~140 LOC)
+- **Security Features:** Directory traversal prevention (`..` blocked), structural validation, project sandboxing, admin bypass
+- **Project Sandboxing:** Worker operations scoped to `/sandbox/projects/{sanitized_project_name}/`
+- **Project Name Sanitization:** Spaces → underscores, slashes → underscores (e.g., "Neon Snake" → "Neon_Snake")
+- **Target User:** Worker AI agents for file-based task execution (sandboxed), Admin AI agent (full access)
+- **Status:** ✅ Complete - Session 49: Tool names fixed, Session 51: Path normalization (~140 LOC), Session 52: Project sandboxing (~100 LOC), Session 55: Path handling fixes + project sanitization (~150 LOC)
 
 ### mcp-servers/hainet-system/src/main.rs (Phase 5.2 - Complete)
 - `SystemServer::new()` - Create system management MCP server

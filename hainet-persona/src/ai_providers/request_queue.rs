@@ -7,7 +7,7 @@ use anyhow::{Result, Context};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use tokio::sync::{RwLock, SemaphorePermit};
+use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
 
 use super::api_registry::{ApiRegistry, OllamaEndpoint, HealthStatus};
