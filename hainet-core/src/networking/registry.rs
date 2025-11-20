@@ -209,14 +209,29 @@ impl DeviceRegistry {
 
     /// Mark a device as offline
     pub async fn mark_offline(&self, peer_id: &PeerId) -> Result<()> {
+        self.update_status(peer_id, PeerStatus::Offline).await
+    }
+
+    /// Update device status
+    pub async fn update_status(&self, peer_id: &PeerId, status: PeerStatus) -> Result<()> {
         let mut devices = self.devices.write().await;
         
         if let Some(entry) = devices.get_mut(peer_id) {
-            entry.peer_info.status = PeerStatus::Offline;
-            entry.health_score = 0.0;
+            let old_status = entry.peer_info.status;
+            entry.peer_info.status = status;
             
-            warn!("Device {} marked offline", peer_id);
-            let _ = self.event_tx.send(RegistryEvent::PeerOffline(*peer_id)).await;
+            if status == PeerStatus::Offline {
+                entry.health_score = 0.0;
+                warn!("Device {} marked offline", peer_id);
+                let _ = self.event_tx.send(RegistryEvent::PeerOffline(*peer_id)).await;
+            } else if status == PeerStatus::Suspected && old_status != PeerStatus::Suspected {
+                debug!("Device {} suspected offline", peer_id);
+                let _ = self.event_tx.send(RegistryEvent::PeerSuspected(*peer_id)).await;
+            } else if status == PeerStatus::Online && old_status != PeerStatus::Online {
+                entry.peer_info.update_last_seen();
+                debug!("Device {} back online", peer_id);
+                let _ = self.event_tx.send(RegistryEvent::PeerUpdated(entry.peer_info.clone())).await;
+            }
         }
         
         Ok(())
@@ -228,6 +243,16 @@ impl DeviceRegistry {
         devices
             .values()
             .filter(|e| e.peer_info.status == PeerStatus::Online)
+            .map(|e| e.peer_info.clone())
+            .collect()
+    }
+
+    /// Get monitored devices (Online + Suspected)
+    pub async fn get_monitored_devices(&self) -> Vec<PeerInfo> {
+        let devices = self.devices.read().await;
+        devices
+            .values()
+            .filter(|e| e.peer_info.status == PeerStatus::Online || e.peer_info.status == PeerStatus::Suspected)
             .map(|e| e.peer_info.clone())
             .collect()
     }

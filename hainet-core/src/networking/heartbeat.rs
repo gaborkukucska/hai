@@ -158,7 +158,7 @@ impl HeartbeatManager {
         registry: &Arc<DeviceRegistry>,
         peers: &Arc<RwLock<HashMap<PeerId, HeartbeatState>>>,
     ) -> Result<()> {
-        let online_devices = registry.get_online_devices().await;
+        let online_devices = registry.get_monitored_devices().await;
         let mut peers_map = peers.write().await;
         
         for peer_info in online_devices {
@@ -167,6 +167,14 @@ impl HeartbeatManager {
             // Get or create heartbeat state
             let state = peers_map.entry(peer_id).or_insert_with(HeartbeatState::new);
             
+            // Check for missed heartbeat (if we sent one that wasn't received)
+            // We allow a small grace period (100ms) to avoid race conditions on first run
+            if state.last_sent > state.last_received {
+                // Only record miss if enough time has passed (e.g. > 50% of interval)
+                // But since this runs ON interval, it implies a full interval passed.
+                state.record_missed();
+            }
+
             // Update last sent time
             state.last_sent = SystemTime::now();
             

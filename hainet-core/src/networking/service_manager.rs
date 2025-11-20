@@ -237,9 +237,24 @@ impl ServiceManager {
             .collect()
     }
 
-    /// Get service by ID
+    /// Get a service by ID
     pub fn get_service(&self, service_id: Uuid) -> Option<ServiceInfo> {
         self.services.read().unwrap().get(&service_id).cloned()
+    }
+
+    /// Get all services for a specific peer
+    pub fn get_services_by_peer(&self, peer_id: &PeerId) -> Vec<ServiceInfo> {
+        let services_map = self.services.read().unwrap();
+        let peer_index = self.services_by_peer.read().unwrap();
+        
+        if let Some(service_ids) = peer_index.get(peer_id) {
+            service_ids
+                .iter()
+                .filter_map(|id| services_map.get(id).cloned())
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Update service health status
@@ -265,6 +280,17 @@ impl ServiceManager {
                     service_id, service.consecutive_failures, service.health_status
                 );
             }
+        }
+    }
+
+    /// Force mark a service as unhealthy (e.g. when host peer is offline)
+    pub fn mark_service_unhealthy(&self, service_id: Uuid) {
+        let mut services = self.services.write().unwrap();
+        if let Some(service) = services.get_mut(&service_id) {
+            service.last_health_check = SystemTime::now();
+            service.consecutive_failures = std::cmp::max(service.consecutive_failures + 1, 2);
+            service.health_status = ServiceHealth::Unhealthy;
+            warn!("Service {} forced to UNHEALTHY state", service_id);
         }
     }
 

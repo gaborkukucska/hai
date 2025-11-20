@@ -303,6 +303,19 @@ impl PMAgent {
                 self.validate_task(&task_id).await?;
             }
             
+            // Check for tasks needing revision
+            let tasks_needing_revision = self.get_tasks_needing_revision().await?;
+            
+            tracing::info!(
+                "PM {} found {} tasks needing revision",
+                self.id.name,
+                tasks_needing_revision.len()
+            );
+            
+            for task_id in tasks_needing_revision {
+                self.handle_revision_task(&task_id).await?;
+            }
+            
             // Check if all tasks are complete
             if self.is_project_complete().await? {
                 self.complete_project().await?;
@@ -354,6 +367,17 @@ impl PMAgent {
             .collect())
     }
     
+    /// Get tasks that need revision (rejected by PM)
+    async fn get_tasks_needing_revision(&self) -> Result<Vec<TaskId>> {
+        let project_manager = self.project_manager.read().await;
+        let tasks = project_manager.get_project_tasks(&self.project_id).await?;
+        
+        Ok(tasks.into_iter()
+            .filter(|task| matches!(task.status, crate::projects::TaskStatus::NeedsRevision))
+            .map(|task| task.id)
+            .collect())
+    }
+    
     /// Validate task results submitted by worker
     async fn validate_task(&mut self, task_id: &TaskId) -> Result<()> {
         let task = {
@@ -374,7 +398,7 @@ impl PMAgent {
         // Call LLM for validation decision
         let options = GenerationOptions {
             temperature: Some(0.3),
-            max_tokens: Some(300),
+            max_tokens: Some(2048),
             ..Default::default()
         };
         
@@ -388,7 +412,7 @@ impl PMAgent {
         
         // Add timeout wrapper to prevent indefinite hanging
         tracing::info!("[DIAGNOSTIC] PM {} calling LLM for validation (model: {})", self.id.name, model_name);
-        let llm_timeout = tokio::time::Duration::from_secs(60); // 60s timeout for LLM generation
+        let llm_timeout = tokio::time::Duration::from_secs(300); // 300s timeout for LLM generation
         let response = tokio::time::timeout(
             llm_timeout,
             client.generate(model_name, &prompt, options)
@@ -456,6 +480,50 @@ impl PMAgent {
                 reason
             );
         }
+        
+        Ok(())
+    }
+    
+    /// Handle a task that needs revision
+    async fn handle_revision_task(&mut self, task_id: &TaskId) -> Result<()> {
+        let task = {
+            let pm = self.project_manager.read().await;
+            pm.get_task(task_id).await?
+        };
+        
+        // Check if task can be retried
+        if !task.can_retry_revision() {
+            tracing::warn!(
+                "PM {} task '{}' exceeded max revisions ({}), marking as failed",
+                self.id.name,
+                task.title,
+                task.max_revisions
+            );
+            
+            let failure_reason = format!(
+                "Exceeded maximum revision attempts ({}). Last feedback: {}",
+                task.max_revisions,
+                task.pm_feedback.as_deref().unwrap_or("No feedback")
+            );
+            
+            let pm = self.project_manager.read().await;
+            pm.fail_task(task_id, failure_reason).await?;
+            return Ok(());
+        }
+        
+        // Reset task for revision
+        tracing::info!(
+            "PM {} resetting task '{}' for revision (attempt {}/{})",
+            self.id.name,
+            task.title,
+            task.revision_count + 1,
+            task.max_revisions
+        );
+        
+        // The task will be reset to InProgress, and the existing worker will retry
+        // We don't need to spawn a new worker - the existing one should still be active
+        let pm = self.project_manager.read().await;
+        pm.reset_task_for_revision(task_id).await?;
         
         Ok(())
     }
@@ -776,7 +844,7 @@ CRITICAL: JSON only. No explanations.
         
         // Add timeout wrapper to prevent indefinite hanging
         tracing::info!("[DIAGNOSTIC] PM {} calling LLM for planning (model: {})", self.id.name, model_name);
-        let llm_timeout = tokio::time::Duration::from_secs(60); // 60s timeout for LLM generation
+        let llm_timeout = tokio::time::Duration::from_secs(300); // 300s timeout for LLM generation
         let response = tokio::time::timeout(
             llm_timeout,
             client.generate(model_name, &planning_prompt, options)

@@ -6,8 +6,22 @@
 last_updated = "2025-11-17T06:25:00.000000+00:00"
 project_name = "HAI-Net Seed"
 version = "0.52"
-current_phase = "Security Enhancement"
-current_cycle = "Session 52 - Project-Based File Sandboxing - COMPLETE"
+[[completed_cycles]]
+id = "10.1"
+date = "2025-11-20"
+phase = "Advanced Mesh Features"
+session = "Network Resilience & Auto-Healing"
+changes = [
+    "Created AutoHealer component for monitoring peer and service health",
+    "Implemented immediate service degradation on peer failure",
+    "Enhanced DeviceRegistry to monitor suspected peers",
+    "Integrated AutoHealer into MeshCoordinator",
+    "Verified with auto_healing_test.rs"
+]
+status = "success"
+next_session = "Service Recovery & Migration"
+current_phase = "Advanced Mesh Features"
+current_cycle = "Session 10.1 - Network Resilience & Auto-Healing - COMPLETE"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -88,6 +102,7 @@ phase_6b_progress = 1.00  # 6/6 sessions complete - PHASE 6B COMPLETE! 🎉
 phase_7_progress = 1.00  # 8/8 cycles complete - PHASE 7 COMPLETE! 🎉 (7.7 Verification, 7.8 Binary Transfer Fix)
 phase_8a_progress = 1.00  # 4/4 sessions complete - PHASE 8A COMPLETE! 🎉
 phase_9a_progress = 1.00  # 5/5 sessions complete - PHASE 9A COMPLETE! 🎉
+phase_10_progress = 0.20  # 1/5 sessions complete (10.1 Auto-Healing)
 phase_8b_progress = 1.00  # 5/5 sessions complete - PHASE 8B COMPLETE! 🎉
 phase_session_40_progress = 1.00  # Phase 2 COMPLETE (100%), Phase 3 COMPLETE (100%) - Phase 1 deferred
 total_loc_produced = 40537  # +120 LOC (Session 42: selection.rs +120 net changes)
@@ -1140,186 +1155,6 @@ test_breakdown = [
 ]
 next_step = "Phase 10: Advanced Mesh Features (Network Resilience, Auto-Healing, Service Migration) OR Production Integration Testing"
 phase_completion = "Phase 9A: 100% COMPLETE! 🎊 (5/5 sessions done)"
-
-[[completed_cycles]]
-id = "9A.4"
-name = "Mesh Communication Protocol - Session 4 Complete"
-completion_date = "2025-11-05"
-loc = 1400  # mesh_message(380) + rpc_client(440) + rpc_server(320) + multiplexer(260)
-tests = 34  # Mesh communication tests (all passing)
-goal = "Implement mesh communication protocol with RPC layer, request multiplexing, timeout/retry logic, and message routing for distributed task execution across mesh network"
-next_step = "Session 5: Service Auto-Discovery & Integration"
-phase_completion = "Phase 9A: 80% complete (4/5 sessions done)"
-
-[[completed_cycles]]
-id = "9A.3"
-name = "Service Distribution & Load Balancing - Session 3 Complete"
-completion_date = "2025-11-05"
-loc = 1090  # service_manager(450) + load_balancer(360) + service_registry(280)
-tests = 24  # Service distribution tests (all passing)
-goal = "Implement service discovery, registration, and intelligent load balancing to distribute AI services across mesh network based on device roles and capabilities"
-files_created = [
-    "hainet-core/src/networking/service_manager.rs (450 LOC) - Service lifecycle management with health checking",
-    "hainet-core/src/networking/load_balancer.rs (360 LOC) - Intelligent routing with 3 strategies",
-    "hainet-core/src/networking/service_registry.rs (280 LOC) - Centralized service catalog with capability matching",
-    "helperfiles/SESSION_29_PHASE_9A_SESSION_3_SERVICE_DISTRIBUTION.md - Complete session documentation"
-]
-files_modified = [
-    "hainet-core/src/networking/mod.rs - Added service distribution module exports",
-    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 3 completion"
-]
-key_features = [
-    "Service lifecycle management (register, unregister, discover, health tracking)",
-    "5 service types: LLM, STT, TTS, Storage, MCP",
-    "3-state health FSM (Healthy → Degraded → Unhealthy)",
-    "3 load balancing strategies (RoundRobin, LeastLoaded, CapabilityBased)",
-    "Health-aware routing with automatic failover",
-    "Backup services in routing decisions for client-side failover",
-    "Capability-based service placement (predefined requirements)",
-    "ServiceRegistry with device capability and role integration",
-    "Statistics tracking (requests per service, failover count, success/failure rates)",
-    "Thread-safe with Arc<RwLock<>> state management"
-]
-compilation_status = "Success - Clean build in 0.10s (8 cosmetic warnings, 0 errors)"
-test_status = "24/24 service distribution tests passing (138/138 total hainet-core tests)"
-architecture_components = [
-    "ServiceManager - Service lifecycle and health management",
-    "LoadBalancer - Intelligent routing with multiple strategies",
-    "ServiceRegistry - Centralized catalog on Master node",
-    "ServiceInfo - Service metadata with health tracking",
-    "RoutingDecision - Selected service + backups for failover",
-    "ServiceRequirements - Capability matching for placement"
-]
-technical_highlights = [
-    "Service types: LLM (8GB RAM, GPU), STT/TTS (4GB RAM, 4 cores), Storage (500GB disk), MCP (2GB RAM)",
-    "Health state machine prevents flapping with gradual degradation",
-    "RoundRobin: Equal distribution across services",
-    "LeastLoaded: Routes to service with fewest requests",
-    "CapabilityBased: Ready for device capability scoring integration",
-    "Automatic service cleanup on peer offline (registry event integration)",
-    "Statistics for observability (total/successful/failed routes, failovers)",
-    "Type-safe service discovery with capability matching"
-]
-test_breakdown = [
-    "ServiceManager (9 tests): creation, registration, unregistration, discovery, health updates, cleanup, stats",
-    "LoadBalancer (9 tests): creation, round-robin, least-loaded, strategy switching, failover, backups, stats, rebalance",
-    "ServiceRegistry (6 tests): creation, capabilities, services, matching (LLM/Storage), stats"
-]
-next_step = "Session 4: Mesh Communication Protocol (RPC layer, request multiplexing, timeout/retry logic)"
-phase_completion = "Phase 9A: 60% complete (3/5 sessions done)"
-
-[[completed_cycles]]
-id = "9A.2"
-name = "Master-Slave Coordination & Role Assignment - Session 2 Complete"
-completion_date = "2025-11-05"
-loc = 680  # mesh_coordinator.rs
-tests = 10  # mesh_coordinator tests (all passing)
-goal = "Implement master election algorithm with capability-based scoring, intelligent role assignment with specialized roles, and mesh topology coordination with automatic failover"
-files_created = [
-    "hainet-core/src/networking/mesh_coordinator.rs (680 LOC) - Master election, role assignment, mesh topology coordinator"
-]
-files_modified = [
-    "hainet-core/src/networking/mod.rs - Added mesh_coordinator module export"
-]
-key_features = [
-    "Capability-based master election with deterministic tie-breaking (PeerId)",
-    "6-state mesh FSM (Initializing → Electing → Establishing → Operational → MasterFailure → Partitioned)",
-    "Intelligent role assignment with 5 specialized roles (LLMHost, STTTTSHost, MCPServerHost, StorageNode, ComputeWorker)",
-    "Role assignment criteria: LLMHost (GPU or RAM≥16GB), STTTTSHost (CPU≥4), StorageNode (Disk≥500GB)",
-    "Automatic master failover with re-election on PeerOffline events",
-    "Event-driven topology monitoring via DeviceRegistry integration",
-    "ElectionResult with runner-up tracking and score margins",
-    "RoleAssignment with timestamp and multi-role support",
-    "TopologyStats for mesh health monitoring",
-    "Thread-safe coordinator with Arc<RwLock<>> state management"
-]
-compilation_status = "Success - Clean build in 2.10s (8 cosmetic warnings, 0 errors)"
-test_status = "10/10 mesh coordinator tests passing (114/114 total hainet-core tests)"
-architecture_components = [
-    "MeshCoordinator - Central coordination with master election and role assignment",
-    "ElectionResult - Tracks election outcomes with runner-up and margins",
-    "RoleAssignment - Device roles with specialized role lists",
-    "SpecializedRole - 5 specialized roles for optimal mesh topology",
-    "MeshState - 6-state FSM for lifecycle management",
-    "TopologyStats - Real-time mesh health and role distribution"
-]
-technical_highlights = [
-    "Capability scoring: RAM 40%, GPU 30%, CPU 20%, Disk 10% (from Session 1)",
-    "Deterministic tie-breaking: PeerId comparison prevents split-brain",
-    "Role limits: Max 2 LLM hosts, 2 STT/TTS hosts, 3 storage nodes",
-    "Automatic re-election: Triggered by master PeerOffline event",
-    "Background monitoring: Subscribes to RegistryEvent stream",
-    "State transitions: Logged with tracing for visibility",
-    "Event-driven: Reactive topology management via registry events",
-    "Type safety: Compile-time verification of all state transitions"
-]
-test_breakdown = [
-    "test_coordinator_creation - Initialization and state verification",
-    "test_master_election_single_candidate - Unanimous election",
-    "test_master_election_multiple_candidates - Highest score wins",
-    "test_master_election_tie_breaking - Deterministic PeerId tiebreaker",
-    "test_role_assignment - Master and slave role distribution",
-    "test_specialized_role_assignment_llm_host - GPU detection",
-    "test_specialized_role_assignment_storage_node - Disk detection",
-    "test_get_role_assignment - Query individual assignments",
-    "test_topology_stats - Statistics calculation",
-    "test_is_master - Master detection logic"
-]
-next_step = "Session 3: Service Distribution & Load Balancing"
-phase_completion = "Phase 9A: 40% complete (2/5 sessions done)"
-
-[[completed_cycles]]
-id = "9A.1"
-name = "Peer Discovery & Device Registry - Session 1 Complete"
-completion_date = "2025-11-05"
-loc = 1150  # peer_discovery(320) + registry(450) + heartbeat(380)
-tests = 22  # Networking tests from Session 1
-goal = "Implement mDNS-based peer discovery, device registry with health tracking, and heartbeat system for mesh networking"
-files_created = [
-    "hainet-core/src/networking/peer_discovery.rs (320 LOC) - Peer discovery manager with mDNS framework",
-    "hainet-core/src/networking/registry.rs (450 LOC) - Device registry with health tracking and events",
-    "hainet-core/src/networking/heartbeat.rs (380 LOC) - Heartbeat manager for peer health monitoring"
-]
-files_modified = [
-    "hainet-core/src/networking/mod.rs - Exported new peer discovery modules",
-    "helperfiles/3_PROJECT_STATUS.toml - Updated with Session 1 completion"
-]
-key_features = [
-    "PeerDiscovery manager with mDNS service discovery framework",
-    "DeviceRole enum (Master, Slave, Standalone, UIOnly)",
-    "PeerStatus tracking (Online, Offline, Suspected)",
-    "DeviceCapabilities with weighted scoring (RAM 40%, GPU 30%, CPU 20%, Disk 10%)",
-    "PeerInfo with peer metadata and health status",
-    "DeviceRegistry with event-driven architecture",
-    "RegistryEvent system (PeerDiscovered, PeerUpdated, PeerOffline, PeerSuspected, CapabilitiesChanged)",
-    "DeviceEntry with health scoring and capability history (100 snapshots)",
-    "HeartbeatManager with automatic peer monitoring",
-    "HeartbeatState with RTT tracking and failure counting",
-    "Background heartbeat monitoring (5s interval, 15s timeout)",
-    "RegistryStats and HeartbeatStats for monitoring",
-    "Comprehensive test coverage (20+ unit tests)"
-]
-compilation_status = "Success - Clean build in 1.38s (7 warnings, 0 errors)"
-test_status = "104/104 tests passed (100% success rate) - All hainet-core library tests"
-architecture_components = [
-    "PeerDiscovery - mDNS-based device discovery",
-    "DeviceRegistry - Centralized peer tracking with events",
-    "HeartbeatManager - Active health monitoring",
-    "Event system - Real-time mesh coordination notifications"
-]
-technical_highlights = [
-    "Thread-safe with Arc<RwLock<>> for concurrent access",
-    "Event-driven architecture for mesh coordination",
-    "Automatic health degradation (0.2 per failure, gradual recovery)",
-    "Capability history tracking (last 100 snapshots per device)",
-    "Time-based peer status updates (last_seen, last_heartbeat)",
-    "Background monitoring tasks with configurable intervals",
-    "Type-safe PeerId integration from libp2p",
-    "No serialization dependencies (removed to avoid PeerId issues)"
-]
-next_step = "Session 2: Master-Slave Coordination & Role Assignment"
-phase_completion = "Phase 9A: 20% complete (1/5 sessions done)"
-
 
 # Detailed phase/cycle implementation plans
 
@@ -2856,7 +2691,7 @@ total_crates = 8
 crates = [
     "hainet-persona (11,892 LOC) - Main agent system",
     "hainet-chain (792 LOC) - Identity & blockchain",
-    "hainet-core (774 LOC) - Storage & sync",
+    "hainet-core (1,100 LOC) - Storage, sync & networking",
     "hainet-seed (959 LOC) - Installer",
     "hainet-bridge (minimal) - Bridge component",
     "hainet-portal (minimal) - Portal component",

@@ -24,3 +24,6 @@ pub mod multiplexer;
 
 // Phase 9A Session 5: Service Auto-Discovery & Integration
 pub mod service_detector;
+
+// Phase 10 Session 1: Network Resilience & Auto-Healing
+pub mod auto_healer;

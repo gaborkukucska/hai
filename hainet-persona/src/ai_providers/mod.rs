@@ -74,29 +74,77 @@ impl AIProviderManager {
         Ok(manager)
     }
     
-    /// Initialize Ollama load balancing from configuration
+    /// Initialize Ollama load balancing from configuration and discovered endpoints
     async fn initialize_load_balancing(manager: &AIProviderManager) -> Result<()> {
         // Try to load configuration
         let config_path = std::path::PathBuf::from("hainet-persona/ollama-endpoints.toml");
         let config = OllamaConfig::load_or_default(&config_path);
         
+        // Get all discovered Ollama endpoints
+        let catalog = manager.catalog.read().await;
+        let discovered_ollama_endpoints: Vec<String> = catalog
+            .all_models()
+            .iter()
+            .filter(|m| matches!(m.provider_type, discovery::ProviderType::Ollama))
+            .map(|m| m.endpoint.clone())
+            .collect::<std::collections::HashSet<_>>() // Deduplicate
+            .into_iter()
+            .collect();
+        drop(catalog); // Release lock
+        
         info!(
-            "Initializing Ollama load balancing with {} endpoints (strategy: {})",
+            "Initializing Ollama load balancing with {} configured endpoints + {} discovered endpoints",
             config.endpoints.len(),
-            config.load_balancing.strategy
+            discovered_ollama_endpoints.len()
         );
         
-        // Create API registry
+        // Merge configured and discovered endpoints (discovered takes priority)
+        let mut all_endpoints = discovered_ollama_endpoints.clone();
+        for (name, endpoint_config) in &config.endpoints {
+            if !all_endpoints.contains(&endpoint_config.url) {
+                info!("Adding configured endpoint '{}': {}", name, endpoint_config.url);
+                all_endpoints.push(endpoint_config.url.clone());
+            }
+        }
+        
+        // Deduplicate and log
+        all_endpoints.sort();
+        all_endpoints.dedup();
+        
+        info!("Total Ollama endpoints for load balancing: {}", all_endpoints.len());
+        for (i, endpoint) in all_endpoints.iter().enumerate() {
+            info!("  {}. {}", i + 1, endpoint);
+        }
+        
+        // Determine primary endpoint (prefer first discovered, fallback to config)
+        let primary_endpoint = discovered_ollama_endpoints
+            .first()
+            .or_else(|| all_endpoints.first())
+            .cloned()
+            .unwrap_or_else(|| config.primary_endpoint());
+        
+        // Additional endpoints are all others
+        let additional_endpoints: Vec<String> = all_endpoints
+            .iter()
+            .filter(|e| *e != &primary_endpoint)
+            .cloned()
+            .collect();
+        
+        info!("Primary endpoint: {}", primary_endpoint);
+        info!("Additional endpoints: {}", additional_endpoints.len());
+        
+        // Create API registry with all endpoints
         let registry = Arc::new(
             ApiRegistry::new(
-                config.primary_endpoint(),
-                config.additional_endpoints(),
+                primary_endpoint,
+                additional_endpoints,
                 config.endpoint_overrides(),
                 config.default_max_concurrent(),
             ).await?
         );
         
         // Start background health monitoring
+        info!("Starting health monitoring for {} endpoints...", all_endpoints.len());
         registry.clone().start_health_monitoring().await;
         
         // Create request queue
@@ -114,7 +162,7 @@ impl AIProviderManager {
             (*manager_ptr).api_registry = Some(registry);
         }
         
-        info!("✅ Ollama load balancing initialized");
+        info!("✅ Ollama load balancing initialized with {} endpoints", all_endpoints.len());
         
         Ok(())
     }

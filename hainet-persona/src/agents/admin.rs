@@ -417,7 +417,7 @@ impl AdminAgent {
         
         let options = GenerationOptions {
             temperature: Some(planning_temp),
-            max_tokens: Some(self.llm_config.max_tokens.min(1024) as usize), // Cap at 1024 for planning
+            max_tokens: Some(self.llm_config.max_tokens.min(2048) as usize), // Cap at 2048 for planning
             system: Some(system_prompt),
             ..Default::default()
         };

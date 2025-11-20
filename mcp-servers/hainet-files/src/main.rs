@@ -175,30 +175,88 @@ impl FilesServer {
     }
 
     async fn handle_file_write(&self, path: String, content: String, project_name: Option<String>) -> Result<String> {
-        debug!("Writing file: {}", path);
+        debug!("📝 Writing file: {} (project: {:?})", path, project_name);
+        debug!("   Content size: {} bytes", content.len());
 
         // Normalize and validate path
-        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())
+            .context(format!("Path normalization failed for: {}", path))?;
+        
+        debug!("   Normalized path: {}", normalized_path.display());
 
         // Create parent directory if it doesn't exist
         if let Some(parent) = normalized_path.parent() {
+            debug!("   Parent directory: {}", parent.display());
+            
+            // Check if parent already exists
+            let parent_exists = parent.exists();
+            debug!("   Parent exists before create_dir_all: {}", parent_exists);
+            
+            // Create parent directory
             tokio::fs::create_dir_all(parent)
                 .await
-                .context("Failed to create parent directory")?;
+                .context(format!("Failed to create parent directory: {}", parent.display()))?;
+            
+            // Verify parent was created
+            let parent_exists_after = parent.exists();
+            debug!("   Parent exists after create_dir_all: {}", parent_exists_after);
+            
+            if !parent_exists_after {
+                anyhow::bail!("Parent directory creation succeeded but directory does not exist: {}", parent.display());
+            }
+            
+            // Check parent directory permissions
+            match tokio::fs::metadata(parent).await {
+                Ok(metadata) => {
+                    debug!("   Parent directory metadata: is_dir={}, readonly={}", 
+                           metadata.is_dir(), metadata.permissions().readonly());
+                    
+                    if metadata.permissions().readonly() {
+                        anyhow::bail!("Parent directory is read-only: {}", parent.display());
+                    }
+                }
+                Err(e) => {
+                    anyhow::bail!("Failed to get parent directory metadata: {} - {}", parent.display(), e);
+                }
+            }
+        } else {
+            debug!("   No parent directory (writing to root)");
         }
 
+        // Check if file already exists
+        let file_exists = normalized_path.exists();
+        debug!("   File exists before write: {}", file_exists);
+
         // Write file
+        debug!("   Attempting to write {} bytes to: {}", content.len(), normalized_path.display());
         tokio::fs::write(&normalized_path, &content)
             .await
-            .context("Failed to write file")?;
+            .context(format!("Failed to write file to: {}", normalized_path.display()))?;
+
+        // Verify file was written
+        match tokio::fs::metadata(&normalized_path).await {
+            Ok(metadata) => {
+                debug!("   ✅ File written successfully: {} bytes", metadata.len());
+                if metadata.len() != content.len() as u64 {
+                    tracing::warn!("   ⚠️  File size mismatch: expected {} bytes, got {} bytes", 
+                                   content.len(), metadata.len());
+                }
+            }
+            Err(e) => {
+                anyhow::bail!("File write succeeded but cannot read metadata: {} - {}", normalized_path.display(), e);
+            }
+        }
 
         // Store in CAS
+        debug!("   Storing in CAS...");
         let storage = self.storage.read().await;
         let hash = storage
             .store()
             .put(content.as_bytes(), Some(PathBuf::from(&path)))
             .await
             .context("Failed to store in CAS")?;
+        
+        debug!("   ✅ CAS storage complete: {}", hash.to_hex());
 
         let result = WriteResult {
             success: true,
@@ -207,6 +265,7 @@ impl FilesServer {
             size: content.len(),
         };
 
+        debug!("   ✅ File write operation completed successfully");
         Ok(serde_json::to_string(&result)?)
     }
 

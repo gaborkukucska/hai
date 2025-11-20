@@ -16,6 +16,7 @@ use tracing::{info, warn, debug, error};
 
 use super::peer_discovery::{DeviceCapabilities, DeviceRole, PeerInfo};
 use super::registry::{DeviceRegistry, RegistryEvent};
+use super::auto_healer::AutoHealer;
 
 /// Mesh topology state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +95,7 @@ pub struct MeshCoordinator {
     registry: Arc<DeviceRegistry>,
     election_timeout: Duration,
     last_election: Arc<RwLock<Option<SystemTime>>>,
+    auto_healer: Arc<RwLock<Option<Arc<AutoHealer>>>>,
 }
 
 impl MeshCoordinator {
@@ -112,6 +114,7 @@ impl MeshCoordinator {
             registry,
             election_timeout: Duration::from_secs(30),
             last_election: Arc::new(RwLock::new(None)),
+            auto_healer: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -125,6 +128,12 @@ impl MeshCoordinator {
         let mut coordinator = Self::new(local_peer_id, local_capabilities, registry);
         coordinator.election_timeout = election_timeout;
         coordinator
+    }
+
+    /// Set the AutoHealer component
+    pub async fn set_auto_healer(&self, healer: Arc<AutoHealer>) {
+        let mut h = self.auto_healer.write().await;
+        *h = Some(healer);
     }
 
     /// Get current mesh state
@@ -370,6 +379,13 @@ impl MeshCoordinator {
 
         // Subscribe to registry events
         let event_rx = self.registry.event_receiver();
+
+        // Start AutoHealer if present
+        if let Some(healer) = self.auto_healer.read().await.as_ref() {
+            if let Err(e) = healer.start().await {
+                error!("Failed to start AutoHealer: {}", e);
+            }
+        }
 
         tokio::spawn(async move {
             let mut rx = event_rx.write().await;
