@@ -1,4 +1,3 @@
-//! # START OF FILE hainet-portal/src/components/ChatInterface.tsx
 import { useState, useEffect, useRef } from 'react'
 import { invoke } from '../lib/tauri';
 import { VoiceInput } from './VoiceInput'
@@ -7,6 +6,7 @@ import VideoPlayer from './VideoPlayer'
 import Settings from './Settings'
 import { FrameAnalysisResult, DynamicUIComponent, DynamicUIAction } from '../types'
 import DynamicUIRenderer from './DynamicUIRenderer'
+import ActiveAgentsList from './ActiveAgentsList'
 
 interface ChatMessage {
   id: string
@@ -39,6 +39,7 @@ export default function ChatInterface() {
   const [showVoiceInput, setShowVoiceInput] = useState(false)
   const [showWebcam, setShowWebcam] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showAgents, setShowAgents] = useState(true)
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [isVideoVisible, setIsVideoVisible] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -223,7 +224,8 @@ export default function ChatInterface() {
           <Settings />
         </div>
       )}
-      <div className="flex flex-col h-full flex-1">
+
+      <div className="flex flex-col h-full flex-1 min-w-0">
         <VideoPlayer
           src={videoSrc}
           isVisible={isVideoVisible}
@@ -234,181 +236,194 @@ export default function ChatInterface() {
           {messages.length === 0 ? (
             <div className="text-center text-gray-500 py-8">
               <p className="text-lg">Welcome to HAI-Net!</p>
-            <p className="text-sm mt-2">Start a conversation with your AI assistant</p>
-          </div>
-        ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
+              <p className="text-sm mt-2">Start a conversation with your AI assistant</p>
+            </div>
+          ) : (
+            messages.map((msg) => (
               <div
-                className={`max-w-[70%] rounded-lg p-3 ${
-                  msg.role === 'user'
+                key={msg.id}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[70%] rounded-lg p-3 ${msg.role === 'user'
                     ? 'bg-hai-primary text-white'
                     : 'bg-gray-700 text-gray-100'
-                }`}
-              >
-                <div className="whitespace-pre-wrap break-words">{msg.content}</div>
-                {msg.video_src && (
-                  <div className="mt-2">
-                    <VideoPlayer src={msg.video_src} />
-                  </div>
-                )}
-                {msg.dynamic_component && (
-                  <div className="mt-2 pt-2 border-t border-gray-600">
-                    <DynamicUIRenderer
-                      schema={msg.dynamic_component}
-                      onAction={handleDynamicAction}
-                    />
-                  </div>
-                )}
-                {msg.attachments && msg.attachments.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-gray-600 space-y-1">
-                    {msg.attachments.map((att, idx) => (
-                      <div key={idx} className="text-xs opacity-75">
-                        📎 {att.name} ({formatFileSize(att.size)})
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="text-xs opacity-75 mt-1">
-                  {formatTimestamp(msg.timestamp)}
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-        {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-gray-700 text-gray-100 rounded-lg p-3">
-              <div className="flex items-center space-x-2">
-                <div className="animate-pulse">Thinking...</div>
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Attachments Preview */}
-      {attachments.length > 0 && (
-        <div className="border-t border-gray-700 bg-gray-800 p-2">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-xs text-gray-400 mb-1">Attachments:</div>
-            <div className="flex flex-wrap gap-2">
-              {attachments.map((att, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 bg-gray-700 rounded px-3 py-1 text-sm"
+                    }`}
                 >
-                  <span>📎 {att.name}</span>
-                  <span className="text-gray-400 text-xs">
-                    ({formatFileSize(att.size)})
-                  </span>
-                  <button
-                    onClick={() => removeAttachment(idx)}
-                    className="text-red-400 hover:text-red-300 ml-2"
-                  >
-                    ✕
-                  </button>
+                  <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                  {msg.video_src && (
+                    <div className="mt-2">
+                      <video src={msg.video_src} controls className="w-full rounded" />
+                    </div>
+                  )}
+                  {msg.dynamic_component && (
+                    <div className="mt-2 pt-2 border-t border-gray-600">
+                      <DynamicUIRenderer
+                        schema={msg.dynamic_component}
+                        onAction={handleDynamicAction}
+                      />
+                    </div>
+                  )}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-600 space-y-1">
+                      {msg.attachments.map((att, idx) => (
+                        <div key={idx} className="text-xs opacity-75">
+                          📎 {att.name} ({formatFileSize(att.size)})
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="text-xs opacity-75 mt-1">
+                    {formatTimestamp(msg.timestamp)}
+                  </div>
                 </div>
-              ))}
+              </div>
+            ))
+          )}
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="bg-gray-700 text-gray-100 rounded-lg p-3">
+                <div className="flex items-center space-x-2">
+                  <div className="animate-pulse">Thinking...</div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Attachments Preview */}
+        {attachments.length > 0 && (
+          <div className="border-t border-gray-700 bg-gray-800 p-2">
+            <div className="max-w-4xl mx-auto">
+              <div className="text-xs text-gray-400 mb-1">Attachments:</div>
+              <div className="flex flex-wrap gap-2">
+                {attachments.map((att, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-2 bg-gray-700 rounded px-3 py-1 text-sm"
+                  >
+                    <span>📎 {att.name}</span>
+                    <span className="text-gray-400 text-xs">
+                      ({formatFileSize(att.size)})
+                    </span>
+                    <button
+                      onClick={() => removeAttachment(idx)}
+                      className="text-red-400 hover:text-red-300 ml-2"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Voice Input Area (Collapsible) */}
-      {showVoiceInput && (
+        {/* Voice Input Area (Collapsible) */}
+        {showVoiceInput && (
+          <div className="border-t border-gray-700 bg-gray-800 p-4">
+            <div className="max-w-4xl mx-auto">
+              <VoiceInput
+                onTranscription={handleVoiceTranscription}
+                onError={handleVoiceError}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Webcam View Area (Collapsible) */}
+        {showWebcam && (
+          <div className="border-t border-gray-700 bg-gray-800 p-4">
+            <div className="max-w-4xl mx-auto">
+              <WebcamView onFrameAnalysis={handleFrameAnalysis} />
+            </div>
+          </div>
+        )}
+
+        {/* Input Area */}
         <div className="border-t border-gray-700 bg-gray-800 p-4">
-          <div className="max-w-4xl mx-auto">
-            <VoiceInput 
-              onTranscription={handleVoiceTranscription}
-              onError={handleVoiceError}
+          <div className="max-w-4xl mx-auto flex gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
             />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-lg transition-colors"
+              title="Attach files"
+            >
+              📎
+            </button>
+            <button
+              onClick={() => setShowVoiceInput(!showVoiceInput)}
+              className={`${showVoiceInput
+                ? 'bg-hai-primary text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+                } px-4 py-3 rounded-lg transition-colors`}
+              title="Toggle voice input"
+            >
+              🎤
+            </button>
+            <button
+              onClick={() => setShowWebcam(!showWebcam)}
+              className={`${showWebcam
+                ? 'bg-hai-primary text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+                } px-4 py-3 rounded-lg transition-colors`}
+              title="Toggle webcam"
+            >
+              📷
+            </button>
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className={`${showSettings
+                ? 'bg-hai-primary text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+                } px-4 py-3 rounded-lg transition-colors`}
+              title="Toggle settings"
+            >
+              ⚙️
+            </button>
+            <button
+              onClick={() => setShowAgents(!showAgents)}
+              className={`${showAgents
+                ? 'bg-hai-primary text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+                } px-4 py-3 rounded-lg transition-colors`}
+              title="Toggle agents list"
+            >
+              👥
+            </button>
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Type your message here..."
+              disabled={isLoading}
+              className="flex-1 bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-hai-primary disabled:opacity-50"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={isLoading || (!input.trim() && attachments.length === 0)}
+              className="bg-hai-primary hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Sending...' : 'Send'}
+            </button>
           </div>
-        </div>
-      )}
-
-      {/* Webcam View Area (Collapsible) */}
-      {showWebcam && (
-        <div className="border-t border-gray-700 bg-gray-800 p-4">
-          <div className="max-w-4xl mx-auto">
-            <WebcamView onFrameAnalysis={handleFrameAnalysis} />
-          </div>
-        </div>
-      )}
-
-      {/* Input Area */}
-      <div className="border-t border-gray-700 bg-gray-800 p-4">
-        <div className="max-w-4xl mx-auto flex gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={handleFileSelect}
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-3 rounded-lg transition-colors"
-            title="Attach files"
-          >
-            📎
-          </button>
-          <button
-            onClick={() => setShowVoiceInput(!showVoiceInput)}
-            className={`${
-              showVoiceInput
-                ? 'bg-hai-primary text-white'
-                : 'bg-gray-700 hover:bg-gray-600 text-white'
-            } px-4 py-3 rounded-lg transition-colors`}
-            title="Toggle voice input"
-          >
-            🎤
-          </button>
-          <button
-            onClick={() => setShowWebcam(!showWebcam)}
-            className={`${
-              showWebcam
-                ? 'bg-hai-primary text-white'
-                : 'bg-gray-700 hover:bg-gray-600 text-white'
-            } px-4 py-3 rounded-lg transition-colors`}
-            title="Toggle webcam"
-          >
-            📷
-          </button>
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className={`${
-              showSettings
-                ? 'bg-hai-primary text-white'
-                : 'bg-gray-700 hover:bg-gray-600 text-white'
-            } px-4 py-3 rounded-lg transition-colors`}
-            title="Toggle settings"
-          >
-            ⚙️
-          </button>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type your message here..."
-            disabled={isLoading}
-            className="flex-1 bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-hai-primary disabled:opacity-50"
-          />
-          <button
-            onClick={sendMessage}
-            disabled={isLoading || (!input.trim() && attachments.length === 0)}
-            className="bg-hai-primary hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoading ? 'Sending...' : 'Send'}
-          </button>
         </div>
       </div>
+
+      {/* Agents Sidebar */}
+      {showAgents && (
+        <div className="w-[30%] bg-gray-800 border-l border-gray-700 hidden md:block">
+          <ActiveAgentsList />
+        </div>
+      )}
     </div>
-  </div>
   );
 }

@@ -34,6 +34,12 @@ use crate::ai_providers::providers::{GenerationOptions};
 use crate::test_utils::JSONValidator;
 use std::time::Instant;
 
+pub mod memory;
+pub mod profile;
+
+use self::memory::ConversationStore;
+use self::profile::UserProfile;
+
 /// Threshold for detecting complex intents that require projects
 const COMPLEX_INTENT_THRESHOLD: f64 = 0.7;
 
@@ -79,7 +85,17 @@ pub struct AdminAgent {
     metrics: Arc<RwLock<MetricsCollector>>,
     
     /// Session task list for LLM context (short-term memory)
+    /// Session task list for LLM context (short-term memory)
     session_tasks: SessionTaskList,
+    
+    /// Message receiver for processing system events
+    receiver: Option<tokio::sync::mpsc::Receiver<Message>>,
+    
+    /// Persistent conversation memory
+    memory: Arc<ConversationStore>,
+    
+    /// User profile and preferences
+    profile: Arc<UserProfile>,
 }
 
 impl AdminAgent {
@@ -89,6 +105,8 @@ impl AdminAgent {
         project_manager: Arc<RwLock<ProjectManager>>,
         ai_provider_manager: Arc<AIProviderManager>,
         metrics: Arc<RwLock<MetricsCollector>>,
+        memory_db_url: String,
+        profile_db_url: String,
     ) -> Result<Self> {
         let id = AgentId::new(AgentType::Admin, "main-admin".to_string());
         let config = HaiNetConfig::load_or_default();
@@ -99,6 +117,16 @@ impl AdminAgent {
         tracing::info!("Admin AI LLM config: temp={}, max_tokens={}, provider_pref={:?}", 
                       llm_config.temperature, llm_config.max_tokens, llm_config.provider_preference);
         
+        // Register with MessageBus
+        let (_receiver, _) = context.message_bus.write().await
+            .register_agent(id.clone())
+            .await
+            .context("Failed to register Admin agent with MessageBus")?;
+
+        // Initialize memory and profile
+        let memory = Arc::new(ConversationStore::new(&memory_db_url).await?);
+        let profile = Arc::new(UserProfile::new(&profile_db_url).await?);
+
         Ok(Self {
             id: id.clone(),
             context,
@@ -113,16 +141,179 @@ impl AdminAgent {
             llm_config,
             metrics,
             session_tasks: SessionTaskList::new(),
+            receiver: Some(_receiver),
+            memory,
+            profile,
         })
+    }
+
+    /// Get the agent context
+    pub fn context(&self) -> &Arc<AgentContext> {
+        &self.context
+    }
+
+    /// Get the project manager
+    pub fn project_manager(&self) -> &Arc<RwLock<ProjectManager>> {
+        &self.project_manager
+    }
+
+    /// Helper to update status
+    async fn update_status(&self, activity: &str) {
+        self.context.message_bus.write().await.update_agent_status(
+            self.id.clone(),
+            format!("{:?}", self.state_machine.current_state()),
+            activity.to_string()
+        ).await;
+    }
+
+    // ========== Project Management Commands ==========
+
+    /// Detect if the user input is a project management command
+    fn is_project_management_command(&self, user_input: &str) -> Option<String> {
+        let input_lower = user_input.to_lowercase();
+        
+        // Delete keywords
+        if (input_lower.contains("delete") || input_lower.contains("remove") || input_lower.contains("cancel")) 
+            && (input_lower.contains("project") || input_lower.contains("all")) {
+            return Some("delete".to_string());
+        }
+        
+        // Pause keywords
+        if (input_lower.contains("pause") || input_lower.contains("hold") || input_lower.contains("stop working on")) 
+            && input_lower.contains("project") {
+            return Some("pause".to_string());
+        }
+        
+        // Resume keywords
+        if (input_lower.contains("resume") || input_lower.contains("continue") || input_lower.contains("restart")) 
+            && input_lower.contains("project") {
+            return Some("resume".to_string());
+        }
+        
+        // Stop keywords
+        if (input_lower.contains("stop") || input_lower.contains("terminate") || input_lower.contains("end")) 
+            && input_lower.contains("project") 
+            && !input_lower.contains("working on") {
+            return Some("stop".to_string());
+        }
+        
+        // Rename keywords
+        if (input_lower.contains("rename") || input_lower.contains("change name")) 
+            && input_lower.contains("project") {
+            return Some("rename".to_string());
+        }
+
+        // Export keywords
+        if (input_lower.contains("export") || input_lower.contains("backup") || input_lower.contains("archive")) 
+            && input_lower.contains("project") {
+            return Some("export".to_string());
+        }
+
+        // Import keywords
+        if (input_lower.contains("import") || input_lower.contains("restore") || input_lower.contains("load")) 
+            && input_lower.contains("project") {
+            return Some("import".to_string());
+        }
+        
+        // List keywords
+        if (input_lower.contains("list") || input_lower.contains("show") || input_lower.contains("what")) 
+            && input_lower.contains("project") {
+            return Some("list".to_string());
+        }
+        
+        None
+    }
+
+    /// Handle project management commands
+    async fn handle_project_management_command(&mut self, user_input: &str, command_type: &str) -> Result<String> {
+        tracing::info!("Handling project management command: {}", command_type);
+        
+        match command_type {
+            "delete" => {
+                if user_input.to_lowercase().contains("all") {
+                    self.delete_all_projects().await
+                } else {
+                    // Try to extract project ID or title from input
+                    // For now, just inform user they need to specify
+                    Ok("To delete a specific project, please use the UI menu next to the project in the Active Projects list. To delete all projects, say 'delete all projects'.".to_string())
+                }
+            },
+            "pause" => {
+                Ok("To pause a project, please use the UI menu next to the project in the Active Projects list.".to_string())
+            },
+            "resume" => {
+                Ok("To resume a project, please use the UI menu next to the project in the Active Projects list.".to_string())
+            },
+            "stop" => {
+                Ok("To stop a project, please use the UI menu next to the project in the Active Projects list.".to_string())
+            },
+            "rename" => {
+                Ok("To rename a project, please use the UI menu next to the project in the Active Projects list.".to_string())
+            },
+            "export" => {
+                Ok("To export a project, please use the 'Export' option in the project menu in the Active Projects list.".to_string())
+            },
+            "import" => {
+                Ok("To import a project, please use the 'Import' button in the Active Projects header.".to_string())
+            },
+            "list" => {
+                self.list_active_projects_to_user().await
+            },
+            _ => {
+                Ok("I didn't understand that project management command. You can ask me to list, delete, pause, resume, or stop projects.".to_string())
+            }
+        }
+    }
+
+    /// Delete all active projects
+    async fn delete_all_projects(&self) -> Result<String> {
+        let count = self.project_manager.read().await
+            .delete_all_active_projects()
+            .await?;
+        
+        Ok(format!("✅ Successfully deleted {} project(s). All associated PM and worker agents will be cleaned up.", count))
+    }
+
+    /// List all active projects for the user
+    async fn list_active_projects_to_user(&self) -> Result<String> {
+        let projects = self.project_manager.read().await
+            .list_active_projects()
+            .await?;
+        
+        if projects.is_empty() {
+            return Ok("You don't have any active projects at the moment. Say something like 'build me a todo app' to create one!".to_string());
+        }
+        
+        let mut response = format!("📋 **Active Projects ({}):**\n\n", projects.len());
+        for (idx, project) in projects.iter().enumerate() {
+            response.push_str(&format!(
+                "{}. **{}** ({})\n   {}\n   {} tasks\n\n",
+                idx + 1,
+                project.title,
+                project.status,
+                project.overview.chars().take(100).collect::<String>(),
+                project.task_ids.len()
+            ));
+        }
+        
+        response.push_str("💡 You can manage these projects using the menu in the Active Projects sidebar.");
+        
+        Ok(response)
     }
     
     /// Main entry point for user interaction
     pub async fn process_user_input(&mut self, user_input: String) -> Result<String> {
-        // 1. Parse Intent
+        // 1. Check for project management commands FIRST
+        if let Some(command_type) = self.is_project_management_command(&user_input) {
+            return self.handle_project_management_command(&user_input, &command_type).await;
+        }
+
+        // 2. Parse Intent
+        self.update_status("Parsing user intent").await;
         let intent = self.intent_parser.parse(&user_input).await?;
         tracing::info!("Parsed intent: {:?} (confidence: {})", intent.intent_type, intent.confidence);
 
-        // 2. Handle initial startup state
+        // 3. Handle initial startup state
         // If still in Startup state, transition to Conversation first
         if *self.state_machine.current_state() == AgentState::Startup {
             tracing::warn!("Admin AI still in Startup state, transitioning to Conversation");
@@ -130,9 +321,10 @@ impl AdminAgent {
                 AgentState::Conversation,
                 "Auto-transition from Startup on first message".to_string()
             )?;
+            self.update_status("Transitioned to Conversation").await;
         }
         
-        // 3. Add user request to session tasks
+        // 4. Add user request to session tasks
         let request_title = if user_input.len() > 50 {
             format!("{}...", &user_input[..47])
         } else {
@@ -141,14 +333,34 @@ impl AdminAgent {
         self.session_tasks.add_task(request_title.clone(), None);
         let _ = self.session_tasks.start_task(&request_title);
 
-        // 4. Route to appropriate handler based on intent complexity
+        // 5. Route to appropriate handler based on intent complexity
         let result = if self.is_complex_intent(&intent, &user_input)? {
             self.handle_complex_intent(&user_input, &intent).await
         } else {
             self.handle_simple_intent(&user_input, &intent).await
         };
         
-        // 5. Update session task status based on result
+        // Save to memory if successful
+        if let Ok(ref response) = result {
+            let entry = crate::agents::admin::memory::ConversationEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                user_message: user_input.clone(),
+                admin_response: response.clone(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
+                context_snapshot: None,
+                sentiment: None,
+                intent: Some(format!("{:?}", intent.intent_type)),
+            };
+            
+            if let Err(e) = self.memory.add_entry(entry).await {
+                tracing::warn!("Failed to save conversation entry: {:?}", e);
+            }
+        }
+        
+        // 6. Update session task status based on result
         match &result {
             Ok(_) => {
                 let _ = self.session_tasks.complete_task(&request_title);
@@ -756,7 +968,63 @@ impl AdminAgent {
         // Load conversation prompt
         let mut prompt_manager = self.context.prompt_manager.write().await;
         let mut prompt_context = PromptContext::default();
-        prompt_context.current_request = Some(user_input.to_string());
+        
+        // Retrieve context
+        let history = self.memory.get_recent_context(10).await.unwrap_or_default();
+        let goals = self.profile.get_goals().await.unwrap_or_default();
+        let preferences = self.profile.get_preferences().await.unwrap_or_default();
+        
+        let mut memory_context = String::new();
+        
+        if !goals.is_empty() {
+            memory_context.push_str("USER GOALS:\n");
+            for goal in goals {
+                memory_context.push_str(&format!("- {}\n", goal));
+            }
+            memory_context.push('\n');
+        }
+
+        if !preferences.is_empty() {
+            memory_context.push_str("USER PREFERENCES:\n");
+            for (k, v) in preferences {
+                memory_context.push_str(&format!("- {}: {}\n", k, v));
+            }
+            memory_context.push('\n');
+        }
+        
+        if !history.is_empty() {
+            memory_context.push_str("RECENT CONVERSATION:\n");
+            for entry in history {
+                let user_msg = if entry.user_message.len() > 200 {
+                    format!("{}...", &entry.user_message[..197])
+                } else {
+                    entry.user_message.clone()
+                };
+                let admin_msg = if entry.admin_response.len() > 200 {
+                    format!("{}...", &entry.admin_response[..197])
+                } else {
+                    entry.admin_response.clone()
+                };
+                memory_context.push_str(&format!("User: {}\nAdmin: {}\n", user_msg, admin_msg));
+            }
+            memory_context.push('\n');
+        }
+
+        // Add project context
+        let project_context = self.get_project_context().await;
+        memory_context.push_str("\n");
+        memory_context.push_str(&project_context);
+        
+        // Combine with user input
+        let full_request = if !memory_context.is_empty() {
+            format!("CONTEXT:\n{}\n\nUSER REQUEST:\n{}", memory_context, user_input)
+        } else {
+            user_input.to_string()
+        };
+        
+        prompt_context.current_request = Some(full_request.clone());
+        prompt_context.variables.insert("user_input".to_string(), serde_json::Value::String(full_request));
+        prompt_context.variables.insert("memory_context".to_string(), serde_json::Value::String(memory_context));
         
         let system_prompt = prompt_manager.get_prompt(
             &self.id,
@@ -767,9 +1035,13 @@ impl AdminAgent {
         drop(prompt_manager);
 
         // Select the best model for conversation
-        let selection_context = SelectionContext::for_admin();
+        let selection_context = SelectionContext {
+            agent_type: AgentType::Admin,
+            operation: "conversation".to_string(),
+            priority: crate::messaging::Priority::Normal,
+            complexity: crate::ai_providers::ModelComplexity::Medium,
+        };
         
-        // Load user preference for Admin agent if available
         let preferred_family = if let Some(ref user_settings) = self.context.user_settings {
             let settings = user_settings.read().await;
             settings.get_model_preference("admin").await.ok().flatten()
@@ -785,18 +1057,18 @@ impl AdminAgent {
         // Generate conversational response using LLM config
         let options = GenerationOptions {
             temperature: Some(self.llm_config.temperature),
-            max_tokens: Some(self.llm_config.max_tokens.min(512) as usize), // Cap at 512 for conversation
+            max_tokens: Some(self.llm_config.max_tokens.min(512) as usize),
             system: Some(system_prompt),
             ..Default::default()
         };
         
         let client = selected_model.get_client()?;
-        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
         let model_name = if selected_model.model_id.contains("::") {
             selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
         } else {
             &selected_model.model_id
         };
+        
         let response = client.generate(
             model_name,
             user_input,
@@ -812,6 +1084,25 @@ impl AdminAgent {
         );
         
         Ok(response.text)
+    }
+    
+    /// Get context about recent projects (active and completed)
+    async fn get_project_context(&self) -> String {
+        let project_manager = self.project_manager.read().await;
+        if let Ok(projects) = project_manager.list_active_projects().await {
+            if projects.is_empty() {
+                return "No projects found.".to_string();
+            }
+            
+            let mut summary = String::from("PROJECT CONTEXT:\n");
+            // Sort by created_at desc (already done by SQL query)
+            for project in projects.iter().take(5) {
+                summary.push_str(&format!("- {} ({}): {}\n", project.title, project.status, project.overview));
+            }
+            summary
+        } else {
+            "Failed to retrieve project context.".to_string()
+        }
     }
     
     /// Monitor active projects for completion/failures
@@ -878,7 +1169,25 @@ impl Agent for AdminAgent {
         // Process incoming messages from PM agents
         tracing::debug!("Admin received message from {}: {:?}", message.from.name, message.content);
         
-        // TODO: Handle project status updates, completion notifications, etc.
+        if let crate::messaging::MessageContent::StatusUpdate(status) = message.content {
+            // Check if this is a completion update (Idle state + 100% progress)
+            if status.state == AgentState::Idle && status.progress == Some(1.0) {
+                let user_msg = format!("🔔 PROJECT UPDATE from {}: {}", message.from.name, status.message);
+                
+                // Send notification to User
+                // The UI should be listening for messages directed to "user"
+                let user_id = crate::messaging::AgentId::user("user".to_string());
+                let response = crate::messaging::Message::new(
+                    self.id.clone(),
+                    user_id,
+                    crate::messaging::MessageContent::Response(user_msg)
+                );
+                
+                if let Err(e) = self.context.message_bus.write().await.send_message(response).await {
+                    tracing::error!("Failed to forward project update to user: {:?}", e);
+                }
+            }
+        }
         
         Ok(())
     }
@@ -893,6 +1202,46 @@ impl Agent for AdminAgent {
         )?;
         
         tracing::info!("Admin AI started in Conversation state");
+        
+        // Spawn message processing loop
+        if let Some(mut receiver) = self.receiver.take() {
+            let message_bus = self.context.message_bus.clone();
+            let admin_id = self.id.clone();
+            
+            tokio::spawn(async move {
+                tracing::info!("Admin message processing loop started");
+                
+                while let Some(message) = receiver.recv().await {
+                    tracing::debug!("Admin received message from {}: {:?}", message.from.name, message.content);
+                    
+                    // Handle StatusUpdate messages from PM agents
+                    if let crate::messaging::MessageContent::StatusUpdate(status) = &message.content {
+                        // Check if this is a completion update (Idle state + 100% progress)
+                        if status.state == AgentState::Idle && status.progress == Some(1.0) {
+                            let user_msg = format!("🔔 PROJECT UPDATE from {}: {}", message.from.name, status.message);
+                            
+                            // Send notification to User
+                            let user_id = crate::messaging::AgentId::user("user".to_string());
+                            let response = crate::messaging::Message::new(
+                                admin_id.clone(),
+                                user_id,
+                                crate::messaging::MessageContent::Response(user_msg)
+                            );
+                            
+                            if let Err(e) = message_bus.write().await.send_message(response).await {
+                                tracing::error!("Failed to forward project update to user: {:?}", e);
+                            } else {
+                                tracing::info!("Admin forwarded project completion to user");
+                            }
+                        }
+                    }
+                }
+                
+                tracing::info!("Admin message processing loop ended");
+            });
+        } else {
+            tracing::warn!("Admin started without message receiver - will not process system events");
+        }
         
         Ok(())
     }

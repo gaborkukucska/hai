@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use uuid::Uuid;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 
 use crate::messaging::AgentId;
 
@@ -280,4 +281,61 @@ impl Project {
         }
         completed_tasks as f64 / self.task_ids.len() as f64
     }
+}
+
+// ========== Export/Import Data Structures ==========
+
+/// Task data for export (simplified representation)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskExportData {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub dependencies: Vec<String>,
+    pub assigned_to: Option<String>,
+    pub deliverables: Vec<String>,
+    pub pm_feedback: Option<String>,
+}
+
+/// Milestone data for export (simplified representation)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MilestoneExportData {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub deadline: Option<i64>, // Unix timestamp
+    pub completed: bool,
+}
+
+/// Full project data for export
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectExportData {
+    pub id: String,
+    pub title: String,
+    pub overview: String,
+    pub status: ProjectStatus,
+    pub created_at: i64, // Unix timestamp
+    pub tasks: Vec<TaskExportData>,
+    pub milestones: Vec<MilestoneExportData>,
+}
+
+/// Metadata returned after successful export
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportMetadata {
+    pub project_id: String,
+    pub project_title: String,
+    pub export_date: String, // ISO 8601 format
+    pub file_count: usize,
+    pub total_size: u64,
+}
+
+/// Result returned after successful import
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportResult {
+    pub project_id: String,
+    pub original_title: String,
+    pub imported_title: String,
+    pub task_count: usize,
+    pub file_count: usize,
 }

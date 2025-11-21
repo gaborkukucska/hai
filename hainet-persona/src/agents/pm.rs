@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 use tokio::sync::RwLock;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::messaging::{MessageBus, AgentId};
 use crate::prompts::{PromptManager, AgentType, AgentState, PromptContext};
@@ -24,6 +26,13 @@ use super::pm_intelligence::{
     ProjectOutcome
 };
 use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
+
+/// Pending validation task
+struct PendingValidation {
+    task_id: TaskId,
+    started_at: SystemTime,
+    handle: JoinHandle<Result<ValidationResponse>>,
+}
 
 /// Project Manager Agent
 /// 
@@ -63,6 +72,9 @@ pub struct PMAgent {
     
     /// Spawned worker agents (task_id -> worker_agent_id)
     workers: HashMap<TaskId, AgentId>,
+
+    /// Active worker channels (TemplateName -> (AgentId, mpsc::Sender<TaskId>))
+    active_workers: HashMap<String, (AgentId, mpsc::Sender<TaskId>)>,
     
     /// Task dependency graph
     task_graph: Option<TaskGraph>,
@@ -81,6 +93,12 @@ pub struct PMAgent {
     
     /// Session task list for LLM context (short-term memory)
     session_tasks: SessionTaskList,
+    
+    /// Pending async validations (task_id -> validation handle)
+    pending_validations: HashMap<TaskId, PendingValidation>,
+    
+    /// Message receiver (kept alive to maintain registration)
+    _receiver: Option<mpsc::Receiver<crate::messaging::Message>>,
 }
 
 impl PMAgent {
@@ -106,13 +124,17 @@ impl PMAgent {
             ai_provider_manager,
             mcp_client,
             user_settings,
+
             workers: HashMap::new(),
+            active_workers: HashMap::new(),
             task_graph: None,
             learner: HistoricalLearner::new(),
             project_complexity: None,
             selected_strategy: None,
             project_start_time: None,
             session_tasks: SessionTaskList::new(),
+            pending_validations: HashMap::new(),
+            _receiver: None,
         }
     }
     
@@ -126,6 +148,15 @@ impl PMAgent {
         self.state_machine.current_state()
     }
     
+    /// Helper to update status
+    async fn update_status(&self, activity: &str) {
+        self.message_bus.write().await.update_agent_status(
+            self.id.clone(),
+            format!("{:?}", self.state_machine.current_state()),
+            activity.to_string()
+        ).await;
+    }
+
     /// Start PM agent lifecycle
     /// 
     /// Startup → Idle → Planning → Managing
@@ -142,11 +173,18 @@ impl PMAgent {
             "PM initialized, ready to plan".to_string()
         )?;
         
-        // Then transition to Planning
+        // Register with MessageBus
+        let (receiver, _) = self.message_bus.write().await
+            .register_agent(self.id.clone())
+            .await
+            .context("Failed to register PM agent with MessageBus")?;
+        self._receiver = Some(receiver);
+
         self.state_machine.transition(
             AgentState::Planning,
-            "PM starting project analysis".to_string()
+            "Initializing project planning".to_string()
         )?;
+        self.update_status("Planning project").await;
         
         // Mark analysis task as in progress
         let _ = self.session_tasks.start_task("Analyze project requirements");
@@ -258,9 +296,30 @@ impl PMAgent {
                 break;
             }
             
-            // Log task status distribution for debugging
+            // Check project status from manager
             {
                 let pm = self.project_manager.read().await;
+                if let Some(project) = pm.get_project(&self.project_id).await? {
+                    match project.status {
+                        crate::projects::ProjectStatus::Paused => {
+                            tracing::info!("PM {} project paused, sleeping...", self.id.name);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            continue;
+                        },
+                        crate::projects::ProjectStatus::Cancelled | 
+                        crate::projects::ProjectStatus::Failed | 
+                        crate::projects::ProjectStatus::Completed => {
+                            tracing::info!("PM {} project in terminal state ({:?}), stopping...", self.id.name, project.status);
+                            break;
+                        },
+                        _ => {} // Continue managing
+                    }
+                } else {
+                    tracing::warn!("PM {} project not found, stopping...", self.id.name);
+                    break;
+                }
+
+                // Log task status distribution for debugging
                 let all_tasks = pm.get_project_tasks(&self.project_id).await?;
                 let task_status_summary: HashMap<String, usize> = all_tasks.iter()
                     .fold(HashMap::new(), |mut acc, task| {
@@ -276,6 +335,10 @@ impl PMAgent {
                 );
             }
             
+            // Detect and mark stuck tasks
+            self.detect_stuck_tasks().await?;
+            self.detect_blocked_tasks().await?;
+            
             // Get executable tasks (unassigned + dependencies met)
             let executable_tasks = self.get_executable_tasks().await?;
             
@@ -287,8 +350,14 @@ impl PMAgent {
             
             // Spawn workers and assign tasks
             for task_id in executable_tasks {
-                self.spawn_worker_for_task(&task_id).await?;
+                self.assign_task_to_worker(&task_id).await?;
             }
+            
+            // Poll pending validations (non-blocking)
+            self.poll_pending_validations().await?;
+            
+            // Timeout stale validations (>60s)
+            self.timeout_stale_validations().await?;
             
             // Check for completed tasks needing validation
             let tasks_under_review = self.get_tasks_under_review().await?;
@@ -299,8 +368,9 @@ impl PMAgent {
                 tasks_under_review.len()
             );
             
+            // Spawn async validations for tasks under review (non-blocking)
             for task_id in tasks_under_review {
-                self.validate_task(&task_id).await?;
+                self.spawn_validation(task_id)?;
             }
             
             // Check for tasks needing revision
@@ -347,13 +417,92 @@ impl PMAgent {
         
         // Filter by dependency graph
         if let Some(graph) = &self.task_graph {
-            Ok(unassigned.into_iter()
-                .filter(|task_id| graph.can_execute(task_id, &completed))
-                .collect())
+            let executable: Vec<TaskId> = unassigned.into_iter()
+                .filter(|task_id| {
+                    let can_exec = graph.can_execute(task_id, &completed);
+                    if !can_exec {
+                        if let Some(deps) = graph.dependencies.get(task_id) {
+                            let missing: Vec<_> = deps.iter().filter(|d| !completed.contains(d)).collect();
+                            tracing::debug!("Task {} not executable. Missing deps: {:?}", task_id, missing);
+                        }
+                    }
+                    can_exec
+                })
+                .collect();
+            Ok(executable)
         } else {
             // No graph, return all unassigned
             Ok(unassigned)
         }
+    }
+    
+    /// Detect and mark tasks stuck in InProgress state
+    /// Tasks stuck for more than 2 minutes are marked as Stuck for manual intervention
+    async fn detect_stuck_tasks(&mut self) -> Result<()> {
+        const STUCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120); // 2 minutes
+        
+        let project_manager = self.project_manager.read().await;
+        let tasks = project_manager.get_project_tasks(&self.project_id).await?;
+        drop(project_manager);
+        
+        for task in tasks {
+            if task.is_stuck(STUCK_TIMEOUT) {
+                tracing::warn!(
+                    "PM {} detected stuck task: {} ({}). Marking as Stuck for manual intervention.",
+                    self.id.name,
+                    task.id,
+                    task.title
+                );
+                
+                // Mark task as stuck
+                let mut project_manager = self.project_manager.write().await;
+                project_manager.mark_task_stuck(
+                    &task.id,
+                    format!(
+                        "Task stuck in InProgress for more than {} seconds. Worker may be queued, generating, stuck, or errored. Manual intervention required.",
+                        STUCK_TIMEOUT.as_secs()
+                    )
+                ).await?;
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Detect unassigned tasks that are blocked by failed/stuck dependencies
+    async fn detect_blocked_tasks(&mut self) -> Result<()> {
+        let project_manager = self.project_manager.read().await;
+        let tasks = project_manager.get_project_tasks(&self.project_id).await?;
+        drop(project_manager);
+
+        let task_status_map: HashMap<TaskId, crate::projects::TaskStatus> = tasks.iter()
+            .map(|t| (t.id.clone(), t.status.clone()))
+            .collect();
+
+        for task in tasks.iter().filter(|t| t.status == crate::projects::TaskStatus::Unassigned) {
+            for dep_id in &task.dependencies {
+                if let Some(dep_status) = task_status_map.get(dep_id) {
+                    if matches!(dep_status, crate::projects::TaskStatus::Failed | crate::projects::TaskStatus::Stuck) {
+                        tracing::warn!(
+                            "PM {} detected blocked task: {} ({}). Dependency {} is {:?}. Marking as Stuck.",
+                            self.id.name,
+                            task.id,
+                            task.title,
+                            dep_id,
+                            dep_status
+                        );
+                        
+                        let mut project_manager = self.project_manager.write().await;
+                        project_manager.mark_task_stuck(
+                            &task.id,
+                            format!("Dependency {} is {:?}", dep_id, dep_status)
+                        ).await?;
+                        break; // Mark once and move to next task
+                    }
+                }
+            }
+        }
+        Ok(())
     }
     
     /// Get tasks under review (submitted by workers)
@@ -484,6 +633,283 @@ impl PMAgent {
         Ok(())
     }
     
+    /// Spawn async validation task (non-blocking)
+    fn spawn_validation(&mut self, task_id: TaskId) -> Result<()> {
+        // Don't spawn if already validating
+        if self.pending_validations.contains_key(&task_id) {
+            return Ok(());
+        }
+        
+        // Clone necessary data for the spawned task
+        let project_manager = self.project_manager.clone();
+        let ai_provider_manager = self.ai_provider_manager.clone();
+        let id_name = self.id.name.clone();
+        let task_id_clone = task_id.clone();
+        
+        // Spawn validation as separate task
+        let handle = tokio::spawn(async move {
+            Self::validate_task_async(
+                task_id_clone,
+                project_manager,
+                ai_provider_manager,
+                id_name,
+            ).await
+        });
+        
+        // Store pending validation
+        self.pending_validations.insert(task_id.clone(), PendingValidation {
+            task_id: task_id.clone(),
+            started_at: SystemTime::now(),
+            handle,
+        });
+        
+        tracing::info!("PM {} spawned async validation for task {}", self.id.name, task_id);
+        Ok(())
+    }
+    
+    /// Poll pending validations and process completed ones
+    async fn poll_pending_validations(&mut self) -> Result<()> {
+        let mut completed = Vec::new();
+        
+        // Check which validations are complete
+        for (task_id, pending) in &mut self.pending_validations {
+            if pending.handle.is_finished() {
+                completed.push(task_id.clone());
+            }
+        }
+        
+        // Process completed validations
+        for task_id in completed {
+            if let Some(pending) = self.pending_validations.remove(&task_id) {
+                match pending.handle.await {
+                    Ok(Ok(validation_response)) => {
+                        self.handle_validation_result(&task_id, validation_response).await?;
+                    }
+                    Ok(Err(e)) => {
+                        tracing::error!(
+                            "PM {} validation failed for task {}: {:?}",
+                            self.id.name,
+                            task_id,
+                            e
+                        );
+                        // Auto-approve on validation error to keep project moving
+                        self.auto_approve_task(&task_id, format!("Validation error: {}", e)).await?;
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "PM {} validation task panicked for task {}: {:?}",
+                            self.id.name,
+                            task_id,
+                            e
+                        );
+                        // Auto-approve on panic
+                        self.auto_approve_task(&task_id, format!("Validation panic: {}", e)).await?;
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Handle validation result
+    async fn handle_validation_result(&mut self, task_id: &TaskId, validation: ValidationResponse) -> Result<()> {
+        let task = {
+            let pm = self.project_manager.read().await;
+            pm.get_task(task_id).await?
+        };
+        
+        let pm = self.project_manager.read().await;
+        
+        if validation.approved {
+            pm.approve_task(task_id, validation.feedback).await?;
+            
+            let task_title = if task.title.len() > 50 {
+                format!("{}...", &task.title[..47])
+            } else {
+                task.title.clone()
+            };
+            let _ = self.session_tasks.update_status(&task_title, SessionTaskStatus::Complete);
+            
+            tracing::info!(
+                "PM {} approved task {} - {}",
+                self.id.name,
+                task_id,
+                task.title
+            );
+        } else if validation.revision_needed && task.can_retry_revision() {
+            pm.request_revision(task_id, validation.feedback.clone()).await?;
+            
+            tracing::warn!(
+                "PM {} requested revision for task {} (attempt {}/{}) - {}",
+                self.id.name,
+                task_id,
+                task.revision_count + 1,
+                task.max_revisions,
+                validation.feedback
+            );
+        } else {
+            let reason = if task.can_retry_revision() {
+                validation.feedback
+            } else {
+                format!("Max revisions exceeded. Last feedback: {}", validation.feedback)
+            };
+            
+            pm.fail_task(task_id, reason.clone()).await?;
+            
+            tracing::error!(
+                "PM {} failed task {} - {}",
+                self.id.name,
+                task_id,
+                reason
+            );
+        }
+        
+        Ok(())
+    }
+    
+    /// Timeout stale validations (>60s) and auto-approve them
+    async fn timeout_stale_validations(&mut self) -> Result<()> {
+        let timeout_duration = std::time::Duration::from_secs(60);
+        let now = SystemTime::now();
+        let mut timed_out = Vec::new();
+        
+        for (task_id, pending) in &self.pending_validations {
+            if let Ok(elapsed) = now.duration_since(pending.started_at) {
+                if elapsed > timeout_duration {
+                    timed_out.push(task_id.clone());
+                }
+            }
+        }
+        
+        for task_id in timed_out {
+            if let Some(pending) = self.pending_validations.remove(&task_id) {
+                tracing::warn!(
+                    "PM {} validation timed out for task {} after 60s, auto-approving",
+                    self.id.name,
+                    task_id
+                );
+                
+                // Abort the hanging validation task
+                pending.handle.abort();
+                
+                // Auto-approve to keep project moving
+                self.auto_approve_task(&task_id, "Validation timed out after 60s".to_string()).await?;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Auto-approve a task with a warning message
+    async fn auto_approve_task(&self, task_id: &TaskId, reason: String) -> Result<()> {
+        let pm = self.project_manager.read().await;
+        pm.approve_task(task_id, format!("AUTO-APPROVED: {}", reason)).await?;
+        
+        tracing::warn!(
+            "PM {} auto-approved task {} - {}",
+            self.id.name,
+            task_id,
+            reason
+        );
+        
+        Ok(())
+    }
+    
+    /// Spawn-safe validation logic (static method)
+    async fn validate_task_async(
+        task_id: TaskId,
+        project_manager: Arc<RwLock<ProjectManager>>,
+        ai_provider_manager: Arc<AIProviderManager>,
+        pm_name: String,
+    ) -> Result<ValidationResponse> {
+        let task = {
+            let pm = project_manager.read().await;
+            pm.get_task(&task_id).await?
+        };
+        
+        // Generate validation prompt
+        let prompt = Self::generate_validation_prompt_static(&task)?;
+        
+        // Select model
+        let selection_context = SelectionContext::for_pm();
+        let selected_model = ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await
+            .context("Failed to select a model for validation")?;
+        
+        let options = GenerationOptions {
+            temperature: Some(0.3),
+            max_tokens: Some(1024),
+            stop: Some(vec!["</s>".to_string(), "\n\n\n".to_string()]),
+            ..Default::default()
+        };
+        
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        tracing::info!("[DIAGNOSTIC] PM {} calling LLM for validation (model: {})", pm_name, model_name);
+        
+        let response = client.generate(model_name, &prompt, options)
+            .await
+            .context("Failed to validate task with LLM")?;
+        
+        tracing::debug!(
+            target: "llm_messages",
+            "[PM VALIDATION RESPONSE] Model: {}, Response ({} chars):\n{}",
+            model_name,
+            response.text.len(),
+            response.text
+        );
+        
+        Self::parse_validation_response_static(&response.text)
+    }
+    
+    /// Static version of generate_validation_prompt
+    fn generate_validation_prompt_static(task: &crate::projects::Task) -> Result<String> {
+        Ok(format!(
+            r#"You are a Project Manager AI validating worker output.
+
+TASK: {}
+DESCRIPTION: {}
+
+WORKER DELIVERABLES:
+{}
+
+Evaluate if the deliverables meet the task requirements.
+
+Respond with ONLY this JSON format (no other text):
+{{
+  "approved": true,
+  "feedback": "your feedback here",
+  "revision_needed": false
+}}
+
+JSON response:"#,
+            task.title,
+            task.description,
+            task.deliverables.join("\n")
+        ))
+    }
+    
+    /// Static version of parse_validation_response
+    fn parse_validation_response_static(response: &str) -> Result<ValidationResponse> {
+        let json_str = if response.contains("```json") {
+            response.split("```json").nth(1)
+                .and_then(|s| s.split("```").next())
+                .unwrap_or(response)
+        } else {
+            response
+        }.trim();
+        
+        serde_json::from_str(json_str)
+            .context(format!("Failed to parse validation response: {}", json_str))
+    }
+    
     /// Handle a task that needs revision
     async fn handle_revision_task(&mut self, task_id: &TaskId) -> Result<()> {
         let task = {
@@ -575,7 +1001,7 @@ impl PMAgent {
         let tasks = project_manager.get_project_tasks(&self.project_id).await?;
         
         Ok(tasks.iter().all(|task| 
-            matches!(task.status, crate::projects::TaskStatus::Complete)
+            matches!(task.status, crate::projects::TaskStatus::Complete | crate::projects::TaskStatus::Failed | crate::projects::TaskStatus::Stuck)
         ))
     }
     
@@ -618,9 +1044,58 @@ impl PMAgent {
             );
         }
         
+        {
         let project_manager = self.project_manager.write().await;
         project_manager.complete_project(&self.project_id).await?;
+    }
+    
+    // Notify Admin
+    let tasks = {
+        let pm = self.project_manager.read().await;
+        pm.get_project_tasks(&self.project_id).await?
+    };
+    
+    let failed_count = tasks.iter().filter(|t| matches!(t.status, crate::projects::TaskStatus::Failed)).count();
+    let stuck_count = tasks.iter().filter(|t| matches!(t.status, crate::projects::TaskStatus::Stuck)).count();
+    
+    let message_content = if failed_count > 0 || stuck_count > 0 {
+         format!("Project {} completed with issues: {} failed, {} stuck tasks.", self.project_id, failed_count, stuck_count)
+    } else {
+         format!("Project {} completed successfully.", self.project_id)
+    };
+
+        // Find the registered Admin agent
+        let admin_id = {
+            let bus = self.message_bus.read().await;
+            let active_agents = bus.get_active_agents().await;
+            
+            active_agents.iter()
+                .find(|agent| agent.id.agent_type == crate::messaging::AgentType::Admin)
+                .map(|agent| agent.id.clone())
+        };
         
+        if let Some(admin_id) = admin_id {
+            let message = crate::messaging::Message::new(
+                self.id.clone(),
+                admin_id,
+                crate::messaging::MessageContent::StatusUpdate(crate::messaging::StatusUpdate {
+                    agent_id: self.id.clone(),
+                    state: AgentState::Idle,
+                    message: message_content,
+                    progress: Some(1.0),
+                })
+            );
+            
+            if let Err(e) = self.message_bus.write().await.send_message(message).await {
+                tracing::error!("Failed to notify Admin of project completion: {:?}", e);
+            } else {
+                tracing::info!("PM {} notified Admin of project completion", self.id.name);
+            }
+        } else {
+            tracing::warn!("No Admin agent registered - cannot send project completion notification");
+        }
+
+
         self.state_machine.transition(
             AgentState::Idle,
             "Project completed successfully".to_string()
@@ -909,6 +1384,14 @@ CRITICAL: JSON only. No explanations.
                 let depends_on: Vec<usize> = d["depends_on"].as_array()?
                     .iter()
                     .filter_map(|i| i.as_u64().map(|v| v as usize))
+                    .filter(|&dep_idx| {
+                        if dep_idx == task_index {
+                            tracing::warn!("Ignoring self-dependency for task index {}", task_index);
+                            false
+                        } else {
+                            true
+                        }
+                    })
                     .collect();
                 Some(TaskDependency { task_index, depends_on })
             })
@@ -920,8 +1403,8 @@ CRITICAL: JSON only. No explanations.
         Ok(DetailedPlan { tasks, dependencies })
     }
     
-    /// Spawn worker for a specific task
-    async fn spawn_worker_for_task(&mut self, task_id: &TaskId) -> Result<()> {
+    /// Assign task to a worker (reusing existing or spawning new)
+    async fn assign_task_to_worker(&mut self, task_id: &TaskId) -> Result<()> {
         // Get task details - scope ends here, releasing lock
         let (task_title, task_description) = {
             let pm = self.project_manager.read().await;
@@ -932,9 +1415,8 @@ CRITICAL: JSON only. No explanations.
             
             let title = task.title.clone();
             let description = task.description.clone();
-            // Lock automatically dropped at end of scope
             (title, description)
-        }; // Lock is DEFINITELY gone here
+        }; 
         
         // Update session task status to in progress
         let session_task_title = if task_title.len() > 50 {
@@ -946,87 +1428,83 @@ CRITICAL: JSON only. No explanations.
         
         // Select appropriate worker template based on task description
         let template = WorkerTemplate::select_for_task(&task_description);
-        let template_name = template.name.clone(); // Save name before moving template
+        let template_name = template.name.clone();
         
-        tracing::info!("Spawning {} for task: {}", template_name, task_title);
-        tracing::info!("[DIAGNOSTIC] PM {} selected template: {}", self.id.name, template_name);
-        tracing::info!("[DIAGNOSTIC] PM {} about to create worker from template", self.id.name);
+        tracing::info!("Assigning task '{}' to worker type '{}'", task_title, template_name);
+
+        // Check if we have an active worker for this template
+    if let Some((worker_id, tx)) = self.active_workers.get(&template_name) {
+        tracing::info!("Reusing worker {} for task {}", worker_id.name, task_title);
+        
+        // Mark task as assigned BEFORE sending to channel to prevent duplicate sends
+        {
+            let project_manager = self.project_manager.write().await;
+            project_manager.assign_task(task_id, worker_id.clone()).await?;
+        }
+        
+        // Update tracking
+        self.workers.insert(task_id.clone(), worker_id.clone());
+        
+        // Send task
+        if let Err(_) = tx.send(task_id.clone()).await {
+            tracing::warn!("Worker channel closed for {}, spawning new one", template_name);
+            self.active_workers.remove(&template_name);
+            // Recursively retry assignment (will spawn new worker)
+            // We need to Box::pin because async recursion
+            return Box::pin(self.assign_task_to_worker(task_id)).await;
+        }
+        
+        return Ok(());
+    }
+
+        // Spawn new worker if none exists
+        tracing::info!("Spawning new {} for task: {}", template_name, task_title);
         
         // Create worker agent with proper template
-        // CRITICAL FIX: Pass shared MCP client instead of creating new empty one
-        // This ensures workers have access to the MCP servers initialized at Portal startup
         let mut worker = super::worker::WorkerAgent::from_template(
             template,
             self.message_bus.clone(),
             self.prompt_manager.clone(),
             self.project_manager.clone(),
-            self.mcp_client.clone(), // ✅ Use shared MCP client (already has connected servers)
+            self.mcp_client.clone(),
             self.ai_provider_manager.clone(),
-            self.user_settings.clone(), // ✅ Pass user settings for model preferences
+            self.user_settings.clone(),
         );
         
-        // Log MCP client status for diagnostics
-        {
-            let client = self.mcp_client.read().await;
-            let servers = client.list_servers().await;
-            tracing::info!(
-                "Worker {} created with {} MCP servers: {:?}",
-                template_name,
-                servers.len(),
-                servers
-            );
-        }
-        
         let worker_id = worker.id().clone();
-        tracing::info!("[DIAGNOSTIC] PM {} created worker with ID: {}", self.id.name, worker_id.name);
-        
-        // Store worker mapping
-        self.workers.insert(task_id.clone(), worker_id.clone());
-        
-        tracing::info!("[DIAGNOSTIC] PM {} about to transition worker to Idle", self.id.name);
         
         // Transition worker to Idle state
         worker.state_machine_mut().transition(
             AgentState::Idle,
-            "Worker initialized and ready for task".to_string()
+            "Worker initialized and ready for task loop".to_string()
         )?;
         
-        tracing::info!("[DIAGNOSTIC] PM {} worker transitioned to Idle successfully", self.id.name);
+        // Create channel for task distribution
+        let (tx, rx) = mpsc::channel(100);
         
-        tracing::info!("[DIAGNOSTIC] PM {} about to call assign_task", self.id.name);
+        // Store worker mapping and channel
+        self.workers.insert(task_id.clone(), worker_id.clone());
+        self.active_workers.insert(template_name.clone(), (worker_id.clone(), tx.clone()));
         
-        // Assign task to worker (lock should be fully released by now)
-        worker.assign_task(task_id.clone()).await?;
-
-        // Start the task to transition its state to InProgress
-        let project_manager = self.project_manager.write().await;
-        project_manager.start_task(task_id).await?;
-        drop(project_manager);
+        // Mark task as assigned BEFORE sending to channel to prevent duplicate sends
+        {
+            let project_manager = self.project_manager.write().await;
+            project_manager.assign_task(task_id, worker_id.clone()).await?;
+        }
         
-        tracing::info!("[DIAGNOSTIC] PM {} assign_task and start_task completed successfully", self.id.name);
-        
-        tracing::info!("[DIAGNOSTIC] About to spawn worker {} for task {}", worker.id().name, task_id);
-        
-        // Execute worker in background
-        let task_id_for_logging = task_id.clone();
+        // Execute worker run loop in background
         let worker_name = worker.id().name.clone();
+        let worker_name_clone = worker_name.clone();
         tokio::spawn(async move {
-            tracing::info!("[DIAGNOSTIC] Worker {} tokio::spawn ENTERED async block for task {}", worker_name, task_id_for_logging);
-            
-            // Execute task with timeout
-            let execution_timeout = tokio::time::Duration::from_secs(120); // 2 minute timeout for entire task
-            match tokio::time::timeout(execution_timeout, worker.execute_task()).await {
-                Ok(Ok(())) => {
-                    tracing::info!("Worker {} completed task execution, awaiting PM validation", worker_name);
-                }
-                Ok(Err(e)) => {
-                    tracing::error!("Worker {} task execution failed: {:?}", worker_name, e);
-                }
-                Err(_) => {
-                    tracing::error!("Worker {} task execution TIMED OUT after {:?}", worker_name, execution_timeout);
-                }
-            }
+            worker.run(rx).await;
+            tracing::info!("Worker {} run loop terminated", worker_name_clone);
         });
+        
+        // Send the first task
+        if let Err(e) = tx.send(task_id.clone()).await {
+             tracing::error!("Failed to send initial task to new worker {}: {:?}", worker_name, e);
+             return Err(anyhow::anyhow!("Failed to send task to new worker"));
+        }
         
         Ok(())
     }
@@ -1062,7 +1540,10 @@ impl super::Agent for PMAgent {
 
     async fn stop(&mut self) -> Result<()> {
         tracing::info!("PM agent {} stopping.", self.id.name);
-        // Add any cleanup logic here
+        self.state_machine.transition(
+            AgentState::Idle,
+            "Agent stopped externally".to_string()
+        )?;
         Ok(())
     }
 
@@ -1134,6 +1615,7 @@ impl TaskGraph {
                 let depends_on: Vec<TaskId> = dep.depends_on
                     .into_iter()
                     .filter(|&idx| idx < tasks.len())
+                    .filter(|&idx| idx != dep.task_index) // Prevent self-dependency
                     .map(|idx| tasks[idx].id.clone())
                     .collect();
                 dep_map.insert(task_id, depends_on);

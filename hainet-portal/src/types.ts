@@ -109,3 +109,36 @@ export const MODEL_FAMILIES: ModelFamily[] = [
   { id: 'deepseek', name: 'DeepSeek', description: 'DeepSeek family' },
   { id: 'phi', name: 'Phi', description: 'Microsoft\'s Phi family' },
 ];
+
+// Agent Types
+export interface AgentId {
+  type: string;
+  name: string;
+}
+
+export interface AgentStatus {
+  state: string;
+  activity: string;
+  last_updated: number;
+}
+
+export interface AgentInfo {
+  id: AgentId;
+  status?: AgentStatus;
+  instance_id: string;
+  domain?: string;
+  worker_type?: string;
+}
+
+export interface TaskInfo {
+  id: string;
+  title: string;
+  status: string;
+}
+
+export interface ProjectInfo {
+  id: string;
+  title: string;
+  status: string;
+  tasks: TaskInfo[];
+}

@@ -491,6 +491,10 @@ This file tracks the core functions/methods defined within the framework, catego
 - `ProjectManager::get_project_tasks(project_id)` - Get tasks for project
 - `ProjectManager::get_project_milestones(project_id)` - Get milestones for project
 - `ProjectManager::get_project_progress(project_id)` - Get project progress summary
+- `ProjectManager::export_project(project_id)` - Export project to .tar.gz
+- `ProjectManager::import_project(archive_path)` - Import project from .tar.gz
+- `ProjectManager::get_project_sandbox_path(title)` - Get absolute sandbox path
+- `ProjectManager::delete_project_sandbox(title)` - Delete project sandbox directory
 
 ---
 
@@ -938,6 +942,21 @@ pub struct ToolMetadata {
 - `JSONValidator::parse_and_validate(text, schema)` - Parse and validate against schema
 - `ParsingStrategy` enum - Tracks which parsing strategy succeeded (DirectParse, MarkdownExtraction, JsonRepair, RegexExtraction, Failed)
 - `ParseResult` struct - Contains parsed value, strategy used, error details
+
+---
+
+## Tauri Bridge (Session 57 - Complete)
+
+### hainet-portal/src-tauri/src/admin_bridge.rs
+- `AdminBridge::get_active_agents()` - Get list of active agents
+- `AdminBridge::get_active_projects()` - Get list of active projects
+- `AdminBridge::pause_project(project_id)` - Pause a project
+- `AdminBridge::resume_project(project_id)` - Resume a project
+- `AdminBridge::stop_project(project_id)` - Stop/cancel a project
+- `AdminBridge::rename_project(project_id, new_title)` - Rename a project
+- `AdminBridge::delete_project(project_id)` - Delete a project
+- `AdminBridge::export_project(project_id)` - Export project to archive
+- `AdminBridge::import_project()` - Open file dialog to import project
 
 ---
 

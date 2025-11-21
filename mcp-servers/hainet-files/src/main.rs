@@ -57,13 +57,13 @@ struct FileMetadata {
 
 /// HAI-Net Files Server
 #[derive(Clone)]
-struct FilesServer {
+pub(crate) struct FilesServer {
     storage: Arc<RwLock<StorageManager>>,
     base_path: PathBuf,
 }
 
 impl FilesServer {
-    fn new(storage_path: PathBuf, base_path: PathBuf) -> Result<Self> {
+    pub(crate) fn new(storage_path: PathBuf, base_path: PathBuf) -> Result<Self> {
         let storage = StorageManager::new(storage_path)?;
         info!("📂 Base path for file operations: {}", base_path.display());
         Ok(Self {
@@ -84,7 +84,7 @@ impl FilesServer {
     /// - Prevents directory traversal attacks
     /// - Isolates project workspaces
     /// - Admin access requires explicit bypass
-    fn normalize_path(&self, requested_path: &str, project_name: Option<&str>) -> Result<PathBuf> {
+    pub(crate) fn normalize_path(&self, requested_path: &str, project_name: Option<&str>) -> Result<PathBuf> {
         // Determine if this is an Admin bypass request
         let is_admin_access = match project_name {
             None | Some(ADMIN_PROJECT_BYPASS) => {
@@ -118,11 +118,10 @@ impl FilesServer {
             // Safe to unwrap here because is_admin_access is false
             let project_name = project_name.unwrap();
             
-            // Sanitize project name: replace spaces and special chars with underscores
-            let sanitized_project = project_name
-                .replace(' ', "_")
-                .replace('/', "_")
-                .replace('\\', "_");
+            // Sanitize project name: replace non-alphanumeric chars (except - and _) with underscores
+            let sanitized_project: String = project_name.chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                .collect();
             
             canonical_base
                 .join("sandbox")
@@ -592,3 +591,6 @@ async fn main() -> Result<()> {
     info!("🛑 HAI-Net Files MCP Server shutting down");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

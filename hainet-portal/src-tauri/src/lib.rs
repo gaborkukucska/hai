@@ -87,6 +87,24 @@ async fn get_agent_state(state: State<'_, AppState>) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Get list of active agents
+#[tauri::command]
+async fn get_active_agents(state: State<'_, AppState>) -> Result<Vec<hainet_persona::messaging::AgentInfo>, String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.get_active_agents()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Get list of active projects
+#[tauri::command]
+async fn get_active_projects(state: State<'_, AppState>) -> Result<Vec<hainet_persona::projects::ProjectInfo>, String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.get_active_projects()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Transcribe audio to text via Admin AI
 #[tauri::command]
 async fn transcribe_audio(
@@ -121,6 +139,94 @@ async fn tts_is_ready(state: State<'_, AppState>) -> Result<bool, String> {
 async fn list_tts_voices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let tts = state.tts_handler.read().await;
     tts.list_voices()
+}
+
+// ========== Project Management Commands ==========
+
+/// Pause a project
+#[tauri::command]
+async fn pause_project(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.pause_project(project_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Resume a paused project
+#[tauri::command]
+async fn resume_project(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.resume_project(project_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Stop/cancel a project
+#[tauri::command]
+async fn stop_project(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.stop_project(project_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Rename a project
+#[tauri::command]
+async fn rename_project(
+    project_id: String,
+    new_title: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.rename_project(project_id, new_title)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a project
+#[tauri::command]
+async fn delete_project(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.delete_project(project_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Export a project to a tar.gz file
+#[tauri::command]
+async fn export_project(
+    project_id: String,
+    export_path: String,
+    state: State<'_, AppState>,
+) -> Result<hainet_persona::projects::ExportMetadata, String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.export_project(project_id, export_path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Import a project from a tar.gz file
+#[tauri::command]
+async fn import_project(
+    import_path: String,
+    state: State<'_, AppState>,
+) -> Result<hainet_persona::projects::ImportResult, String> {
+    let bridge = state.admin_bridge.read().await;
+    bridge.import_project(import_path)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -234,6 +340,15 @@ pub fn run() {
         get_history,
         clear_history,
         get_agent_state,
+        get_active_agents,
+        get_active_projects,
+        pause_project,
+        resume_project,
+        stop_project,
+        rename_project,
+        delete_project,
+        export_project,
+        import_project,
         transcribe_audio,
         synthesize_speech,
         tts_is_ready,

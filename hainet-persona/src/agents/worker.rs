@@ -85,6 +85,9 @@ pub struct WorkerAgent {
     /// Session task list - tracks progress within session
     session_tasks: SessionTaskList,
     
+    /// Message receiver (kept alive to maintain registration)
+    _receiver: Option<tokio::sync::mpsc::Receiver<crate::messaging::Message>>,
+    
     /// Current project name (for file operation sandboxing)
     /// Workers are sandboxed to /sandbox/projects/{project_name}/
     /// None means no sandboxing (used by Admin agents)
@@ -108,6 +111,7 @@ impl WorkerAgent {
             WorkerType::Files => WorkerTemplate::file_worker(),
             WorkerType::Network => WorkerTemplate::network_worker(),
             WorkerType::Research => WorkerTemplate::research_worker(),
+            WorkerType::Code => WorkerTemplate::code_worker(),
             WorkerType::Compute => WorkerTemplate::file_worker(), // Default to file worker
             _ => WorkerTemplate::file_worker(),
         };
@@ -152,6 +156,7 @@ impl WorkerAgent {
             tool_selector: ToolSelector::new(fallback_tools),
             self_correction_enabled: true,
             session_tasks: SessionTaskList::new(),
+            _receiver: None,
             current_project_name: None, // No project until task is assigned
         }
     }
@@ -208,6 +213,7 @@ impl WorkerAgent {
             tool_selector: ToolSelector::new(fallback_tools),
             self_correction_enabled: true,
             session_tasks: SessionTaskList::new(),
+            _receiver: None,
             current_project_name: None, // No project until task is assigned
         }
     }
@@ -220,6 +226,15 @@ impl WorkerAgent {
     /// Get current state
     pub fn state(&self) -> &AgentState {
         self.state_machine.current_state()
+    }
+    
+    /// Helper to update status
+    async fn update_status(&self, activity: &str) {
+        self.message_bus.write().await.update_agent_status(
+            self.id.clone(),
+            format!("{:?}", self.state_machine.current_state()),
+            activity.to_string()
+        ).await;
     }
     
     /// Get worker type
@@ -236,11 +251,8 @@ impl WorkerAgent {
         
         self.current_task = Some(task_id.clone());
         
-        // Update task status to Assigned
-        {
-            let project_manager = self.project_manager.write().await;
-            project_manager.assign_task(&task_id, self.id.clone()).await?;
-        } // Write lock explicitly dropped here
+        // NOTE: Task is already marked as Assigned in DB by PM before being sent to channel
+        // We only need to set up worker-side state here
         
         // Get task details and add to session task list
         let task = self.get_task_details(&task_id).await?;
@@ -296,9 +308,10 @@ impl WorkerAgent {
             AgentState::Planning,
             "Discovery-based planning".to_string()
         )?;
+        self.update_status(&format!("Planning task {}", task_id)).await;
         
         // Execute with discovery-based approach
-        let start_time = SystemTime::now();
+        let _start_time = SystemTime::now();
         let result = self.execute_with_discovery(&task).await;
         
         match result {
@@ -312,6 +325,7 @@ impl WorkerAgent {
                     AgentState::Reporting,
                     "Task complete, reporting to PM".to_string()
                 )?;
+                self.update_status(&format!("Reporting task {}", task_id)).await;
                 
                 // Submit task for review
                 let project_manager = self.project_manager.write().await;
@@ -325,6 +339,24 @@ impl WorkerAgent {
                 // Mark task as failed in session
                 self.session_tasks.fail_task(&task.title)
                     .unwrap_or_else(|err| tracing::warn!("Failed to fail session task: {}", err));
+                
+                // Properly fail the task in project manager to prevent it from being stuck
+                tracing::error!(
+                    "Worker {} failing task {} due to execution error: {}",
+                    self.id.name,
+                    task_id,
+                    e
+                );
+                
+                let project_manager = self.project_manager.write().await;
+                if let Err(fail_err) = project_manager.fail_task(&task_id, format!("Worker execution error: {}", e)).await {
+                    tracing::error!(
+                        "Worker {} failed to mark task {} as failed: {}",
+                        self.id.name,
+                        task_id,
+                        fail_err
+                    );
+                }
                 
                 Err(e)
             }
@@ -362,18 +394,36 @@ impl WorkerAgent {
             AgentState::Planning,
             "Analyzing task requirements with learning".to_string()
         )?;
+        self.update_status(&format!("Planning task {}", task_id)).await;
         
         // Use LLM to plan with intelligent tool selection
-        let execution_plan = self.plan_task_execution_with_learning(&task).await?;
+        self.update_status(&format!("Planning task {}", task_id)).await;
+        
+        // Plan execution
+        let execution_plan = match self.plan_task_execution_with_learning(&task).await {
+            Ok(plan) => plan,
+            Err(e) => {
+                tracing::error!("Worker {} planning failed for task {}: {}", self.id.name, task_id, e);
+                
+                // Fail the task so it doesn't get stuck in InProgress
+                let project_manager = self.project_manager.write().await;
+                if let Err(fail_err) = project_manager.fail_task(&task_id, format!("Planning failed: {}", e)).await {
+                    tracing::error!("Failed to mark task as failed after planning error: {}", fail_err);
+                }
+                
+                return Err(e);
+            }
+        };
         
         tracing::info!("Worker {} planned {} steps for task: {}", 
                        self.id.name, execution_plan.steps.len(), task.title);
         
-        // Transition to Working
+        // Transition to Working state
         self.state_machine.transition(
             AgentState::Working,
-            "Executing task with adaptive retry".to_string()
+            format!("Executing task {}", task_id)
         )?;
+        self.update_status(&format!("Executing task {}", task_id)).await;
         
         // Execute with learning and self-correction
         let start_time = SystemTime::now();
@@ -394,11 +444,13 @@ impl WorkerAgent {
                     "Task complete, reporting to PM".to_string()
                 )?;
                 
+                tracing::info!("Worker {} submitting task {} for review with {} deliverables", self.id.name, task_id, deliverables.len());
+
                 // Submit task for review
                 let project_manager = self.project_manager.write().await;
                 project_manager.complete_task(&task_id, deliverables).await?;
                 
-                tracing::info!("Worker {} completed task: {}", self.id.name, task.title);
+                tracing::info!("Worker {} completed task: {} and updated status to UnderReview", self.id.name, task.title);
                 
                 Ok(())
             }
@@ -409,6 +461,24 @@ impl WorkerAgent {
                 
                 // Record failure outcome
                 self.record_failure_outcome(&task, start_time, &execution_plan, &e);
+                
+                // Properly fail the task in project manager to prevent it from being stuck
+                tracing::error!(
+                    "Worker {} failing task {} due to execution error: {}",
+                    self.id.name,
+                    task_id,
+                    e
+                );
+                
+                let project_manager = self.project_manager.write().await;
+                if let Err(fail_err) = project_manager.fail_task(&task_id, format!("Worker execution error: {}", e)).await {
+                    tracing::error!(
+                        "Worker {} failed to mark task {} as failed: {}",
+                        self.id.name,
+                        task_id,
+                        fail_err
+                    );
+                }
                 
                 Err(e)
             }
@@ -480,8 +550,7 @@ impl WorkerAgent {
                     };
                     
                     return Err(anyhow::anyhow!(
-                        "Task failed: {}", 
-                        task.failure_reason.as_deref().unwrap_or("Unknown reason")
+                        "Task failed"
                     ));
                 }
                 
@@ -491,18 +560,74 @@ impl WorkerAgent {
                     continue;
                 }
                 
+                crate::projects::TaskStatus::InProgress => {
+                    // Check if this is a revision reset by PM
+                    let task = {
+                        let pm = self.project_manager.read().await;
+                        pm.get_task(&task_id).await?
+                    };
+                    
+                    if let Some(feedback) = task.pm_feedback {
+                        tracing::info!("Worker {} detected PM reset for revision: {}", self.id.name, feedback);
+                        
+                        // Transition to Planning
+                        self.state_machine.transition(
+                            AgentState::Planning,
+                            format!("Revision requested: {}", feedback)
+                        )?;
+                        
+                        // Re-execute task
+                        self.execute_task().await?;
+                        
+                        // Recurse to wait for validation of the new attempt
+                        // This ensures we don't return until the task is finally approved or failed
+                        return Box::pin(self.await_validation()).await;
+                    }
+                    
+                    // Task is still in progress but no feedback? 
+                    // This might be a race where PM reset it but we haven't seen feedback yet, or a crash recovery.
+                    tracing::warn!(
+                        "Worker {} found task {} still in InProgress during validation wait. Feedback: {:?}. Waiting for status change...",
+                        self.id.name,
+                        task_id,
+                        task.pm_feedback
+                    );
+                    tokio::time::sleep(poll_interval).await;
+                    continue;
+                }
+                
+                crate::projects::TaskStatus::Stuck => {
+                    tracing::error!(
+                        "Worker {} task {} marked as Stuck by PM. Manual intervention required.",
+                        self.id.name,
+                        task_id
+                    );
+                    
+                    self.state_machine.transition(
+                        AgentState::Idle,
+                        "Task marked as stuck".to_string()
+                    )?;
+                    self.current_task = None;
+                    
+                    return Err(anyhow::anyhow!("Task marked as stuck by PM"));
+                }
+                
                 _ => {
-                    return Err(anyhow::anyhow!(
-                        "Unexpected task status: {:?}", 
-                        task_status
-                    ));
+                    tracing::warn!(
+                        "Worker {} encountered unexpected task status {:?} for task {}",
+                        self.id.name,
+                        task_status,
+                        task_id
+                    );
+                    tokio::time::sleep(poll_interval).await;
+                    continue;
                 }
             }
         }
     }
     
     /// Handle revision request from PM
-    fn handle_revision_request<'a>(&'a mut self, task_id: &'a TaskId) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool>> + 'a>> {
+    fn handle_revision_request<'a>(&'a mut self, task_id: &'a TaskId) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool>> + Send + 'a>> {
         Box::pin(async move {
             let task = {
                 let pm = self.project_manager.read().await;
@@ -524,35 +649,37 @@ impl WorkerAgent {
             }
             
             // Get PM feedback
-            let feedback = task.pm_feedback.clone()
-                .unwrap_or_else(|| "No specific feedback provided".to_string());
-            
-            tracing::info!(
-                "Worker {} revision feedback: {}",
-                self.id.name,
-                feedback
-            );
-            
-            // Reset task for revision
-            {
-                let pm = self.project_manager.write().await;
-                let mut task = pm.get_task(task_id).await?;
-                task.reset_for_revision()?;
-                pm.request_revision(task_id, feedback.clone()).await?;
+        let feedback = task.pm_feedback.clone()
+            .unwrap_or_else(|| "No specific feedback provided".to_string());
+        
+        tracing::info!(
+            "Worker {} revision feedback: {}",
+            self.id.name,
+            feedback
+        );
+        
+        // Transition back to Planning to retry with feedback in context
+        self.state_machine.transition(
+            AgentState::Planning,
+            format!("Revision requested: {}", feedback)
+        )?;
+        
+        // Mark as InProgress to indicate we are working on it
+        {
+            let pm = self.project_manager.write().await;
+            // We use start_task to set it to InProgress
+            // This might fail if it's already InProgress, but that's fine (idempotent-ish check)
+            if let Err(e) = pm.start_task(task_id).await {
+                tracing::debug!("Worker {} could not set task to InProgress (might already be): {}", self.id.name, e);
             }
-            
-            // Transition back to Planning to retry with feedback in context
-            self.state_machine.transition(
-                AgentState::Planning,
-                format!("Revision requested: {}", feedback)
-            )?;
-            
-            // Re-execute task with PM feedback
-            self.execute_task().await?;
-            
-            // Wait for validation again (use Box::pin to avoid infinite size)
-            self.await_validation().await
-        })
+        }
+        
+        // Re-execute task with PM feedback
+        self.execute_task().await?;
+        
+        // Wait for validation again (use Box::pin to avoid infinite size)
+        self.await_validation().await
+    })
     }
     
     /// Handle error and transition to Error state
@@ -1765,6 +1892,64 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
         
         Ok(result.to_string())
     }
+    /// Run worker loop processing tasks from channel
+    pub async fn run(mut self, mut task_rx: tokio::sync::mpsc::Receiver<TaskId>) {
+        tracing::info!("Worker {} started run loop", self.id.name);
+
+        // Register with MessageBus and store the receiver to keep registration alive
+        let (receiver, _) = self.message_bus.write().await
+            .register_agent(self.id.clone())
+            .await
+            .context("Failed to register Worker agent with MessageBus")
+            .expect("Worker failed to register with MessageBus"); // Panic if registration fails, as it's critical
+        self._receiver = Some(receiver);
+        
+        while let Some(task_id) = task_rx.recv().await {
+            tracing::info!("Worker {} received task {}", self.id.name, task_id);
+            
+            // Task is already marked as Assigned in DB by PM
+            // But we still need to call assign_task to set up worker-side state
+            if let Err(e) = self.assign_task(task_id.clone()).await {
+                tracing::error!("Worker {} failed to assign task: {:?}", self.id.name, e);
+                continue;
+            }
+
+            // Mark task as started (InProgress)
+            {
+                let project_manager = self.project_manager.write().await;
+                if let Err(e) = project_manager.start_task(&task_id).await {
+                    tracing::error!("Worker {} failed to start task: {:?}", self.id.name, e);
+                    continue;
+                }
+            }
+            
+            // Execute task
+            // We use execute_task() which includes the full lifecycle (Planning -> Working -> Reporting)
+            if let Err(e) = self.execute_task().await {
+                 tracing::error!("Worker {} failed to execute task: {:?}", self.id.name, e);
+                 // We continue to validation even on error, as the task might be marked as Failed
+                 // and we need to clear the state or handle revision
+            }
+            
+            // Wait for validation
+            match self.await_validation().await {
+                Ok(_) => tracing::info!("Worker {} task validated, ready for next", self.id.name),
+                Err(e) => tracing::error!("Worker {} validation failed/timed out: {:?}", self.id.name, e),
+            }
+            
+            // Ensure we are back in Idle state before next task
+            if !matches!(self.state_machine.current_state(), AgentState::Idle) {
+                tracing::warn!("Worker {} not in Idle state after validation, forcing transition", self.id.name);
+                let _ = self.state_machine.transition(
+                    AgentState::Idle, 
+                    "Forcing Idle state for next task".to_string()
+                );
+                self.current_task = None;
+            }
+        }
+        
+        tracing::info!("Worker {} run loop ended", self.id.name);
+    }
 }
 
 #[async_trait::async_trait]
@@ -1788,6 +1973,7 @@ impl super::Agent for WorkerAgent {
         Ok(())
     }
 }
+
 
 /// Execution plan generated by LLM
 #[derive(Debug, Clone)]

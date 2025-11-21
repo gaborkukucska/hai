@@ -84,7 +84,7 @@ impl ModelSelector {
                 let catalog = self.catalog.read().await;
                 let mut candidates: Vec<(&ModelScore, &crate::ai_providers::catalog::CatalogedModel)> = Vec::new();
                 
-                for (index, score) in ranked_models.iter().enumerate() {
+                for (_index, score) in ranked_models.iter().enumerate() {
                     // Check if model matches preferred family
                     if !Self::matches_family(&score.model_id, preferred_family) {
                         debug!(

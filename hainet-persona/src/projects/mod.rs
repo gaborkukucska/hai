@@ -13,10 +13,10 @@ pub mod manager;
 pub mod migrations;
 
 // Re-export key types for convenience
-pub use project::{Project, ProjectId, ProjectStatus};
+pub use project::{Project, ProjectId, ProjectStatus, ExportMetadata, ImportResult};
 pub use task::{Task, TaskId, TaskStatus};
 pub use milestone::{Milestone, MilestoneId, MilestoneStatus};
-pub use manager::{ProjectManager, HibernatedAgent};
+pub use manager::{ProjectManager, HibernatedAgent, ProjectInfo, TaskInfo};
 pub use storage::ProjectStorage;
 
 #[cfg(test)]

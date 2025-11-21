@@ -114,7 +114,7 @@ impl AdminBridge {
         
         // Initialize MCP servers from default config before creating agents
         {
-            let mut client = mcp_client.write().await;
+            let client = mcp_client.write().await;
             match client.start_default_servers().await {
                 Ok(results) => {
                     log::info!("MCP servers initialized successfully");
@@ -170,6 +170,13 @@ impl AdminBridge {
             hainet_persona::UserSettingsManager::new(&format!("sqlite://{}?mode=rwc", settings_db_path.display())).await?
         ));
         
+        // Create memory and profile DB paths
+        let memory_db_path = data_dir.join("memory.db");
+        let profile_db_path = data_dir.join("profile.db");
+        
+        let memory_db_url = format!("sqlite://{}?mode=rwc", memory_db_path.display());
+        let profile_db_url = format!("sqlite://{}?mode=rwc", profile_db_path.display());
+        
         let context = Arc::new(AgentContext::new(
             message_bus,
             prompt_manager,
@@ -178,7 +185,14 @@ impl AdminBridge {
         ).with_user_settings(user_settings));
         
         // Create Admin AI agent (ai_provider_manager already created earlier)
-        let mut admin = AdminAgent::new(context, project_manager, ai_provider_manager, metrics_collector).await?;
+        let mut admin = AdminAgent::new(
+            context, 
+            project_manager, 
+            ai_provider_manager, 
+            metrics_collector,
+            memory_db_url,
+            profile_db_url
+        ).await?;
         
         // Start Admin AI
         admin.start().await?;
@@ -188,11 +202,43 @@ impl AdminBridge {
         
         log::info!("Admin AI Bridge initialized successfully");
         
-        Ok(Self {
+        let bridge = Self {
             admin: Arc::new(RwLock::new(admin)),
             message_history: Arc::new(RwLock::new(Vec::new())),
             stt_handler,
-        })
+        };
+
+        // Register User agent to receive notifications
+        let user_id = hainet_persona::messaging::AgentId::user("user".to_string());
+        let (mut user_rx, _) = context.message_bus.write().await.register_agent(user_id.clone()).await?;
+        
+        log::info!("Registered User agent: {:?}", user_id);
+        
+        // Spawn listener for User agent messages
+        let history_clone = bridge.message_history.clone();
+        tokio::spawn(async move {
+            log::info!("User agent listener started");
+            while let Some(msg) = user_rx.recv().await {
+                log::info!("User agent received message from {:?}: {:?}", msg.from, msg.content);
+                
+                if let hainet_persona::messaging::MessageContent::Response(text) = msg.content {
+                    let chat_msg = ChatMessage {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        content: text,
+                        role: "assistant".to_string(), // Display as assistant message
+                        timestamp: chrono::Utc::now().timestamp(),
+                        attachments: vec![],
+                        video_src: None,
+                        dynamic_component: None,
+                    };
+                    
+                    history_clone.write().await.push(chat_msg);
+                }
+            }
+            log::warn!("User agent listener ended");
+        });
+        
+        Ok(bridge)
     }
     
     /// Send message to Admin AI and get response
@@ -327,4 +373,84 @@ impl AdminBridge {
         
         self.stt_handler.transcribe(audio).await
     }
+    /// Get list of active agents
+    pub async fn get_active_agents(&self) -> Result<Vec<hainet_persona::messaging::AgentInfo>> {
+        let admin = self.admin.read().await;
+        let context = admin.context();
+        let bus = context.message_bus.read().await;
+        Ok(bus.get_active_agents().await)
+    }
+
+    pub async fn get_active_projects(&self) -> Result<Vec<hainet_persona::projects::ProjectInfo>> {
+        let admin = self.admin.read().await;
+        let project_manager = admin.project_manager().read().await;
+        Ok(project_manager.get_active_projects_with_tasks().await?)
+    }
+
+    // ========== Project Management ==========
+
+    /// Pause a project
+    pub async fn pause_project(&self, project_id: String) -> Result<()> {
+        let admin = self.admin.read().await;
+        let project_manager = admin.project_manager().read().await;
+        let pid = hainet_persona::projects::ProjectId::from_string(&project_id)?;
+        project_manager.pause_project(&pid).await?;
+        Ok(())
+    }
+
+    /// Resume a paused project
+    pub async fn resume_project(&self, project_id: String) -> Result<()> {
+        let admin = self.admin.read().await;
+        let project_manager = admin.project_manager().read().await;
+        let pid = hainet_persona::projects::ProjectId::from_string(&project_id)?;
+        project_manager.resume_project(&pid).await?;
+        Ok(())
+    }
+
+    /// Stop/cancel a project
+    pub async fn stop_project(&self, project_id: String) -> Result<()> {
+        let admin = self.admin.read().await;
+        let project_manager = admin.project_manager().read().await;
+        let pid = hainet_persona::projects::ProjectId::from_string(&project_id)?;
+        project_manager.stop_project(&pid).await?;
+        Ok(())
+    }
+
+    /// Rename a project
+    pub async fn rename_project(&self, project_id: String, new_title: String) -> Result<()> {
+        let admin = self.admin.read().await;
+        let project_manager = admin.project_manager().read().await;
+        let pid = hainet_persona::projects::ProjectId::from_string(&project_id)?;
+        project_manager.rename_project(&pid, new_title).await?;
+        Ok(())
+    }
+
+    /// Delete a project
+    pub async fn delete_project(&self, project_id: String) -> Result<()> {
+        let admin = self.admin.read().await;
+        let project_manager = admin.project_manager().read().await;
+        let pid = hainet_persona::projects::ProjectId::from_string(&project_id)?;
+        project_manager.delete_project(&pid).await?;
+        Ok(())
+    }
+
+    /// Export a project to a tar.gz file
+    pub async fn export_project(&self, project_id: String, export_path: String) -> Result<hainet_persona::projects::ExportMetadata> {
+        let admin = self.admin.read().await;
+        let project_manager = admin.project_manager().read().await;
+        let pid = hainet_persona::projects::ProjectId::from_string(&project_id)?;
+        
+        let metadata = project_manager.export_project(&pid, std::path::Path::new(&export_path)).await?;
+        Ok(metadata)
+    }
+
+    /// Import a project from a tar.gz file
+    pub async fn import_project(&self, import_path: String) -> Result<hainet_persona::projects::ImportResult> {
+        let admin = self.admin.read().await;
+        let project_manager = admin.project_manager().read().await;
+        
+        let result = project_manager.import_project(std::path::Path::new(&import_path)).await?;
+        Ok(result)
+    }
 }
+

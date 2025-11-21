@@ -74,12 +74,14 @@ pub enum TaskStatus {
     Complete,
     /// Task failed with errors
     Failed,
+    /// Task stuck in InProgress, needs manual intervention
+    Stuck,
 }
 
 impl TaskStatus {
     /// Check if task is in a terminal state
     pub fn is_terminal(&self) -> bool {
-        matches!(self, TaskStatus::Complete | TaskStatus::Failed)
+        matches!(self, TaskStatus::Complete | TaskStatus::Failed | TaskStatus::Stuck)
     }
 
     /// Check if task is active (assigned or in progress)
@@ -104,6 +106,7 @@ impl std::fmt::Display for TaskStatus {
             TaskStatus::NeedsRevision => write!(f, "Needs Revision"),
             TaskStatus::Complete => write!(f, "Complete"),
             TaskStatus::Failed => write!(f, "Failed"),
+            TaskStatus::Stuck => write!(f, "Stuck"),
         }
     }
 }
@@ -164,6 +167,9 @@ pub struct Task {
     
     /// Timestamp when task completed
     pub completed_at: Option<SystemTime>,
+    
+    /// Timestamp when task status last changed
+    pub last_status_change: SystemTime,
 }
 
 impl Task {
@@ -173,6 +179,7 @@ impl Task {
         title: String,
         description: String,
     ) -> Self {
+        let now = SystemTime::now();
         Self {
             id: TaskId::new(),
             project_id,
@@ -188,10 +195,11 @@ impl Task {
             max_revisions: 2,
             blocking_reason: None,
             failure_reason: None,
-            created_at: SystemTime::now(),
+            created_at: now,
             assigned_at: None,
             started_at: None,
             completed_at: None,
+            last_status_change: now,
         }
     }
 
@@ -217,6 +225,7 @@ impl Task {
         self.assigned_worker = Some(worker_id);
         self.status = TaskStatus::Assigned;
         self.assigned_at = Some(SystemTime::now());
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -229,6 +238,7 @@ impl Task {
 
         self.status = TaskStatus::InProgress;
         self.started_at = Some(SystemTime::now());
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -241,6 +251,7 @@ impl Task {
 
         self.status = TaskStatus::Blocked;
         self.blocking_reason = Some(reason);
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -253,6 +264,7 @@ impl Task {
 
         self.status = TaskStatus::InProgress;
         self.blocking_reason = None;
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -265,6 +277,7 @@ impl Task {
 
         self.deliverables = deliverables;
         self.status = TaskStatus::UnderReview;
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -278,6 +291,7 @@ impl Task {
         self.status = TaskStatus::Complete;
         self.validation_notes = Some(notes);
         self.completed_at = Some(SystemTime::now());
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -291,6 +305,7 @@ impl Task {
         self.status = TaskStatus::InProgress;
         self.validation_notes = Some(format!("Rejected: {}", reason));
         self.deliverables.clear();
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -304,6 +319,7 @@ impl Task {
         self.status = TaskStatus::Failed;
         self.failure_reason = Some(reason);
         self.completed_at = Some(SystemTime::now());
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -325,6 +341,7 @@ impl Task {
         self.revision_count += 1;
         self.pm_feedback = Some(feedback);
         self.status = TaskStatus::NeedsRevision;
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }
@@ -347,6 +364,34 @@ impl Task {
 
         self.status = TaskStatus::InProgress;
         self.deliverables.clear();
+        self.last_status_change = SystemTime::now();
+        
+        Ok(())
+    }
+
+    /// Check if task is stuck in InProgress state
+    /// A task is considered stuck if it's been in InProgress for more than the timeout duration
+    pub fn is_stuck(&self, timeout_duration: std::time::Duration) -> bool {
+        if self.status != TaskStatus::InProgress {
+            return false;
+        }
+
+        if let Ok(elapsed) = SystemTime::now().duration_since(self.last_status_change) {
+            elapsed > timeout_duration
+        } else {
+            false
+        }
+    }
+
+    /// Mark task as stuck (requires manual intervention)
+    pub fn mark_as_stuck(&mut self, reason: String) -> Result<()> {
+        if self.status != TaskStatus::InProgress {
+            anyhow::bail!("Can only mark InProgress tasks as stuck");
+        }
+
+        self.status = TaskStatus::Stuck;
+        self.failure_reason = Some(reason);
+        self.last_status_change = SystemTime::now();
         
         Ok(())
     }

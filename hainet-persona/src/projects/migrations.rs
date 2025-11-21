@@ -25,6 +25,13 @@ const MIGRATIONS: &[Migration] = &[
             ALTER TABLE tasks ADD COLUMN max_revisions INTEGER NOT NULL DEFAULT 2;
         "#,
     },
+    Migration {
+        version: 2,
+        name: "add_task_status_change_tracking",
+        up_sql: r#"
+            ALTER TABLE tasks ADD COLUMN last_status_change INTEGER NOT NULL DEFAULT 0;
+        "#,
+    },
 ];
 
 /// Migration runner for project storage database

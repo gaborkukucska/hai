@@ -125,7 +125,9 @@ async fn main() -> Result<()> {
         agent_context, 
         project_manager.clone(),
         ai_provider_manager,
-        metrics.clone()
+        metrics.clone(),
+        "sqlite://hainet_memory.db?mode=rwc".to_string(),
+        "sqlite://hainet_profile.db?mode=rwc".to_string(),
     ).await?;
     admin.start().await?;
     info!("✅ Admin AI Agent initialized");

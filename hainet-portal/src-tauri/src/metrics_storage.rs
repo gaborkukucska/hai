@@ -6,11 +6,11 @@
 
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
-use sqlx::{Row, SqlitePool as Pool};
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, error, info};
+use sqlx::Row;
+// use std::path::PathBuf;
+// use std::sync::Arc;
+// use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 /// Time range for querying historical metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]

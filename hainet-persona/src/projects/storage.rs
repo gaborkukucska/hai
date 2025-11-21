@@ -235,8 +235,8 @@ impl ProjectStorage {
                 dependencies, status, deliverables, validation_notes,
                 pm_feedback, revision_count, max_revisions,
                 blocking_reason, failure_reason, created_at, assigned_at,
-                started_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                started_at, completed_at, last_status_change
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#
         )
         .bind(task.id.to_string())
@@ -257,6 +257,7 @@ impl ProjectStorage {
         .bind(task.assigned_at.map(system_time_to_i64))
         .bind(task.started_at.map(system_time_to_i64))
         .bind(task.completed_at.map(system_time_to_i64))
+        .bind(system_time_to_i64(task.last_status_change))
         .execute(&self.pool)
         .await?;
 
@@ -286,9 +287,10 @@ impl ProjectStorage {
             UPDATE tasks SET
                 title = ?, description = ?, assigned_worker = ?,
                 dependencies = ?, status = ?, deliverables = ?,
-                validation_notes = ?, pm_feedback = ?, revision_count = ?, max_revisions = ?,
-                blocking_reason = ?, failure_reason = ?,
-                assigned_at = ?, started_at = ?, completed_at = ?
+                validation_notes = ?, pm_feedback = ?, revision_count = ?,
+                max_revisions = ?, blocking_reason = ?, failure_reason = ?,
+                assigned_at = ?, started_at = ?, completed_at = ?,
+                last_status_change = ?
             WHERE id = ?
             "#
         )
@@ -307,6 +309,7 @@ impl ProjectStorage {
         .bind(task.assigned_at.map(system_time_to_i64))
         .bind(task.started_at.map(system_time_to_i64))
         .bind(task.completed_at.map(system_time_to_i64))
+        .bind(system_time_to_i64(task.last_status_change))
         .bind(task.id.to_string())
         .execute(&self.pool)
         .await?;
@@ -463,6 +466,7 @@ fn row_to_task(row: &SqliteRow) -> Result<Task> {
         "NeedsRevision" | "Needs Revision" => TaskStatus::NeedsRevision,
         "Complete" => TaskStatus::Complete,
         "Failed" => TaskStatus::Failed,
+        "Stuck" => TaskStatus::Stuck,
         _ => anyhow::bail!("Unknown task status: {}", status_str),
     };
 
@@ -486,6 +490,7 @@ fn row_to_task(row: &SqliteRow) -> Result<Task> {
         assigned_at: row.try_get::<Option<i64>, _>("assigned_at")?.map(i64_to_system_time),
         started_at: row.try_get::<Option<i64>, _>("started_at")?.map(i64_to_system_time),
         completed_at: row.try_get::<Option<i64>, _>("completed_at")?.map(i64_to_system_time),
+        last_status_change: i64_to_system_time(row.try_get("last_status_change")?),
     })
 }
 

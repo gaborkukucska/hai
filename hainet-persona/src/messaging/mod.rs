@@ -34,7 +34,7 @@ pub use types::{
     CoordinationMsg, StatusUpdate, Alert, ErrorReport,
 };
 
-pub use channels::MessageBus;
+pub use channels::{MessageBus, AgentInfo, AgentStatus};
 pub use priority::PriorityRouter;
 pub use guardian::{GuardianInterceptor, InterceptResult, BlockReason, PauseReason};
 pub use audit::{AuditLogger, AuditEntry};

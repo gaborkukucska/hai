@@ -12,8 +12,10 @@
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::SystemTime;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
+use serde::{Serialize, Deserialize};
 
 use super::types::{AgentId, ChannelType, Message, Priority};
 
@@ -52,6 +54,21 @@ pub struct ChannelStats {
     pub max_queue_depth: usize,
 }
 
+/// Status of an agent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentStatus {
+    pub state: String,
+    pub activity: String,
+    pub last_updated: u64,
+}
+
+/// Combined agent info for UI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentInfo {
+    pub id: AgentId,
+    pub status: Option<AgentStatus>,
+}
+
 /// Message bus coordinating all agent communication channels
 ///
 /// The MessageBus enforces HAI-Net's constitutional principles:
@@ -73,6 +90,9 @@ pub struct MessageBus {
     
     /// Priority router hook (optional, set in Module 3)
     priority_hook: Arc<RwLock<Option<PriorityHook>>>,
+    
+    /// Agent statuses
+    agent_statuses: Arc<RwLock<HashMap<AgentId, AgentStatus>>>,
     
     /// Channel buffer size
     buffer_size: usize,
@@ -108,6 +128,7 @@ impl MessageBus {
             guardian_channel: Arc::new(RwLock::new(None)),
             guardian_hook: Arc::new(RwLock::new(None)),
             priority_hook: Arc::new(RwLock::new(None)),
+            agent_statuses: Arc::new(RwLock::new(HashMap::new())),
             buffer_size,
         })
     }
@@ -412,6 +433,55 @@ impl MessageBus {
     pub async fn agent_count(&self) -> usize {
         let channels = self.channels.read().await;
         channels.len()
+    }
+
+    /// Get list of all active agents with their status
+    pub async fn get_active_agents(&self) -> Vec<AgentInfo> {
+        let channels = self.channels.read().await;
+        let statuses = self.agent_statuses.read().await;
+        
+        channels.keys().map(|id| {
+            AgentInfo {
+                id: id.clone(),
+                status: statuses.get(id).cloned(),
+            }
+        }).collect()
+    }
+    
+    /// Update agent status
+    pub async fn update_agent_status(&self, agent_id: AgentId, state: String, activity: String) {
+        let mut statuses = self.agent_statuses.write().await;
+        statuses.insert(agent_id, AgentStatus {
+            state,
+            activity,
+            last_updated: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        });
+    }
+}
+
+/// An `AgentEndpoint` provides a convenient way for an agent to send messages
+/// back into the `MessageBus` without needing direct access to the bus itself.
+/// It holds a reference to the `MessageBus` and the agent's own ID.
+#[derive(Clone)]
+pub struct AgentEndpoint {
+    agent_id: AgentId,
+    bus: Arc<MessageBus>,
+}
+
+impl AgentEndpoint {
+    /// Returns the `AgentId` associated with this endpoint.
+    pub fn agent_id(&self) -> &AgentId {
+        &self.agent_id
+    }
+
+    /// Sends a message from this agent through the `MessageBus`.
+    /// The `from` field of the message will be automatically set to this agent's ID.
+    pub async fn send(&self, mut message: Message) -> Result<()> {
+        message.from = self.agent_id.clone();
+        self.bus.send_message(message).await
     }
 }
 

@@ -69,6 +69,7 @@ pub enum WorkerType {
     Network,
     Compute,
     Monitor,
+    Code,
 }
 
 pub use crate::messaging::AgentId;
