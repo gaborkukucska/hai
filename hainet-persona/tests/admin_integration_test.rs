@@ -40,7 +40,14 @@ async fn create_test_admin_agent() -> Result<AdminAgent> {
         MetricsCollector::new("sqlite::memory:").await?,
     ));
 
-    Ok(AdminAgent::new(context, project_manager, ai_provider_manager, metrics).await?)
+    Ok(AdminAgent::new(
+        context, 
+        project_manager, 
+        ai_provider_manager, 
+        metrics,
+        "sqlite::memory:".to_string(),
+        "sqlite::memory:".to_string()
+    ).await?)
 }
 
 #[tokio::test]

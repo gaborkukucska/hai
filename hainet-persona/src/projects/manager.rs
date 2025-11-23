@@ -874,6 +874,13 @@ impl ProjectManager {
         Ok(self.active_projects.read().await.values().cloned().collect())
     }
 
+    /// Get recent projects (including completed ones) from storage
+    pub async fn get_recent_projects(&self, limit: usize) -> Result<Vec<Project>> {
+        // storage.list_active_projects returns all non-deleted projects ordered by created_at DESC
+        let all_projects = self.storage.list_active_projects().await?;
+        Ok(all_projects.into_iter().take(limit).collect())
+    }
+
     /// Get all tasks for a project
     pub async fn get_project_tasks(&self, project_id: &ProjectId) -> Result<Vec<Task>> {
         self.storage.list_project_tasks(project_id).await

@@ -147,6 +147,7 @@ impl AgentStateMachine {
             // From Reporting (Worker agents)
             (Reporting, Idle) => true, // PM validated, ready for next task
             (Reporting, Working) => true, // PM rejected, redo task
+            (Reporting, Planning) => true, // PM requested revision, re-plan task
             (Reporting, Error) => true,
             
             // From Error

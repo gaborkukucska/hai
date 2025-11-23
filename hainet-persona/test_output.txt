@@ -1,0 +1,546 @@
+warning: unreachable pattern
+   --> hainet-core/src/networking/auto_healer.rs:143:17
+    |
+143 |                 _ => {}
+    |                 ^ no value can reach this
+    |
+note: multiple earlier patterns match some of the same values
+   --> hainet-core/src/networking/auto_healer.rs:143:17
+    |
+125 |                 PeerStatus::Offline => {
+    |                 ------------------- matches some of the same values
+...
+133 |                 PeerStatus::Suspected => {
+    |                 --------------------- matches some of the same values
+...
+137 |                 PeerStatus::Online => {
+    |                 ------------------ matches some of the same values
+...
+143 |                 _ => {}
+    |                 ^ collectively making this unreachable
+    = note: `#[warn(unreachable_patterns)]` on by default
+
+warning: unused import: `tracing_subscriber::Layer`
+  --> hainet-core/src/logging.rs:13:5
+   |
+13 | use tracing_subscriber::Layer;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `Transport`
+ --> hainet-core/src/networking/coordinator.rs:6:46
+  |
+6 | ...PeerId, Swarm, Transport,
+  |                   ^^^^^^^^^
+
+warning: field `local_capabilities` is never read
+  --> hainet-core/src/networking/mesh_coordinator.rs:91:5
+   |
+89 | pub struct MeshCoordinator {
+   |            --------------- field in this struct
+90 |     local_peer_id: PeerId,
+91 |     local_capabilities: DeviceCapabilities,
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: field `started_at` is never read
+  --> hainet-core/src/networking/multiplexer.rs:14:5
+   |
+12 | struct PendingRequest {
+   |        -------------- field in this struct
+13 |     message: MeshMessage,
+14 |     started_at: SystemTime,
+   |     ^^^^^^^^^^
+
+warning: fields `config` and `http_client` are never read
+  --> hainet-core/src/networking/service_detector.rs:65:5
+   |
+59 | pub struct ServiceDetector {
+   |            --------------- fields in this struct
+...
+65 |     config: DetectorConfig,
+   |     ^^^^^^
+66 |     /// HTTP client for probing services
+67 |     http_client: reqwest::Client,
+   |     ^^^^^^^^^^^
+
+warning: methods `probe_ollama`, `probe_whisper`, `probe_piper`, and `probe_mcp_servers` are never used
+   --> hainet-core/src/networking/service_detector.rs:135:14
+    |
+ 72 | impl ServiceDetector {
+    | -------------------- methods in this implementation
+...
+135 |     async fn probe_ollama(&self, peer_id...
+    |              ^^^^^^^^^^^^
+...
+188 |     async fn probe_whisper(&self, peer_i...
+    |              ^^^^^^^^^^^^^
+...
+224 |     async fn probe_piper(&self, peer_id:...
+    |              ^^^^^^^^^^^
+...
+260 |     async fn probe_mcp_servers(&self, pe...
+    |              ^^^^^^^^^^^^^^^^^
+
+warning: `hainet-core` (lib) generated 7 warnings
+warning: unused imports: `DateTime` and `Utc`
+  --> hainet-persona/src/projects/project.rs:11:14
+   |
+11 | use chrono::{DateTime, Utc};
+   |              ^^^^^^^^  ^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `Context`
+  --> hainet-persona/src/projects/manager.rs:13:22
+   |
+13 | use anyhow::{Result, Context};
+   |                      ^^^^^^^
+
+warning: unused import: `DateTime`
+  --> hainet-persona/src/projects/manager.rs:17:14
+   |
+17 | use chrono::{DateTime, Utc};
+   |              ^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> hainet-persona/src/agents/pm.rs:458:21
+    |
+458 | ...   let mut project_manager = self.project_manager.write().await;
+    |           ----^^^^^^^^^^^^^^^
+    |           |
+    |           help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+warning: variable does not need to be mutable
+   --> hainet-persona/src/agents/pm.rs:495:29
+    |
+495 | ...   let mut project_manager = self.project_manager.write().await;
+    |           ----^^^^^^^^^^^^^^^
+    |           |
+    |           help: remove this `mut`
+
+warning: unused variable: `task`
+   --> hainet-persona/src/agents/worker.rs:547:25
+    |
+547 |                     let task = {
+    |                         ^^^^ help: if this is intentional, prefix it with an underscore: `_task`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: methods `get_local_ip` and `derive_subnet` are never used
+   --> hainet-persona/src/ai_providers/discovery.rs:250:8
+    |
+ 55 | impl ProviderDiscovery {
+    | ---------------------- methods in this implementation
+...
+250 |     fn get_local_ip(&self) -> Result<String> {
+    |        ^^^^^^^^^^^^
+...
+263 |     fn derive_subnet(&self, ip: &str) -> String {
+    |        ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: field `default_model` is never read
+  --> hainet-persona/src/guardian/ollama_client.rs:18:5
+   |
+16 | pub struct GuardianOllamaClient {
+   |            -------------------- field in this struct
+17 |     ai_provider_manager: Arc<AIProviderManager>,
+18 |     default_model: String,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `GuardianOllamaClient` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: fields `task_planner` and `config` are never read
+  --> hainet-persona/src/agents/admin.rs:61:5
+   |
+50 | pub struct AdminAgent {
+   |            ---------- fields in this struct
+...
+61 |     task_planner: TaskPlanner,
+   |     ^^^^^^^^^^^^
+...
+79 |     config: HaiNetConfig,
+   |     ^^^^^^
+
+warning: field `articles` is never read
+   --> hainet-persona/src/agents/guardian.rs:146:5
+    |
+144 | pub struct ConstitutionalChecker {
+    |            --------------------- field in this struct
+145 |     /// Rules for each article
+146 |     articles: Vec<Article>,
+    |     ^^^^^^^^
+
+warning: field `constitutional_checker` is never read
+   --> hainet-persona/src/agents/guardian.rs:381:5
+    |
+363 | pub struct GuardianAgent {
+    |            ------------- field in this struct
+...
+381 |     constitutional_checker: ConstitutionalChecker,
+    |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `run_audit_workflow`, `run_learning_workflow`, and `run_reporting_workflow` are never used
+   --> hainet-persona/src/agents/guardian.rs:548:14
+    |
+391 | impl GuardianAgent {
+    | ------------------ methods in this implementation
+...
+548 |     async fn run_audit_workflow(&self) -> Result<AuditReport> {
+    |              ^^^^^^^^^^^^^^^^^^
+...
+565 |     async fn run_learning_workflow(&self) -> Result<LearningReport> {
+    |              ^^^^^^^^^^^^^^^^^^^^^
+...
+582 |     async fn run_reporting_workflow(&self, _trigger: ReportTrigger) ...
+    |              ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `guardian_system` is never read
+   --> hainet-persona/src/agents/guardian.rs:654:5
+    |
+651 | struct GuardianAgentHandle {
+    |        ------------------- field in this struct
+...
+654 |     guardian_system: Arc<GuardianSystem>,
+    |     ^^^^^^^^^^^^^^^
+
+warning: field `task_id` is never read
+  --> hainet-persona/src/agents/pm.rs:32:5
+   |
+31 | struct PendingValidation {
+   |        ----------------- field in this struct
+32 |     task_id: TaskId,
+   |     ^^^^^^^
+
+warning: methods `validate_task`, `generate_validation_prompt`, `parse_validation_response`, and `generate_detailed_plan_with_discovery` are never used
+    --> hainet-persona/src/agents/pm.rs:531:14
+     |
+ 104 | impl PMAgent {
+     | ------------ methods in this implementation
+...
+ 531 |     async fn validate_task(&mut self, task_id: &TaskId) -> Result<(...
+     |              ^^^^^^^^^^^^^
+...
+ 958 |     fn generate_validation_prompt(&self, task: &crate::projects::Ta...
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 984 |     fn parse_validation_response(&self, response: &str) -> Result<V...
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1108 |     async fn generate_detailed_plan_with_discovery(
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `prompt_manager` and `max_retries` are never read
+  --> hainet-persona/src/agents/worker.rs:56:5
+   |
+36 | pub struct WorkerAgent {
+   |            ----------- fields in this struct
+...
+56 |     prompt_manager: Arc<RwLock<PromptManager>>,
+   |     ^^^^^^^^^^^^^^
+...
+71 |     max_retries: usize,
+   |     ^^^^^^^^^^^
+
+warning: methods `plan_task_execution`, `execute_with_retries`, `execute_file_task`, `execute_generic_task`, and `extract_path_from_task` are never used
+    --> hainet-persona/src/agents/worker.rs:985:14
+     |
+  97 | impl WorkerAgent {
+     | ---------------- methods in this implementation
+...
+ 985 |     async fn plan_task_execution(&self, task_description: &str) -> ...
+     |              ^^^^^^^^^^^^^^^^^^^
+...
+1236 |     async fn execute_with_retries(&self, plan: &ExecutionPlan) -> R...
+     |              ^^^^^^^^^^^^^^^^^^^^
+...
+1295 |     async fn execute_file_task(&self, task_description: &str) -> Re...
+     |              ^^^^^^^^^^^^^^^^^
+...
+1337 |     async fn execute_generic_task(&self, task_description: &str) ->...
+     |              ^^^^^^^^^^^^^^^^^^^^
+...
+1348 |     fn extract_path_from_task(&self, task_description: &str) -> Str...
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `hainet-persona` (lib) generated 17 warnings (run `cargo fix --lib -p hainet-persona` to apply 5 suggestions)
+   Compiling hainet-persona v0.1.0 (/home/tom/hai/hainet-persona)
+warning: unused import: `PMAgent`
+  --> hainet-persona/tests/pm_worker_validation_test.rs:10:30
+   |
+10 | use hainet_persona::agents::{PMAgent, WorkerAgent};
+   |                              ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `anyhow::Result`
+  --> hainet-persona/tests/worker_execution_test.rs:21:5
+   |
+21 | use anyhow::Result;
+   |     ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `SuccessMetrics`
+ --> hainet-persona/tests/worker_autonomy_test.rs:9:20
+  |
+9 |     ErrorCategory, SuccessMetrics,
+  |                    ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `Agent`
+  --> hainet-persona/tests/worker_execution_test.rs:13:43
+   |
+13 | use hainet_persona::agents::{WorkerAgent, Agent};
+   |                                           ^^^^^
+
+warning: unused variable: `message_bus`
+  --> hainet-persona/tests/pm_worker_validation_test.rs:94:10
+   |
+94 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+   |          ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_message_bus`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `prompt_manager`
+  --> hainet-persona/tests/pm_worker_validation_test.rs:94:23
+   |
+94 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+   |                       ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prompt_manager`
+
+warning: unused variable: `mcp_client`
+  --> hainet-persona/tests/pm_worker_validation_test.rs:94:56
+   |
+94 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+   |                                                        ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_mcp_client`
+
+warning: variable does not need to be mutable
+  --> hainet-persona/tests/integration_tests.rs:76:9
+   |
+76 |     let mut bus = bus.unwrap();
+   |         ----^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` on by default
+
+warning: unused variable: `message_bus`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:164:10
+    |
+164 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |          ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_message_bus`
+
+warning: unused variable: `prompt_manager`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:164:23
+    |
+164 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |                       ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prompt_manager`
+
+warning: unused variable: `mcp_client`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:164:56
+    |
+164 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |                                                        ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_mcp_client`
+
+warning: unused variable: `message_bus`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:239:10
+    |
+239 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |          ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_message_bus`
+
+warning: unused variable: `prompt_manager`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:239:23
+    |
+239 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |                       ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prompt_manager`
+
+warning: unused variable: `mcp_client`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:239:56
+    |
+239 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |                                                        ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_mcp_client`
+
+warning: unused variable: `message_bus`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:302:10
+    |
+302 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |          ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_message_bus`
+
+warning: unused variable: `prompt_manager`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:302:23
+    |
+302 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |                       ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prompt_manager`
+
+warning: unused variable: `mcp_client`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:302:56
+    |
+302 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |                                                        ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_mcp_client`
+
+warning: unused variable: `json_response`
+   --> hainet-persona/tests/worker_execution_test.rs:181:9
+    |
+181 |     let json_response = r#"{
+    |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_json_response`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `json_response`
+   --> hainet-persona/tests/worker_execution_test.rs:202:9
+    |
+202 |     let json_response = r#"```json
+    |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_json_response`
+
+warning: unused variable: `message_bus`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:347:10
+    |
+347 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |          ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_message_bus`
+
+warning: unused variable: `prompt_manager`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:347:23
+    |
+347 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |                       ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_prompt_manager`
+
+warning: unused variable: `mcp_client`
+   --> hainet-persona/tests/pm_worker_validation_test.rs:347:56
+    |
+347 |     let (message_bus, prompt_manager, project_manager, mcp_client, _) =
+    |                                                        ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_mcp_client`
+
+warning: unused variable: `worker`
+   --> hainet-persona/tests/worker_execution_test.rs:264:9
+    |
+264 |     let worker = create_test_worker().await;
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_worker`
+
+warning: `hainet-persona` (test "worker_autonomy_test") generated 1 warning (run `cargo fix --test "worker_autonomy_test"` to apply 1 suggestion)
+error[E0425]: cannot find value `user_name` in this scope
+   --> hainet-persona/src/prompts/loader.rs:454:71
+    |
+454 |         assert!(!rendered.contains("{user_name}"), "Found unreplaced {user_name}");
+    |                                                                       ^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `count` in this scope
+   --> hainet-persona/src/prompts/loader.rs:455:67
+    |
+455 |         assert!(!rendered.contains("{count}"), "Found unreplaced {count}");
+    |                                                                   ^^^^^ not found in this scope
+
+warning: `hainet-persona` (test "integration_tests") generated 1 warning (run `cargo fix --test "integration_tests"` to apply 1 suggestion)
+warning: `hainet-persona` (test "pm_worker_validation_test") generated 16 warnings (run `cargo fix --test "pm_worker_validation_test"` to apply 1 suggestion)
+warning: `hainet-persona` (test "worker_execution_test") generated 5 warnings (run `cargo fix --test "worker_execution_test"` to apply 1 suggestion)
+warning: variable does not need to be mutable
+   --> hainet-persona/src/agents/pm.rs:458:21
+    |
+458 |                 let mut project_manager = self.project_manager.write().await;
+    |                     ----^^^^^^^^^^^^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+warning: variable does not need to be mutable
+   --> hainet-persona/src/agents/pm.rs:495:29
+    |
+495 |                         let mut project_manager = self.project_manager.write().await;
+    |                             ----^^^^^^^^^^^^^^^
+    |                             |
+    |                             help: remove this `mut`
+
+error[E0560]: struct `prompts::types::PromptContext` has no field named `agent_id`
+   --> hainet-persona/src/prompts/loader.rs:439:13
+    |
+439 |             agent_id: AgentId::new(AgentType::Admin, "main-admin".to_string()),
+    |             ^^^^^^^^ `prompts::types::PromptContext` does not have this field
+    |
+    = note: available fields are: `user_name`, `user_did`, `persona_name`, `hub_name`, `device_count` ... and 9 others
+
+error[E0560]: struct `prompts::types::PromptContext` has no field named `state`
+   --> hainet-persona/src/prompts/loader.rs:440:13
+    |
+440 |             state: AgentState::Conversation,
+    |             ^^^^^ `prompts::types::PromptContext` does not have this field
+    |
+    = note: available fields are: `user_name`, `user_did`, `persona_name`, `hub_name`, `device_count` ... and 9 others
+
+error[E0609]: no field `agent_id` on type `prompts::types::PromptContext`
+   --> hainet-persona/src/prompts/loader.rs:446:61
+    |
+446 |         let template = loader.load_prompt_template(&context.agent_id).await.expect("Failed to load template");
+    |                                                             ^^^^^^^^ unknown field
+    |
+    = note: available fields are: `user_name`, `user_did`, `persona_name`, `hub_name`, `device_count` ... and 10 others
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+   --> hainet-persona/src/prompts/loader.rs:446:31
+    |
+446 |         let template = loader.load_prompt_template(&context.agent_id).await.expect("Failed to load template");
+    |                               ^^^^^^^^^^^^^^^^^^^^------------------- argument #2 of type `prompts::types::AgentState` is missing
+    |
+note: method defined here
+   --> hainet-persona/src/prompts/loader.rs:36:18
+    |
+ 36 |     pub async fn load_prompt_template(
+    |                  ^^^^^^^^^^^^^^^^^^^^
+...
+ 39 |         state: AgentState,
+    |         -----------------
+help: provide the argument
+    |
+446 |         let template = loader.load_prompt_template(&context.agent_id, /* prompts::types::AgentState */).await.expect("Failed to load template");
+    |                                                                     ++++++++++++++++++++++++++++++++++
+
+error[E0599]: no method named `render` found for enum `std::result::Result` in the current scope
+   --> hainet-persona/src/prompts/loader.rs:447:33
+    |
+447 |         let rendered = renderer.render(&template, &context).expect("Failed to render");
+    |                                 ^^^^^^ method not found in `std::result::Result<renderer::PromptRenderer, anyhow::Error>`
+    |
+note: the method `render` exists on the type `renderer::PromptRenderer`
+   --> hainet-persona/src/prompts/renderer.rs:31:5
+    |
+ 31 | /     pub async fn render(
+ 32 | |         &self,
+ 33 | |         template: &PromptTemplate,
+ 34 | |         context: &PromptContext,
+ 35 | |     ) -> Result<String> {
+    | |_______________________^
+help: consider using `Result::expect` to unwrap the `renderer::PromptRenderer` value, panicking if the value is a `Result::Err`
+    |
+447 |         let rendered = renderer.expect("REASON").render(&template, &context).expect("Failed to render");
+    |                                +++++++++++++++++
+
+warning: variable does not need to be mutable
+   --> hainet-persona/src/agents/state.rs:312:13
+    |
+312 |         let mut sm = AgentStateMachine::with_max_duration(Duration::from_millis(50));
+    |             ----^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `i`
+   --> hainet-persona/src/agents/worker_intelligence.rs:397:13
+    |
+397 |         for i in 0..5 {
+    |             ^ help: if this is intentional, prefix it with an underscore: `_i`
+
+warning: unused variable: `collector`
+   --> hainet-persona/src/agents/metrics.rs:326:13
+    |
+326 |         let collector = MetricsCollector::new(":memory:").await.unwrap();
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_collector`
+
+Some errors have detailed explanations: E0061, E0425, E0560, E0599, E0609.
+For more information about an error, try `rustc --explain E0061`.
+warning: `hainet-persona` (lib test) generated 9 warnings (4 duplicates)
+error: could not compile `hainet-persona` (lib test) due to 7 previous errors; 9 warnings emitted

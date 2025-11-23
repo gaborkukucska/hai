@@ -47,13 +47,21 @@ impl PromptLoader {
 
         // Fallback to agent-type generic template
         let agent_path = self.get_agent_prompt_path(agent_id);
-        if let Ok(mut template) = self.load_template_from_path(&agent_path).await {
-            // Inject state-specific prompt if available
-            if let Some(state_prompt) = self.load_state_prompt(state).await? {
-                template = self.merge_state_prompt(template, state_prompt, state)?;
+        if agent_path.exists() {
+            match self.load_template_from_path(&agent_path).await {
+                Ok(mut template) => {
+                    // Inject state-specific prompt if available
+                    if let Some(state_prompt) = self.load_state_prompt(state, agent_id).await? {
+                        template = self.merge_state_prompt(template, state_prompt, state).await?;
+                    }
+                    debug!("Loaded agent template with state injection: {:?}", agent_path);
+                    return Ok(template);
+                },
+                Err(e) => {
+                    tracing::error!("Failed to load agent template {:?}: {}", agent_path, e);
+                    return Err(e);
+                }
             }
-            debug!("Loaded agent template with state injection: {:?}", agent_path);
-            return Ok(template);
         }
 
         // Fallback to generic state template
@@ -104,11 +112,19 @@ impl PromptLoader {
         self.file_timestamps.insert(path.to_path_buf(), modified);
 
         info!("Loaded prompt template: {:?}", path);
+        tracing::info!("DEBUG: Template has base_prompt: {}, states: {}, injection_points: {}", 
+            template.base_prompt.is_some(),
+            template.states.as_ref().map(|s| s.len()).unwrap_or(0),
+            template.injection_points.as_ref().map(|i| i.len()).unwrap_or(0)
+        );
+        if let Some(ref states) = template.states {
+            tracing::info!("DEBUG: State keys: {:?}", states.keys().collect::<Vec<_>>());
+        }
         Ok(template)
     }
 
     /// Load state-specific prompt snippet
-    async fn load_state_prompt(&mut self, state: AgentState) -> Result<Option<StatePrompt>> {
+    async fn load_state_prompt(&mut self, state: AgentState, agent_id: &AgentId) -> Result<Option<StatePrompt>> {
         let state_path = self.get_state_prompt_path(state);
         
         if !state_path.exists() {
@@ -130,25 +146,78 @@ impl PromptLoader {
         let state_file: StateFile = toml::from_str(&content)
             .map_err(|e| anyhow!("Failed to parse state file {:?}: {}", state_path, e))?;
 
-        // For now, return the admin prompt as default
-        // TODO: Make this more sophisticated based on agent type
-        Ok(state_file.admin)
+        match agent_id.agent_type {
+            AgentType::Admin => Ok(state_file.admin),
+            AgentType::PM => {
+                if let Some(domain) = &agent_id.domain {
+                    match domain {
+                        PMDomain::Communications => Ok(state_file.pm_comms),
+                        PMDomain::Knowledge => Ok(state_file.pm_knowledge),
+                        PMDomain::System => Ok(state_file.pm_system),
+                    }
+                } else {
+                    Ok(None)
+                }
+            },
+            AgentType::Worker => {
+                if let Some(worker_type) = &agent_id.worker_type {
+                     if let Some(workers) = state_file.workers {
+                         let type_str = format!("{:?}", worker_type).to_lowercase();
+                         Ok(workers.get(&type_str).cloned())
+                     } else {
+                         Ok(None)
+                     }
+                } else {
+                    Ok(None)
+                }
+            },
+            _ => Ok(None),
+        }
+    }
+
+    /// Load injection points from a state file
+    async fn load_state_injection_points(&mut self, state: AgentState) -> Result<Option<HashMap<String, String>>> {
+        let state_path = self.get_state_prompt_path(state);
+        
+        if !state_path.exists() {
+            return Ok(None);
+        }
+
+        // Load the full template to get injection_points
+        match self.load_template_from_path(&state_path).await {
+            Ok(template) => Ok(template.injection_points),
+            Err(_) => Ok(None),
+        }
     }
 
     /// Merge a state prompt into an agent template
-    fn merge_state_prompt(
-        &self,
+    async fn merge_state_prompt(
+        &mut self,
         mut template: PromptTemplate,
         state_prompt: StatePrompt,
         state: AgentState,
     ) -> Result<PromptTemplate> {
         let state_name = format!("{:?}", state).to_lowercase();
         
+        // Merge states section
         if template.states.is_none() {
             template.states = Some(HashMap::new());
         }
         
         template.states.as_mut().unwrap().insert(state_name, state_prompt);
+        
+        // Load and merge injection_points from state file
+        if let Some(state_injections) = self.load_state_injection_points(state).await? {
+            if template.injection_points.is_none() {
+                template.injection_points = Some(HashMap::new());
+            }
+            
+            // Add all injection points from the state file
+            for (key, value) in state_injections {
+                template.injection_points.as_mut().unwrap().insert(key, value);
+            }
+        }
+        
         Ok(template)
     }
 
@@ -156,6 +225,13 @@ impl PromptLoader {
     fn get_agent_state_prompt_path(&self, agent_id: &AgentId, state: AgentState) -> PathBuf {
         let agent_type = format!("{:?}", agent_id.agent_type).to_lowercase();
         let state_name = format!("{:?}", state).to_lowercase();
+        
+        // Check for directory-based structure first: agents/{type}/{state}.toml
+        let dir_path = self.prompts_dir.join("agents").join(&agent_type).join(format!("{}.toml", state_name));
+        if dir_path.exists() {
+            return dir_path;
+        }
+
         let filename = format!("{}-{}.toml", agent_type, state_name);
         self.prompts_dir.join("agents").join(filename)
     }
@@ -362,5 +438,50 @@ description = "Valid prompt"
         assert_eq!(report.total_templates, 2);
         assert_eq!(report.valid_templates, 1);
         assert_eq!(report.errors.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_admin_conversation_prompt_rendering() {
+        use crate::prompts::renderer::PromptRenderer;
+        use serde_json::json;
+        use std::collections::HashMap;
+
+        // Setup
+        // We need to point to the REAL prompts directory for this test to verify the TOML files
+        let mut loader = PromptLoader::new(PathBuf::from("/home/tom/hai/hainet-persona/prompts")).unwrap();
+        let renderer = PromptRenderer::new().unwrap();
+        
+        // Create context
+        let mut variables = HashMap::new();
+        variables.insert("memory_context".to_string(), json!("Project Context: None"));
+        variables.insert("current_request".to_string(), json!("Hello"));
+        
+        // These are what the Admin agent injects into variables
+        variables.insert("hub_status".to_string(), json!("Online"));
+        variables.insert("device_count".to_string(), json!(5));
+        variables.insert("mesh_status".to_string(), json!("Active"));
+        variables.insert("count".to_string(), json!(1));
+        variables.insert("current_state".to_string(), json!("conversation"));
+        
+        let mut context = PromptContext {
+            variables,
+            ..Default::default()
+        };
+        
+        // Set the actual context fields that the template uses
+        context.user_name = "TestUser".to_string();
+
+        let agent_id = AgentId::new(AgentType::Admin, "main-admin".to_string());
+        let state = AgentState::Conversation;
+
+        // Load and render
+        let template = loader.load_prompt_template(&agent_id, state).await.expect("Failed to load template");
+        let rendered = renderer.render(&template, &context).await.expect("Failed to render");
+
+        // Verify
+        assert!(rendered.contains("conversational mode with TestUser"), "user_name not replaced");
+        assert!(rendered.contains("1 active project(s)"), "active_project_count not correctly rendered");
+        assert!(!rendered.contains("{{user_name}}"), "Found unreplaced {{{{user_name}}}}");
+        assert!(!rendered.contains("{{count}}"), "Found unreplaced {{{{count}}}}");
     }
 }

@@ -537,8 +537,17 @@ impl PMAgent {
         // Generate validation prompt
         let prompt = self.generate_validation_prompt(&task)?;
         
-        // Select the best model for validation using AIProviderManager
-        let selection_context = SelectionContext::for_pm();
+        // Select model with user preferences
+        let mut selection_context = SelectionContext::for_pm();
+        
+        // Apply user's preferred model family if available
+        if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            if let Ok(Some(family)) = settings.get_model_preference("PM").await {
+                tracing::debug!("PM {} using user-preferred model family: {}", self.id.name, family);
+                selection_context.preferred_family = Some(family);
+            }
+        }
         let selected_model = self.ai_provider_manager
             .select_model_for_agent(selection_context)
             .await
@@ -692,8 +701,11 @@ impl PMAgent {
                             task_id,
                             e
                         );
-                        // Auto-approve on validation error to keep project moving
-                        self.auto_approve_task(&task_id, format!("Validation error: {}", e)).await?;
+                        // Request revision instead of auto-approving
+                        self.request_task_revision(
+                            &task_id, 
+                            format!("Validation failed - please review and resubmit: {}", e)
+                        ).await?;
                     }
                     Err(e) => {
                         tracing::error!(
@@ -702,8 +714,11 @@ impl PMAgent {
                             task_id,
                             e
                         );
-                        // Auto-approve on panic
-                        self.auto_approve_task(&task_id, format!("Validation panic: {}", e)).await?;
+                        // Request revision on panic instead of auto-approving
+                        self.request_task_revision(
+                            &task_id,
+                            format!("Validation system error - please review and resubmit: {}", e)
+                        ).await?;
                     }
                 }
             }
@@ -768,7 +783,7 @@ impl PMAgent {
         Ok(())
     }
     
-    /// Timeout stale validations (>60s) and auto-approve them
+    /// Timeout stale validations (>60s) and request revision
     async fn timeout_stale_validations(&mut self) -> Result<()> {
         let timeout_duration = std::time::Duration::from_secs(60);
         let now = SystemTime::now();
@@ -785,7 +800,7 @@ impl PMAgent {
         for task_id in timed_out {
             if let Some(pending) = self.pending_validations.remove(&task_id) {
                 tracing::warn!(
-                    "PM {} validation timed out for task {} after 60s, auto-approving",
+                    "PM {} validation timed out for task {} after 60s, requesting revision",
                     self.id.name,
                     task_id
                 );
@@ -793,34 +808,39 @@ impl PMAgent {
                 // Abort the hanging validation task
                 pending.handle.abort();
                 
-                // Auto-approve to keep project moving
-                self.auto_approve_task(&task_id, "Validation timed out after 60s".to_string()).await?;
+                // Request revision instead of auto-approving
+                self.request_task_revision(
+                    &task_id,
+                    "Validation timed out after 60s - please review and resubmit your work".to_string()
+                ).await?;
             }
         }
         
         Ok(())
     }
     
-    /// Auto-approve a task with a warning message
-    async fn auto_approve_task(&self, task_id: &TaskId, reason: String) -> Result<()> {
+    /// Request task revision with feedback
+    async fn request_task_revision(&self, task_id: &TaskId, feedback: String) -> Result<()> {
         let pm = self.project_manager.read().await;
-        pm.approve_task(task_id, format!("AUTO-APPROVED: {}", reason)).await?;
+        pm.request_revision(task_id, feedback).await?;
         
         tracing::warn!(
-            "PM {} auto-approved task {} - {}",
+            "PM {} requested revision for task {} - validation failed",
             self.id.name,
-            task_id,
-            reason
+            task_id
         );
         
         Ok(())
     }
     
-    /// Spawn-safe validation logic (static method)
+    /// Handle revision tasks - reset them for worker to retry
+    
+
+    /// Validate task with simple file-based checks (no LLM)
     async fn validate_task_async(
         task_id: TaskId,
         project_manager: Arc<RwLock<ProjectManager>>,
-        ai_provider_manager: Arc<AIProviderManager>,
+        _ai_provider_manager: Arc<AIProviderManager>,
         pm_name: String,
     ) -> Result<ValidationResponse> {
         let task = {
@@ -828,45 +848,64 @@ impl PMAgent {
             pm.get_task(&task_id).await?
         };
         
-        // Generate validation prompt
-        let prompt = Self::generate_validation_prompt_static(&task)?;
+        tracing::info!("PM {} validating task {} with file-based checks", pm_name, task_id);
         
-        // Select model
-        let selection_context = SelectionContext::for_pm();
-        let selected_model = ai_provider_manager
-            .select_model_for_agent(selection_context)
-            .await
-            .context("Failed to select a model for validation")?;
+        // Simple validation checks (no LLM needed):
         
-        let options = GenerationOptions {
-            temperature: Some(0.3),
-            max_tokens: Some(1024),
-            stop: Some(vec!["</s>".to_string(), "\n\n\n".to_string()]),
-            ..Default::default()
-        };
+        // 1. Check deliverables exist
+        if task.deliverables.is_empty() {
+            tracing::warn!("PM {} task {} has no deliverables", pm_name, task_id);
+            return Ok(ValidationResponse {
+                approved: false,
+                feedback: "No deliverables submitted. Please complete the task and submit your work.".to_string(),
+                revision_needed: true,
+            });
+        }
         
-        let client = selected_model.get_client()?;
-        let model_name = if selected_model.model_id.contains("::") {
-            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
-        } else {
-            &selected_model.model_id
-        };
+        // 2. Check deliverables are not empty/trivial
+        let total_content: usize = task.deliverables.iter()
+            .map(|d| d.len())
+            .sum();
         
-        tracing::info!("[DIAGNOSTIC] PM {} calling LLM for validation (model: {})", pm_name, model_name);
+        if total_content < 50 {
+            tracing::warn!("PM {} task {} has minimal deliverables ({} chars)", pm_name, task_id, total_content);
+            return Ok(ValidationResponse {
+                approved: false,
+                feedback: format!("Deliverables are too minimal ({} chars total). Please provide substantial work.", total_content),
+                revision_needed: true,
+            });
+        }
         
-        let response = client.generate(model_name, &prompt, options)
-            .await
-            .context("Failed to validate task with LLM")?;
+        // 3. Check for placeholder/TODO content
+        let has_placeholders = task.deliverables.iter()
+            .any(|d| {
+                let lower = d.to_lowercase();
+                lower.contains("todo") || 
+                lower.contains("fixme") || 
+                lower.contains("placeholder") ||
+                lower.contains("not implemented") ||
+                lower.contains("coming soon")
+            });
         
-        tracing::debug!(
-            target: "llm_messages",
-            "[PM VALIDATION RESPONSE] Model: {}, Response ({} chars):\n{}",
-            model_name,
-            response.text.len(),
-            response.text
-        );
+        if has_placeholders {
+            tracing::warn!("PM {} task {} contains placeholder content", pm_name, task_id);
+            return Ok(ValidationResponse {
+                approved: false,
+                feedback: "Deliverables contain TODO/placeholder content. Please complete the implementation.".to_string(),
+                revision_needed: true,
+            });
+        }
         
-        Self::parse_validation_response_static(&response.text)
+        // All checks passed - approve
+        tracing::info!("PM {} approved task {} ({} deliverables, {} chars)", 
+            pm_name, task_id, task.deliverables.len(), total_content);
+        
+        Ok(ValidationResponse {
+            approved: true,
+            feedback: format!("Task approved. Deliverables meet requirements ({} items, {} chars total).", 
+                task.deliverables.len(), total_content),
+            revision_needed: false,
+        })
     }
     
     /// Static version of generate_validation_prompt
@@ -1180,11 +1219,22 @@ CRITICAL: JSON only. No explanations.
             self.session_tasks.to_prompt_format()
         );
         
-        let selection_context = SelectionContext::for_pm();
+        // Select model with user preferences
+        let mut selection_context = SelectionContext::for_pm();
+        
+        // Apply user's preferred model family if available
+        if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            if let Ok(Some(family)) = settings.get_model_preference("PM").await {
+                tracing::info!("PM {} using user-preferred model family: {}", self.id.name, family);
+                selection_context.preferred_family = Some(family);
+            }
+        }
+        
         let selected_model = self.ai_provider_manager
             .select_model_for_agent(selection_context)
             .await
-            .context("Failed to select model for PM planning")?;
+            .context("Failed to select a model for PM planning")?;
         
         let options = GenerationOptions {
             temperature: Some(0.5),
@@ -1271,7 +1321,17 @@ CRITICAL: JSON only. No explanations.
         );
         
         // Select the best model for planning using AIProviderManager
-        let selection_context = SelectionContext::for_pm();
+        // Select model with user preferences
+        let mut selection_context = SelectionContext::for_pm();
+        
+        // Apply user's preferred model family if available
+        if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            if let Ok(Some(family)) = settings.get_model_preference("PM").await {
+                tracing::debug!("PM {} using user-preferred model family: {}", self.id.name, family);
+                selection_context.preferred_family = Some(family);
+            }
+        }
         
         // Load user preference for PM agent if available
         let preferred_family = if let Some(ref user_settings) = self.user_settings {

@@ -172,52 +172,71 @@ impl AdminAgent {
     fn is_project_management_command(&self, user_input: &str) -> Option<String> {
         let input_lower = user_input.to_lowercase();
         
+        // Check for implicit project references ("it", "PM", "development", "work")
+        let has_implicit_project_ref = input_lower.contains(" it ") 
+            || input_lower.contains(" pm ") 
+            || input_lower.contains("development") 
+            || input_lower.contains("working on");
+        
+        let has_explicit_project_ref = input_lower.contains("project");
+        let has_project_ref = has_explicit_project_ref || has_implicit_project_ref;
+        
         // Delete keywords
         if (input_lower.contains("delete") || input_lower.contains("remove") || input_lower.contains("cancel")) 
-            && (input_lower.contains("project") || input_lower.contains("all")) {
+            && (has_project_ref || input_lower.contains("all")) {
             return Some("delete".to_string());
         }
         
         // Pause keywords
         if (input_lower.contains("pause") || input_lower.contains("hold") || input_lower.contains("stop working on")) 
-            && input_lower.contains("project") {
+            && has_project_ref {
             return Some("pause".to_string());
         }
         
-        // Resume keywords
-        if (input_lower.contains("resume") || input_lower.contains("continue") || input_lower.contains("restart")) 
-            && input_lower.contains("project") {
+        // Resume keywords - enhanced to catch "get the PM to keep working", "continue development", etc.
+        if ((input_lower.contains("resume") || input_lower.contains("continue") || input_lower.contains("restart"))
+            || (input_lower.contains("keep") && input_lower.contains("working"))
+            || (input_lower.contains("get") && input_lower.contains("pm") && (input_lower.contains("working") || input_lower.contains("going"))))
+            && has_project_ref {
             return Some("resume".to_string());
+        }
+        
+        // Status/Progress keywords - "how is the project going", "what's the status", etc.
+        if ((input_lower.contains("how") && input_lower.contains("going"))
+            || (input_lower.contains("what") && (input_lower.contains("status") || input_lower.contains("progress")))
+            || input_lower.contains("check on"))
+            && has_project_ref {
+            return Some("status".to_string());
         }
         
         // Stop keywords
         if (input_lower.contains("stop") || input_lower.contains("terminate") || input_lower.contains("end")) 
-            && input_lower.contains("project") 
+            && has_project_ref 
             && !input_lower.contains("working on") {
             return Some("stop".to_string());
         }
         
         // Rename keywords
         if (input_lower.contains("rename") || input_lower.contains("change name")) 
-            && input_lower.contains("project") {
+            && has_project_ref {
             return Some("rename".to_string());
         }
 
         // Export keywords
         if (input_lower.contains("export") || input_lower.contains("backup") || input_lower.contains("archive")) 
-            && input_lower.contains("project") {
+            && has_project_ref {
             return Some("export".to_string());
         }
 
         // Import keywords
         if (input_lower.contains("import") || input_lower.contains("restore") || input_lower.contains("load")) 
-            && input_lower.contains("project") {
+            && has_project_ref {
             return Some("import".to_string());
         }
         
         // List keywords
         if (input_lower.contains("list") || input_lower.contains("show") || input_lower.contains("what")) 
-            && input_lower.contains("project") {
+            && has_project_ref {
             return Some("list".to_string());
         }
         
@@ -239,13 +258,16 @@ impl AdminAgent {
                 }
             },
             "pause" => {
-                Ok("To pause a project, please use the UI menu next to the project in the Active Projects list.".to_string())
+                self.pause_most_recent_project().await
             },
             "resume" => {
-                Ok("To resume a project, please use the UI menu next to the project in the Active Projects list.".to_string())
+                self.resume_most_recent_project().await
+            },
+            "status" => {
+                self.get_most_recent_project_status().await
             },
             "stop" => {
-                Ok("To stop a project, please use the UI menu next to the project in the Active Projects list.".to_string())
+                self.pause_most_recent_project().await // Stop is same as pause for now
             },
             "rename" => {
                 Ok("To rename a project, please use the UI menu next to the project in the Active Projects list.".to_string())
@@ -301,14 +323,107 @@ impl AdminAgent {
         Ok(response)
     }
     
+    /// Pause the most recent active project
+    async fn pause_most_recent_project(&self) -> Result<String> {
+        let projects = self.project_manager.read().await
+            .list_active_projects()
+            .await?;
+        
+        if projects.is_empty() {
+            return Ok("You don't have any active projects to pause.".to_string());
+        }
+        
+        // Get the most recent project (last in the list)
+        let project = projects.last().unwrap();
+        let project_id = project.id.clone();
+        let project_title = project.title.clone();
+        
+        // Pause the project
+        self.project_manager.read().await
+            .pause_project(&project_id)
+            .await?;
+        
+        Ok(format!("✅ Paused project: **{}**\n\nThe PM and workers will stop working on this project. You can resume it anytime by asking me to continue or resume the project.", project_title))
+    }
+    
+    /// Resume the most recent paused project
+    async fn resume_most_recent_project(&self) -> Result<String> {
+        let projects = self.project_manager.read().await
+            .list_active_projects()
+            .await?;
+        
+        if projects.is_empty() {
+            return Ok("You don't have any projects to resume. Would you like to create a new project?".to_string());
+        }
+        
+        // Get the most recent project (last in the list)
+        let project = projects.last().unwrap();
+        let project_id = project.id.clone();
+        let project_title = project.title.clone();
+        
+        // Resume the project
+        self.project_manager.read().await
+            .resume_project(&project_id)
+            .await?;
+        
+        Ok(format!("✅ Resumed project: **{}**\n\nThe PM will continue managing this project and coordinating with workers to complete the remaining tasks.", project_title))
+    }
+    
+    /// Get status of the most recent project
+    async fn get_most_recent_project_status(&self) -> Result<String> {
+        let projects = self.project_manager.read().await
+            .list_active_projects()
+            .await?;
+        
+        if projects.is_empty() {
+            return Ok("You don't have any active projects at the moment.".to_string());
+        }
+        
+        // Get the most recent project (last in the list)
+        let project = projects.last().unwrap();
+        
+        // Get detailed task status
+        let pm = self.project_manager.read().await;
+        let tasks = pm.get_project_tasks(&project.id).await?;
+        
+        let total_tasks = tasks.len();
+        let completed_tasks = tasks.iter().filter(|t| matches!(t.status, crate::projects::TaskStatus::Complete)).count();
+        let in_progress_tasks = tasks.iter().filter(|t| matches!(t.status, crate::projects::TaskStatus::Assigned | crate::projects::TaskStatus::InProgress)).count();
+        let unassigned_tasks = tasks.iter().filter(|t| matches!(t.status, crate::projects::TaskStatus::Unassigned)).count();
+        let needs_revision_tasks = tasks.iter().filter(|t| matches!(t.status, crate::projects::TaskStatus::NeedsRevision)).count();
+        
+        let mut response = format!(
+            "📊 **Project Status: {}**\n\n**Overview:** {}\n\n**Progress:**\n- Total Tasks: {}\n- ✅ Completed: {}\n- 🔄 In Progress: {}\n- ⏳ Unassigned: {}\n",
+            project.title,
+            project.overview.chars().take(150).collect::<String>(),
+            total_tasks,
+            completed_tasks,
+            in_progress_tasks,
+            unassigned_tasks
+        );
+        
+        if needs_revision_tasks > 0 {
+            response.push_str(&format!("- ⚠️ Needs Revision: {}\n", needs_revision_tasks));
+        }
+        
+        response.push_str(&format!("\n**Overall Status:** {}", project.status));
+        
+        Ok(response)
+    }
+    
+
     /// Main entry point for user interaction
     pub async fn process_user_input(&mut self, user_input: String) -> Result<String> {
+        tracing::info!("DEBUG: Admin process_user_input called with: {}", user_input);
+        
         // 1. Check for project management commands FIRST
         if let Some(command_type) = self.is_project_management_command(&user_input) {
+            tracing::info!("DEBUG: Detected project management command: {:?}", command_type);
             return self.handle_project_management_command(&user_input, &command_type).await;
         }
 
         // 2. Parse Intent
+        tracing::info!("DEBUG: Parsing intent...");
         self.update_status("Parsing user intent").await;
         let intent = self.intent_parser.parse(&user_input).await?;
         tracing::info!("Parsed intent: {:?} (confidence: {})", intent.intent_type, intent.confidence);
@@ -334,9 +449,14 @@ impl AdminAgent {
         let _ = self.session_tasks.start_task(&request_title);
 
         // 5. Route to appropriate handler based on intent complexity
-        let result = if self.is_complex_intent(&intent, &user_input)? {
+        let is_complex = self.is_complex_intent(&intent, &user_input)?;
+        tracing::info!("DEBUG: Intent is complex: {}", is_complex);
+        
+        let result = if is_complex {
+            tracing::info!("DEBUG: Calling handle_complex_intent");
             self.handle_complex_intent(&user_input, &intent).await
         } else {
+            tracing::info!("DEBUG: Calling handle_simple_intent");
             self.handle_simple_intent(&user_input, &intent).await
         };
         
@@ -910,6 +1030,7 @@ impl AdminAgent {
         user_input: &str,
         intent: &super::intent::Intent,
     ) -> Result<String> {
+        tracing::info!("DEBUG: handle_simple_intent started");
         let start_time = Instant::now();
 
         // 1. Ensure Conversation state
@@ -965,9 +1086,13 @@ impl AdminAgent {
         user_input: &str,
         _intent: &super::intent::Intent,
     ) -> Result<String> {
+        tracing::info!("DEBUG: generate_conversational_response started");
         // Load conversation prompt
         let mut prompt_manager = self.context.prompt_manager.write().await;
         let mut prompt_context = PromptContext::default();
+        
+        // Set current_state so the renderer can find the correct state prompt
+        prompt_context.variables.insert("current_state".to_string(), serde_json::Value::String("conversation".to_string()));
         
         // Retrieve context
         let history = self.memory.get_recent_context(10).await.unwrap_or_default();
@@ -995,13 +1120,15 @@ impl AdminAgent {
         if !history.is_empty() {
             memory_context.push_str("RECENT CONVERSATION:\n");
             for entry in history {
-                let user_msg = if entry.user_message.len() > 200 {
-                    format!("{}...", &entry.user_message[..197])
+                let user_msg = if entry.user_message.chars().count() > 200 {
+                    let truncated: String = entry.user_message.chars().take(197).collect();
+                    format!("{}...", truncated)
                 } else {
                     entry.user_message.clone()
                 };
-                let admin_msg = if entry.admin_response.len() > 200 {
-                    format!("{}...", &entry.admin_response[..197])
+                let admin_msg = if entry.admin_response.chars().count() > 200 {
+                    let truncated: String = entry.admin_response.chars().take(197).collect();
+                    format!("{}...", truncated)
                 } else {
                     entry.admin_response.clone()
                 };
@@ -1022,9 +1149,18 @@ impl AdminAgent {
             user_input.to_string()
         };
         
-        prompt_context.current_request = Some(full_request.clone());
-        prompt_context.variables.insert("user_input".to_string(), serde_json::Value::String(full_request));
+        tracing::info!("DEBUG: Admin conversation full_request:\n{}", full_request);
+        
+        // Set prompt variables - use user_input for current_request since memory_context is injected separately
+        prompt_context.current_request = Some(user_input.to_string());
+        prompt_context.variables.insert("user_input".to_string(), serde_json::Value::String(user_input.to_string()));
         prompt_context.variables.insert("memory_context".to_string(), serde_json::Value::String(memory_context));
+        
+        // Add system status variables
+        prompt_context.variables.insert("hub_status".to_string(), serde_json::Value::String("Online".to_string()));
+        prompt_context.variables.insert("device_count".to_string(), serde_json::json!(1)); // TODO: Get real device count
+        prompt_context.variables.insert("mesh_status".to_string(), serde_json::Value::String("Active".to_string()));
+        prompt_context.variables.insert("count".to_string(), serde_json::json!(self.active_project_count()));
         
         let system_prompt = prompt_manager.get_prompt(
             &self.id,
@@ -1032,15 +1168,12 @@ impl AdminAgent {
             &prompt_context
         ).await?;
         
+        tracing::info!("DEBUG: Rendered system_prompt:\n{}", system_prompt);
+        
         drop(prompt_manager);
 
         // Select the best model for conversation
-        let selection_context = SelectionContext {
-            agent_type: AgentType::Admin,
-            operation: "conversation".to_string(),
-            priority: crate::messaging::Priority::Normal,
-            complexity: crate::ai_providers::ModelComplexity::Medium,
-        };
+        let selection_context = SelectionContext::for_admin();
         
         let preferred_family = if let Some(ref user_settings) = self.context.user_settings {
             let settings = user_settings.read().await;
@@ -1089,19 +1222,26 @@ impl AdminAgent {
     /// Get context about recent projects (active and completed)
     async fn get_project_context(&self) -> String {
         let project_manager = self.project_manager.read().await;
-        if let Ok(projects) = project_manager.list_active_projects().await {
-            if projects.is_empty() {
-                return "No projects found.".to_string();
+        // Use get_recent_projects to include completed ones
+        match project_manager.get_recent_projects(5).await {
+            Ok(projects) => {
+                tracing::info!("DEBUG: Admin retrieved {} recent projects for context", projects.len());
+                if projects.is_empty() {
+                    return "No projects found.".to_string();
+                }
+                
+                let mut summary = String::from("PROJECT CONTEXT:\n");
+                // Sort by created_at desc (already done by SQL query)
+                for project in projects.iter().take(5) {
+                    summary.push_str(&format!("- {} ({}): {}\n", project.title, project.status, project.overview));
+                }
+                tracing::info!("DEBUG: Project context summary:\n{}", summary);
+                summary
+            },
+            Err(e) => {
+                tracing::error!("Failed to retrieve project context: {}", e);
+                "Failed to retrieve project context.".to_string()
             }
-            
-            let mut summary = String::from("PROJECT CONTEXT:\n");
-            // Sort by created_at desc (already done by SQL query)
-            for project in projects.iter().take(5) {
-                summary.push_str(&format!("- {} ({}): {}\n", project.title, project.status, project.overview));
-            }
-            summary
-        } else {
-            "Failed to retrieve project context.".to_string()
         }
     }
     
@@ -1292,7 +1432,14 @@ mod tests {
             MetricsCollector::new("sqlite::memory:").await.unwrap()
         ));
         
-        AdminAgent::new(context, project_manager, ai_provider_manager, metrics).await.unwrap()
+        AdminAgent::new(
+            context, 
+            project_manager, 
+            ai_provider_manager, 
+            metrics,
+            "sqlite::memory:".to_string(),
+            "sqlite::memory:".to_string()
+        ).await.unwrap()
     }
     
     #[tokio::test]

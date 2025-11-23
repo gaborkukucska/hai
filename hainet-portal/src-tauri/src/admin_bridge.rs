@@ -186,7 +186,7 @@ impl AdminBridge {
         
         // Create Admin AI agent (ai_provider_manager already created earlier)
         let mut admin = AdminAgent::new(
-            context, 
+            context.clone(), 
             project_manager, 
             ai_provider_manager, 
             metrics_collector,

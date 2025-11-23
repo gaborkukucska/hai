@@ -33,18 +33,29 @@ impl PromptRenderer {
         template: &PromptTemplate,
         context: &PromptContext,
     ) -> Result<String> {
+        tracing::info!("DEBUG: Renderer.render() called");
+        tracing::info!("DEBUG: Template metadata: state={:?}, version={}", template.metadata.state, template.metadata.version);
+        
         // Start with base prompt
         let mut final_prompt = if let Some(ref base) = template.base_prompt {
+            tracing::info!("DEBUG: Using base prompt ({} chars)", base.system.len());
             base.system.clone()
         } else {
+            tracing::info!("DEBUG: No base prompt");
             String::new()
         };
 
         // Apply state-specific prompt if available
         if let Some(ref states) = template.states {
+            tracing::info!("DEBUG: Template has {} state prompts: {:?}", states.len(), states.keys().collect::<Vec<_>>());
             if let Some(state_prompt) = self.find_matching_state_prompt(states, context) {
+                tracing::info!("DEBUG: Found matching state prompt");
                 final_prompt = self.merge_prompts(&final_prompt, &state_prompt.prompt)?;
+            } else {
+                tracing::warn!("DEBUG: No matching state prompt found!");
             }
+        } else {
+            tracing::warn!("DEBUG: Template has no states!");
         }
 
         // Apply injection points
@@ -70,31 +81,53 @@ impl PromptRenderer {
         states: &'a HashMap<String, StatePrompt>,
         context: &PromptContext,
     ) -> Option<&'a StatePrompt> {
+        tracing::info!("DEBUG: find_matching_state_prompt called");
+        tracing::info!("DEBUG: context.variables keys: {:?}", context.variables.keys().collect::<Vec<_>>());
+        
         // Try to find exact state match first
         if let Some(current_state) = &context.variables.get("current_state") {
+            tracing::info!("DEBUG: Found current_state variable: {:?}", current_state);
             if let Some(state_str) = current_state.as_str() {
+                tracing::info!("DEBUG: Looking for state: {}", state_str);
                 if let Some(state_prompt) = states.get(state_str) {
+                    tracing::info!("DEBUG: Found exact match for state: {}", state_str);
                     return Some(state_prompt);
+                } else {
+                    tracing::warn!("DEBUG: No state found for key: {}", state_str);
                 }
             }
+        } else {
+            tracing::warn!("DEBUG: No current_state variable in context");
         }
 
         // Fallback to any available state
-        states.values().next()
+        let fallback = states.values().next();
+        if fallback.is_some() {
+            tracing::info!("DEBUG: Using fallback state (first available)");
+        } else {
+            tracing::warn!("DEBUG: No fallback state available");
+        }
+        fallback
     }
 
     /// Merge base prompt with state-specific prompt
     fn merge_prompts(&self, base: &str, state: &str) -> Result<String> {
+        tracing::info!("DEBUG: merge_prompts called - base: {} chars, state: {} chars", base.len(), state.len());
+        
         if base.is_empty() {
+            tracing::info!("DEBUG: Base is empty, returning state only");
             return Ok(state.to_string());
         }
         
         if state.is_empty() {
+            tracing::info!("DEBUG: State is empty, returning base only");
             return Ok(base.to_string());
         }
 
         // Combine with clear separation
-        Ok(format!("{}\n\n# Current State Context\n{}", base, state))
+        let merged = format!("{}\n\n# Current State Context\n{}", base, state);
+        tracing::info!("DEBUG: Merged prompt: {} chars", merged.len());
+        Ok(merged)
     }
 
     /// Apply injection points to the template
@@ -107,7 +140,7 @@ impl PromptRenderer {
         let mut result = template.to_string();
 
         for (injection_key, injection_template) in injection_points {
-            let placeholder = format!("{{{}}}", injection_key);
+            let placeholder = format!("{{{{{}}}}}", injection_key);
             
             if result.contains(&placeholder) {
                 // Render the injection template with context
@@ -122,8 +155,11 @@ impl PromptRenderer {
 
     /// Render a template string with context using Handlebars
     fn render_template(&self, template: &str, context: &PromptContext) -> Result<String> {
+        tracing::info!("DEBUG: render_template called with template: {} chars", template.len());
+        
         // Prepare data for handlebars
         let mut data = serde_json::to_value(context)?;
+        tracing::info!("DEBUG: Serialized context to JSON");
         
         // Add helper data
         if let Some(obj) = data.as_object_mut() {
@@ -140,10 +176,15 @@ impl PromptRenderer {
             self.prepare_arrays_for_handlebars(obj);
         }
 
+        tracing::info!("DEBUG: About to render with handlebars");
         // Render with handlebars
         let rendered = self.handlebars.render_template(template, &data)
-            .map_err(|e| anyhow!("Handlebars rendering error: {}", e))?;
+            .map_err(|e| {
+                tracing::error!("DEBUG: Handlebars rendering error: {}", e);
+                anyhow!("Handlebars rendering error: {}", e)
+            })?;
 
+        tracing::info!("DEBUG: Handlebars rendered {} chars", rendered.len());
         Ok(rendered)
     }
 
