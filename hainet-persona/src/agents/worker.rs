@@ -25,6 +25,22 @@ use super::worker_discovery::{
 use serde_json::json;
 use std::time::SystemTime;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SubTask {
+    id: usize,
+    description: String,
+    goal: String,
+    verification_criteria: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VerificationResult {
+    success: bool,
+    issues: Vec<String>,
+    feedback: String,
+}
 
 /// Worker Agent
 /// 
@@ -329,9 +345,27 @@ impl WorkerAgent {
                 
                 // Submit task for review
                 let project_manager = self.project_manager.write().await;
-                project_manager.complete_task(&task_id, deliverables).await?;
+                project_manager.complete_task(&task_id, deliverables.clone()).await?;
                 
                 tracing::info!("Worker {} completed task: {}", self.id.name, task.title);
+                
+                // Send TaskResult message to PM with retry
+                let task_result = crate::messaging::MessageContent::TaskResult(crate::messaging::TaskResult {
+                    task_id: task_id.to_string(),
+                    success: true,
+                    output: serde_json::Value::String(deliverables.join("\n")),
+                    error: None,
+                    metrics: crate::messaging::TaskMetrics {
+                        duration_ms: 0,
+                        cost_usd: 0.0,
+                        resource_tier_used: crate::messaging::ResourceTier::LocalOnly,
+                        tokens_used: None,
+                    },
+                });
+                
+                if let Err(e) = self.send_message_to_pm_with_retry(&task.project_id, task_result, 4).await {
+                    tracing::warn!("Worker {} failed to send completion message to PM after retries: {:?}", self.id.name, e);
+                }
                 
                 Ok(())
             }
@@ -358,6 +392,18 @@ impl WorkerAgent {
                     );
                 }
                 
+                // Send ErrorReport message to PM with retry
+                let error_report = crate::messaging::MessageContent::ErrorReport(crate::messaging::ErrorReport {
+                    error_type: "ExecutionError".to_string(),
+                    message: e.to_string(),
+                    stack_trace: None,
+                    recoverable: false,
+                });
+                
+                if let Err(send_err) = self.send_message_to_pm_with_retry(&task.project_id, error_report, 4).await {
+                    tracing::warn!("Worker {} failed to send error message to PM after retries: {:?}", self.id.name, send_err);
+                }
+                
                 Err(e)
             }
         }
@@ -367,6 +413,7 @@ impl WorkerAgent {
     /// 
     /// This is the original monolithic approach - kept for backward compatibility.
     /// Use execute_task_with_discovery() for new code.
+    #[deprecated(note = "Use execute_task_with_discovery instead")]
     pub async fn execute_task(&mut self) -> Result<()> {
         let task_id = self.current_task.as_ref()
             .ok_or_else(|| anyhow::anyhow!("No task assigned"))?
@@ -448,9 +495,27 @@ impl WorkerAgent {
 
                 // Submit task for review
                 let project_manager = self.project_manager.write().await;
-                project_manager.complete_task(&task_id, deliverables).await?;
+                project_manager.complete_task(&task_id, deliverables.clone()).await?;
                 
                 tracing::info!("Worker {} completed task: {} and updated status to UnderReview", self.id.name, task.title);
+                
+                // Send TaskResult message to PM with retry
+                let task_result = crate::messaging::MessageContent::TaskResult(crate::messaging::TaskResult {
+                    task_id: task_id.to_string(),
+                    success: true,
+                    output: serde_json::Value::String(deliverables.join("\n")),
+                    error: None,
+                    metrics: crate::messaging::TaskMetrics {
+                        duration_ms: 0,
+                        cost_usd: 0.0,
+                        resource_tier_used: crate::messaging::ResourceTier::LocalOnly,
+                        tokens_used: None,
+                    },
+                });
+                
+                if let Err(e) = self.send_message_to_pm_with_retry(&task.project_id, task_result, 4).await {
+                    tracing::warn!("Worker {} failed to send completion message to PM after retries: {:?}", self.id.name, e);
+                }
                 
                 Ok(())
             }
@@ -480,9 +545,101 @@ impl WorkerAgent {
                     );
                 }
                 
+                // Send ErrorReport message to PM with retry
+                let error_report = crate::messaging::MessageContent::ErrorReport(crate::messaging::ErrorReport {
+                    error_type: "ExecutionError".to_string(),
+                    message: e.to_string(),
+                    stack_trace: None,
+                    recoverable: false,
+                });
+                
+                if let Err(send_err) = self.send_message_to_pm_with_retry(&task.project_id, error_report, 4).await {
+                    tracing::warn!("Worker {} failed to send error message to PM after retries: {:?}", self.id.name, send_err);
+                }
+                
                 Err(e)
             }
         }
+    }
+    
+    /// Send a message to PM with retry logic and dynamic PM instance lookup
+    /// This handles the case where PM instance IDs may change
+    async fn send_message_to_pm_with_retry(
+        &self,
+        project_id: &crate::projects::ProjectId,
+        content: crate::messaging::MessageContent,
+        max_retries: u32,
+    ) -> Result<()> {
+        let pm_name_pattern = format!("PM-{}", project_id);
+        
+        for attempt in 1..=max_retries {
+            // Query message bus for current PM instance
+            let pm_id = {
+                let bus = self.message_bus.read().await;
+                bus.find_agent_by_name(crate::prompts::types::AgentType::PM, &pm_name_pattern).await
+            };
+            
+            match pm_id {
+                Some(pm_agent_id) => {
+                    tracing::debug!(
+                        "Worker {} found PM instance for project {}: {:?}",
+                        self.id.name,
+                        project_id,
+                        pm_agent_id
+                    );
+                    
+                    let message = crate::messaging::Message::new(
+                        self.id.clone(),
+                        pm_agent_id,
+                        content.clone(),
+                    );
+                    
+                    match self.message_bus.write().await.send_message(message).await {
+                        Ok(()) => {
+                            tracing::info!(
+                                "Worker {} successfully sent message to PM (attempt {})",
+                                self.id.name,
+                                attempt
+                            );
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Worker {} failed to send message to PM (attempt {}): {:?}",
+                                self.id.name,
+                                attempt,
+                                e
+                            );
+                            
+                            if attempt < max_retries {
+                                // Exponential backoff: 100ms, 200ms, 400ms, 800ms
+                                let delay_ms = 100 * (2_u64.pow(attempt - 1));
+                                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                            }
+                        }
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        "Worker {} could not find PM for project {} (attempt {})",
+                        self.id.name,
+                        project_id,
+                        attempt
+                    );
+                    
+                    if attempt < max_retries {
+                        // Wait before retrying PM lookup
+                        let delay_ms = 100 * (2_u64.pow(attempt - 1));
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+        
+        Err(anyhow::anyhow!(
+            "Failed to send message to PM after {} attempts",
+            max_retries
+        ))
     }
     
     /// Wait for PM validation with real task polling
@@ -717,16 +874,26 @@ impl WorkerAgent {
             recommended_tool
         );
         
-        // Generate planning prompt with tool recommendation
-        let planning_prompt = format!(
-            "{}\n\nRECOMMENDED TOOL (based on history): {}\nConsider using this tool if applicable.",
-            self.generate_planning_prompt(&task.description),
-            recommended_tool
-        );
+        // Generate planning prompt with tool recommendation and available servers
+        let planning_prompt = match self.generate_planning_prompt_with_servers(&task.description).await {
+            Ok(prompt) => format!(
+                "{}\n\nRECOMMENDED TOOL (based on history): {}\nConsider using this tool if applicable.",
+                prompt,
+                recommended_tool
+            ),
+            Err(e) => {
+                tracing::warn!("Failed to generate enhanced prompt with servers: {}. Falling back to basic prompt.", e);
+                format!(
+                    "{}\n\nRECOMMENDED TOOL (based on history): {}\nConsider using this tool if applicable.",
+                    self.generate_planning_prompt(&task.description),
+                    recommended_tool
+                )
+            }
+        };
         
         let options = GenerationOptions {
             temperature: Some(0.1),
-            max_tokens: Some(2048),
+            max_tokens: Some(4096),
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
@@ -788,7 +955,7 @@ impl WorkerAgent {
             response.text
         );
 
-        self.parse_execution_plan(&response.text)
+        self.parse_execution_plan(&response.text).await
     }
     
     /// Execute plan with adaptive retry and self-correction
@@ -982,12 +1149,13 @@ impl WorkerAgent {
     }
     
     /// Plan task execution using LLM (original method for backward compatibility)
+    #[deprecated(note = "Use generate_execution_plan_discovery instead")]
     async fn plan_task_execution(&self, task_description: &str) -> Result<ExecutionPlan> {
         let planning_prompt = self.generate_planning_prompt(task_description);
         
         let options = GenerationOptions {
             temperature: Some(0.1),
-            max_tokens: Some(2048),
+            max_tokens: Some(4096),
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
@@ -1024,16 +1192,94 @@ impl WorkerAgent {
             &selected_model.model_id
         };
 
+        tracing::debug!("Worker {} sending planning prompt to LLM: {}", self.id.name, planning_prompt);
         let response = client.generate(
             model_name,
             &planning_prompt,
             options
         ).await.context("Failed to generate execution plan with LLM")?;
         
-        self.parse_execution_plan(&response.text)
+        tracing::debug!("Worker {} received raw plan from LLM: {}", self.id.name, response.text);
+        self.parse_execution_plan(&response.text).await
     }
     
     /// Generate structured planning prompt for LLM
+    async fn generate_planning_prompt_with_servers(&self, task_description: &str) -> Result<String> {
+        // Discover available servers at planning time
+        let available_tools = self.discover_tools().await?;
+        let mut servers_set = std::collections::HashSet::new();
+        for tool in &available_tools {
+            if let Some(server) = tool.split("::").next() {
+                servers_set.insert(server.to_string());
+            }
+        }
+        let available_servers: Vec<String> = servers_set.into_iter().collect();
+        
+        Ok(format!(
+            r#"You are a Worker AI agent executing a task. Analyze this task and create a structured execution plan.
+
+TASK: {}
+YOUR ROLE: {}
+YOUR CAPABILITIES: {:?}
+
+**CRITICAL - AVAILABLE MCP SERVERS:**
+The following MCP servers are currently available:
+{}
+
+**YOU MUST ONLY USE TOOLS FROM THESE SERVERS. DO NOT use tools from any other servers (e.g., 'server', 'http', 'network').**
+
+AVAILABLE MCP TOOLS:
+{}
+
+INSTRUCTIONS:
+1. Break the task into concrete, executable steps.
+2. Each step must use ONE MCP tool with specific parameters.
+3. **TOOL FORMAT:** Tools must be in format `server_name::tool_name` where server_name is one of the available servers listed above.
+4. Steps can have dependencies on previous steps.
+5. Be specific with file paths, parameters, and expected outputs.
+6. **IMPORTANT - Tool Selection:**
+   - Use `hainet-files::directory_create` to create directories
+   - Use `hainet-files::file_write` to create/write files
+   - Use `hainet-files::file_read` to read existing files
+   - Use `filesystem::read_file` to read files from the filesystem
+   - Use `filesystem::write_file` to write files
+   - Do not attempt to read files that do not exist yet
+   - When setting up a new project, create directories FIRST using directory_create, then create files using file_write
+   - **DO NOT** use tools from non-existent servers like 'server::http_requests' or 'server::file_write'
+
+RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
+{{
+  "steps": [
+    {{
+      "step_number": 1,
+      "tool": "hainet-files::file_write",
+      "params": {{ "path": "src/main.rs", "content": "// Project entry point" }},
+      "description": "Create the main source file for the new project.",
+      "depends_on": []
+    }},
+    {{
+      "step_number": 2,
+      "tool": "hainet-files::file_read",
+      "params": {{ "path": "src/main.rs" }},
+      "description": "Read the newly created file to verify its content.",
+      "depends_on": [1]
+    }}
+  ]
+}}
+
+CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no explanations.
+CRITICAL: Only use tools from available servers: {}
+"#,
+            task_description,
+            self.template.name,
+            self.template.capabilities,
+            available_servers.join(", "),
+            self.format_available_tools(),
+            available_servers.join(", ")
+        ))
+    }
+    
+    /// Generate structured planning prompt for LLM (backward compatible version)
     fn generate_planning_prompt(&self, task_description: &str) -> String {
         format!(
             r#"You are a Worker AI agent executing a task. Analyze this task and create a structured execution plan.
@@ -1120,8 +1366,162 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
         tools_desc
     }
     
-    /// Parse LLM response into ExecutionPlan (enhanced with multi-strategy parsing)
-    fn parse_execution_plan(&self, llm_response: &str) -> Result<ExecutionPlan> {
+    /// Parse LLM response into ExecutionPlan (enhanced with multi-strategy parsing and validation)
+    async fn parse_execution_plan(&self, llm_response: &str) -> Result<ExecutionPlan> {
+        // Get available servers for validation
+        let available_tools = self.discover_tools().await?;
+        let mut available_servers = std::collections::HashSet::new();
+        for tool in &available_tools {
+            if let Some(server) = tool.split("::").next() {
+                available_servers.insert(server.to_string());
+            }
+        }
+        
+        // Try to parse the execution plan with multiple strategies
+        let parse_result: Result<Vec<ExecutionStep>> = (|| {
+            // Strategy 1: Direct JSON extraction (simple case)
+            let json_str = self.extract_json_from_response(llm_response);
+            
+            // Strategy 2: Try direct parse
+            let parsed = match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(value) => value,
+                Err(_) => {
+                    // Strategy 3: Try markdown extraction
+                    if let Ok(value) = self.extract_from_markdown(llm_response) {
+                        value
+                    } else {
+                        // Strategy 4: Try repair (braces/brackets)
+                        self.repair_and_parse(&json_str)?
+                    }
+                }
+            };
+            
+            let steps: Vec<ExecutionStep> = parsed["steps"].as_array()
+                .ok_or_else(|| anyhow::anyhow!("Missing 'steps' array in execution plan"))?
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, s)| {
+                    let _step_number = s["step_number"].as_u64().unwrap_or((idx + 1) as u64) as usize;
+                    let tool = s["tool"].as_str()?.to_string();
+                    let params = s["params"].clone();
+                    let description = s["description"].as_str().unwrap_or("").to_string();
+                    
+                    // Validate tool format (server::tool_name)
+                    if !tool.contains("::") {
+                        tracing::warn!("Invalid tool format (missing ::): {}", tool);
+                        return None;
+                    }
+                    
+                    // Validate server exists
+                    if let Some(server_name) = tool.split("::").next() {
+                        if !available_servers.contains(server_name) {
+                            tracing::warn!(
+                                "Tool '{}' references non-existent server '{}'. Available servers: {:?}",
+                                tool,
+                                server_name,
+                                available_servers
+                            );
+                            return None;
+                        }
+                    }
+                    
+                    Some(ExecutionStep {
+                        tool,
+                        params,
+                        description,
+                    })
+                })
+                .collect();
+            
+            Ok(steps)
+        })();
+        
+        // Check if parsing succeeded and has valid steps
+        let steps = match parse_result {
+            Ok(steps) if !steps.is_empty() => steps,
+            Ok(_) => {
+                // Parsing succeeded but no valid steps found
+                tracing::warn!(
+                    "No valid execution steps found in plan. Response snippet: {}. Attempting fallback to simple plan.",
+                    &llm_response[..llm_response.len().min(200)]
+                );
+                return self.create_fallback_plan(llm_response).await;
+            }
+            Err(e) => {
+                // Parsing failed completely
+                tracing::warn!(
+                    "Failed to parse execution plan: {}. Response snippet: {}. Attempting fallback to simple plan.",
+                    e,
+                    &llm_response[..llm_response.len().min(200)]
+                );
+                return self.create_fallback_plan(llm_response).await;
+            }
+        };
+        
+        // Validate the plan before returning
+        self.validate_execution_plan(&steps)?;
+        
+        tracing::debug!("Parsed {} execution steps from LLM response", steps.len());
+        for (i, step) in steps.iter().enumerate() {
+            tracing::debug!("Step {}: {} (Tool: {})", i + 1, step.description, step.tool);
+        }
+        Ok(ExecutionPlan { steps })
+    }
+    
+    /// Validate execution plan for common issues
+    fn validate_execution_plan(&self, steps: &[ExecutionStep]) -> Result<()> {
+        if steps.is_empty() {
+            return Err(anyhow::anyhow!("Execution plan has no steps"));
+        }
+        
+        // Check for reasonable number of steps (not too many)
+        if steps.len() > 50 {
+            tracing::warn!("Execution plan has {} steps, which seems excessive", steps.len());
+        }
+        
+        // Validate each step has required fields
+        for (idx, step) in steps.iter().enumerate() {
+            if step.tool.is_empty() {
+                return Err(anyhow::anyhow!("Step {} has empty tool name", idx + 1));
+            }
+            if step.description.is_empty() {
+                tracing::warn!("Step {} has empty description", idx + 1);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Create a fallback execution plan when parsing fails
+    /// This prevents permanent task failure by creating a simple plan
+    async fn create_fallback_plan(&self, _llm_response: &str) -> Result<ExecutionPlan> {
+        tracing::warn!("Creating fallback execution plan due to parsing failure");
+        
+        // Discover available tools to find a safe default
+        let available_tools = self.discover_tools().await?;
+        
+        // Try to find a file listing tool as a safe default action
+        let default_tool = available_tools.iter()
+            .find(|t| t.contains("file_list") || t.contains("list"))
+            .or_else(|| available_tools.first())
+            .ok_or_else(|| anyhow::anyhow!("No tools available for fallback plan"))?;
+        
+        tracing::info!("Fallback plan using tool: {}", default_tool);
+        
+        // Create a simple single-step plan
+        let fallback_step = ExecutionStep {
+            tool: default_tool.clone(),
+            params: serde_json::json!({ "path": "." }),
+            description: "Fallback: List current directory to understand project structure".to_string(),
+        };
+        
+        Ok(ExecutionPlan {
+            steps: vec![fallback_step],
+        })
+    }
+    
+    /// Parse LLM response into ExecutionPlan (backward compatible version without validation)
+    fn parse_execution_plan_legacy(&self, llm_response: &str) -> Result<ExecutionPlan> {
         // Strategy 1: Direct JSON extraction (simple case)
         let json_str = self.extract_json_from_response(llm_response);
         
@@ -1171,6 +1571,9 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
         }
         
         tracing::debug!("Parsed {} execution steps from LLM response", steps.len());
+        for (i, step) in steps.iter().enumerate() {
+            tracing::debug!("Step {}: {} (Tool: {})", i + 1, step.description, step.tool);
+        }
         Ok(ExecutionPlan { steps })
     }
     
@@ -1390,9 +1793,28 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
         let servers = mcp_client.list_servers().await;
         tracing::info!("[DIAGNOSTIC] Worker {} found {} servers: {:?}", self.id.name, servers.len(), servers);
         
+        // SAFETY: Filter out the 'filesystem' server to prevent workers from writing outside project sandboxes
+        // The 'filesystem' server has broad access without project-specific sandboxing
+        // Workers should ONLY use 'hainet-files' which properly sandboxes to project directories
+        let safe_servers: Vec<String> = servers.into_iter()
+            .filter(|server| {
+                if server == "filesystem" {
+                    tracing::warn!(
+                        "Worker {} blocked from using 'filesystem' server (security: no project sandboxing). Use 'hainet-files' instead.",
+                        self.id.name
+                    );
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        
+        tracing::info!("[DIAGNOSTIC] Worker {} using {} safe servers (filtered out unsafe servers)", self.id.name, safe_servers.len());
+        
         let mut all_tools = Vec::new();
         
-        for server_name in servers {
+        for server_name in safe_servers {
             tracing::debug!("Worker {} listing tools for server: {}", self.id.name, server_name);
             let tools = mcp_client.list_tools(&server_name).await?;
             tracing::debug!("Worker {} found {} tools in {}", self.id.name, tools.len(), server_name);
@@ -1467,6 +1889,7 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
     // ========================================================================
     
     /// Execute task using discovery-based approach
+    /// Execute task using discovery-based approach with sub-task decomposition
     async fn execute_with_discovery(&mut self, task: &crate::projects::Task) -> Result<Vec<String>> {
         // Step 1: Discover available tools (names only)
         let available_tools = self.discover_tools().await?;
@@ -1475,41 +1898,294 @@ CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no e
             self.id.name,
             available_tools.len()
         );
+
+        // Step 2: Decompose into sub-tasks
+        let subtasks = self.generate_subtasks(task).await?;
+        tracing::info!("Worker {} decomposed task into {} sub-tasks", self.id.name, subtasks.len());
         
-        // Step 2: Ask LLM which tools it needs (minimal context)
-        let tool_selection = self.identify_needed_tools_discovery(task, &available_tools).await?;
-        tracing::info!(
-            "Worker {} selected {} tools: {:?}",
-            self.id.name,
-            tool_selection.needed_tools.len(),
-            tool_selection.needed_tools
+        let mut all_deliverables = Vec::new();
+        
+        for subtask in subtasks {
+            tracing::info!("Worker {} starting sub-task {}: {}", self.id.name, subtask.id, subtask.description);
+            
+            // Execute sub-task loop (Plan -> Execute -> Verify -> Refine)
+            let subtask_deliverables = self.execute_subtask_loop(task, &subtask, &available_tools).await?;
+            all_deliverables.extend(subtask_deliverables);
+        }
+        
+        Ok(all_deliverables)
+    }
+
+    /// Execute a single sub-task with verification loop
+    async fn execute_subtask_loop(
+        &mut self,
+        main_task: &crate::projects::Task,
+        subtask: &SubTask,
+        available_tools: &[String],
+    ) -> Result<Vec<String>> {
+        let max_retries = 3;
+        let mut attempts = 0;
+        let mut feedback = String::new();
+        
+        loop {
+            attempts += 1;
+            if attempts > max_retries {
+                return Err(anyhow::anyhow!("Max retries reached for sub-task {}", subtask.id));
+            }
+
+            // 1. Tool Selection (focused on sub-task)
+            let tool_selection = self.identify_needed_tools_for_subtask(main_task, subtask, available_tools, &feedback).await?;
+            
+            // 2. Load Metadata
+            let tool_metadata = self.load_tool_metadata(&tool_selection.needed_tools).await?;
+            
+            // 3. Plan Execution
+            let execution_plan = self.generate_plan_for_subtask(main_task, subtask, &tool_metadata, &feedback).await?;
+            
+            // 4. Execute Plan
+            let deliverables = match self.execute_discovery_plan(&execution_plan, main_task).await {
+                Ok(d) => d,
+                Err(e) => {
+                    feedback = format!("Execution error: {}", e);
+                    continue;
+                }
+            };
+            
+            // 5. Verify
+            let verification = self.verify_execution(main_task, subtask, &deliverables).await?;
+            
+            if verification.success {
+                tracing::info!("Worker {} verified sub-task {}", self.id.name, subtask.id);
+                return Ok(deliverables);
+            } else {
+                tracing::warn!("Worker {} verification failed for sub-task {}: {}", self.id.name, subtask.id, verification.feedback);
+                feedback = format!("Verification failed: {}. Issues: {:?}", verification.feedback, verification.issues);
+            }
+        }
+    }
+
+    async fn generate_subtasks(&self, task: &crate::projects::Task) -> Result<Vec<SubTask>> {
+        let prompt = format!(
+            r#"You are a Worker AI decomposing a complex task.
+TASK: {}
+DESCRIPTION: {}
+
+INSTRUCTIONS:
+1. Break this task into 1-5 logical sub-tasks.
+2. Each sub-task must be atomic and verifiable.
+3. Define clear verification criteria for each (e.g., "File X exists and contains Y").
+
+RESPOND WITH JSON ONLY:
+{{
+  "subtasks": [
+    {{
+      "id": 1,
+      "description": "Create project structure",
+      "goal": "Initialize directories and empty files",
+      "verification_criteria": "Directory /src exists, main.rs exists"
+    }}
+  ]
+}}
+"#,
+            task.title,
+            task.description
         );
+
+        let options = GenerationOptions {
+            temperature: Some(0.3),
+            max_tokens: Some(2048),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
         
-        // Step 3: Lazy-load metadata for selected tools only
-        let tool_metadata = self.load_tool_metadata(&tool_selection.needed_tools).await?;
-        tracing::info!(
-            "Worker {} loaded metadata for {} tools",
-            self.id.name,
-            tool_metadata.len()
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self.ai_provider_manager.select_model_for_agent(selection_context).await?;
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        let response = client.generate(model_name, &prompt, options).await?;
+        
+        #[derive(Deserialize)]
+        struct Response { subtasks: Vec<SubTask> }
+        
+        let json_str = super::worker_discovery::extract_json(&response.text)
+            .ok_or_else(|| anyhow::anyhow!("Failed to extract JSON from response"))?;
+        
+        let res: Response = serde_json::from_str(&json_str)?;
+        Ok(res.subtasks)
+    }
+
+    async fn identify_needed_tools_for_subtask(
+        &self,
+        main_task: &crate::projects::Task,
+        subtask: &SubTask,
+        available_tools: &[String],
+        feedback: &str,
+    ) -> Result<super::worker_discovery::ToolSelectionRequest> {
+        let tool_list = format_tool_list(available_tools);
+        let prompt = format!(
+            r#"You are selecting tools for a sub-task.
+MAIN TASK: {}
+SUB-TASK: {}
+GOAL: {}
+FEEDBACK FROM PREVIOUS ATTEMPT: {}
+
+AVAILABLE TOOLS:
+{}
+
+INSTRUCTIONS:
+1. Select tools needed for this SPECIFIC sub-task.
+2. Use file_search/file_edit for modifications if files exist.
+3. Use directory_create/file_write for new content.
+
+RESPOND WITH JSON ONLY:
+{{
+  "needed_tools": ["hainet-files::file_search", "hainet-files::file_edit"],
+  "reasoning": "Need to find TODOs and replace them"
+}}
+"#,
+            main_task.title,
+            subtask.description,
+            subtask.goal,
+            feedback,
+            tool_list
         );
+
+        // Reuse existing selection logic/model
+        let options = GenerationOptions {
+            temperature: Some(0.3),
+            max_tokens: Some(1024),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
         
-        // Step 4: Generate execution plan with focused context
-        let execution_plan = self.generate_execution_plan_discovery(task, &tool_metadata).await?;
-        tracing::info!(
-            "Worker {} planned {} steps",
-            self.id.name,
-            execution_plan.steps.len()
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self.ai_provider_manager.select_model_for_agent(selection_context).await?;
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        let response = client.generate(model_name, &prompt, options).await?;
+        parse_tool_selection(&response.text)
+    }
+
+    async fn generate_plan_for_subtask(
+        &self,
+        main_task: &crate::projects::Task,
+        subtask: &SubTask,
+        tool_metadata: &HashMap<String, String>,
+        feedback: &str,
+    ) -> Result<DiscoveryExecutionPlan> {
+        let formatted_metadata = format_tool_metadata(tool_metadata);
+        let prompt = format!(
+            r#"You are planning execution for a sub-task.
+MAIN TASK: {}
+SUB-TASK: {}
+GOAL: {}
+VERIFICATION CRITERIA: {}
+FEEDBACK: {}
+
+TOOLS:
+{}
+
+CRITICAL RULES:
+1. NO PLACEHOLDERS (e.g. // TODO). Write complete code.
+2. Use file_edit to modify existing files.
+3. Verify your own work if possible (e.g. read back file).
+
+RESPOND WITH JSON ONLY (steps array).
+"#,
+            main_task.title,
+            subtask.description,
+            subtask.goal,
+            subtask.verification_criteria,
+            feedback,
+            formatted_metadata
         );
+
+        // Reuse existing planning logic/model
+        let options = GenerationOptions {
+            temperature: Some(0.2),
+            max_tokens: Some(4096),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
         
-        // Step 5: Execute plan with feedback loop
-        self.state_machine.transition(
-            AgentState::Working,
-            "Executing discovery-based plan".to_string()
-        )?;
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self.ai_provider_manager.select_model_for_agent(selection_context).await?;
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
         
-        let deliverables = self.execute_discovery_plan(&execution_plan, task).await?;
+        let response = client.generate(model_name, &prompt, options).await?;
+        parse_execution_plan(&response.text)
+    }
+
+    async fn verify_execution(
+        &self,
+        main_task: &crate::projects::Task,
+        subtask: &SubTask,
+        deliverables: &[String],
+    ) -> Result<VerificationResult> {
+        let prompt = format!(
+            r#"You are verifying a sub-task execution.
+SUB-TASK: {}
+GOAL: {}
+CRITERIA: {}
+
+DELIVERABLES/LOGS:
+{:?}
+
+INSTRUCTIONS:
+1. Check if the goal was met.
+2. Check for placeholders (// TODO, etc) - FAIL if found.
+3. Check for errors in logs.
+
+RESPOND WITH JSON ONLY:
+{{
+  "success": true/false,
+  "issues": ["issue 1", "issue 2"],
+  "feedback": "Detailed feedback for refinement"
+}}
+"#,
+            subtask.description,
+            subtask.goal,
+            subtask.verification_criteria,
+            deliverables
+        );
+
+        let options = GenerationOptions {
+            temperature: Some(0.1),
+            max_tokens: Some(1024),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
         
-        Ok(deliverables)
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self.ai_provider_manager.select_model_for_agent(selection_context).await?;
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        let response = client.generate(model_name, &prompt, options).await?;
+        
+        let json_str = super::worker_discovery::extract_json(&response.text)
+            .ok_or_else(|| anyhow::anyhow!("Failed to extract JSON from response"))?;
+        
+        serde_json::from_str(&json_str).context("Failed to parse verification result")
     }
     
     /// Ask LLM which tools it needs (Phase 1: Tool Selection)
@@ -1532,21 +2208,39 @@ CAPABILITIES: {:?}
 SESSION PROGRESS:
 {}
 
-AVAILABLE TOOLS (names only):
+AVAILABLE TOOLS (use EXACT format shown):
 {}
 
-INSTRUCTIONS:
-1. Identify which tools you need for this task (use tool names above)
-2. List the tools you want to learn more about
-3. Keep your response focused and concise
+CRITICAL RULES FOR TOOL SELECTION:
+1. Tool identifiers MUST use format: server::tool (e.g., 'hainet-files::file_write')
+2. ONLY select tools from the AVAILABLE TOOLS list above
+3. Do NOT invent tool names or use generic names like 'server::tool' or 'server::file_write'
+4. Do NOT use tools that are not in the list above
 
-RESPOND WITH VALID JSON ONLY (no markdown):
+COMMON TOOLS FOR FILE OPERATIONS:
+- hainet-files::directory_create (create directories - NOT 'create-directory')
+- hainet-files::file_write (write/create files)
+- hainet-files::file_read (read existing files)
+- hainet-files::file_list (list directory contents)
+- hainet-files::file_metadata (get file information)
+
+EXAMPLE VALID SELECTIONS:
+- ["hainet-files::directory_create", "hainet-files::file_write"]
+- ["sequential-thinking::sequentialthinking", "hainet-files::file_read"]
+- ["context7::search-library", "hainet-files::file_write"]
+
+INSTRUCTIONS:
+1. Identify which tools you need from the AVAILABLE TOOLS list
+2. Use the EXACT tool identifier format shown (server::tool)
+3. Provide brief reasoning for your selection
+
+RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
 {{
-  "needed_tools": ["server::tool_name1", "server::tool_name2"],
-  "reasoning": "Brief explanation of why these tools"
+  "needed_tools": ["hainet-files::directory_create", "hainet-files::file_write"],
+  "reasoning": "Need to create project directory structure and write initial files"
 }}
 
-CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+CRITICAL: Respond with ONLY the JSON object. No markdown, no code blocks, no explanations.
 "#,
             task.description,
             self.template.name,
@@ -1557,7 +2251,7 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
         
         let options = GenerationOptions {
             temperature: Some(0.3),
-            max_tokens: Some(512),
+            max_tokens: Some(2048),
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
@@ -1656,26 +2350,47 @@ TOOLS YOU REQUESTED (with details):
 PREVIOUS STEP RESULTS:
 No previous results yet
 
+CRITICAL RULES FOR EXECUTION PLAN:
+1. Tool identifiers MUST match the exact format from TOOLS YOU REQUESTED above
+2. Use hainet-files::directory_create (NOT 'create-directory' or 'server::directory_create')
+3. Use hainet-files::file_write (NOT 'file-write' or 'server::file_write')
+4. All file paths are relative to the project sandbox
+5. Create directories BEFORE writing files to them
+
+COMMON PATTERNS:
+- Create directory: {{"tool": "hainet-files::directory_create", "params": {{"path": "/src"}}}}
+- Write file: {{"tool": "hainet-files::file_write", "params": {{"path": "/src/main.rs", "content": "..."}}}}
+- Read file: {{"tool": "hainet-files::file_read", "params": {{"path": "/src/main.rs"}}}}
+- List directory: {{"tool": "hainet-files::file_list", "params": {{"path": "/"}}}}
+
 INSTRUCTIONS:
 1. Create concrete, executable steps using the tools above
 2. Each step uses ONE tool with specific parameters
 3. Be precise with parameters (paths, values, etc.)
 4. Steps can depend on previous step outputs
+5. When creating a new project, create directories FIRST, then files
 
-RESPOND WITH VALID JSON ONLY (no markdown):
+RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
 {{
   "steps": [
     {{
       "step_number": 1,
-      "tool": "server::tool_name",
-      "params": {{"param1": "value1"}},
-      "description": "What this step does",
+      "tool": "hainet-files::directory_create",
+      "params": {{"path": "/src"}},
+      "description": "Create source directory for the project",
       "depends_on": []
+    }},
+    {{
+      "step_number": 2,
+      "tool": "hainet-files::file_write",
+      "params": {{"path": "/src/main.js", "content": "// Main entry point\nconsole.log('Hello World');"}},
+      "description": "Create main JavaScript file",
+      "depends_on": [1]
     }}
   ]
 }}
 
-CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+CRITICAL: Respond with ONLY the JSON object. No markdown, no code blocks, no explanations.
 "#,
             task.description,
             self.template.name,
@@ -1685,7 +2400,7 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
         
         let options = GenerationOptions {
             temperature: Some(0.1),
-            max_tokens: Some(2048),
+            max_tokens: Some(4096),
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
@@ -1748,6 +2463,126 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
             .context("Failed to parse execution plan")
     }
     
+    /// Generate a new execution plan based on failure feedback
+    async fn generate_replanning_discovery(
+        &self,
+        task: &crate::projects::Task,
+        tool_metadata: &HashMap<String, String>,
+        error: &str,
+        failed_plan: &DiscoveryExecutionPlan,
+    ) -> Result<DiscoveryExecutionPlan> {
+        let formatted_metadata = format_tool_metadata(tool_metadata);
+        let failed_steps_json = serde_json::to_string_pretty(&failed_plan.steps).unwrap_or_default();
+        
+        let replanning_prompt = format!(
+            r#"You are a Worker AI agent. Your previous execution plan failed.
+Analyze the error and create a NEW, CORRECTED plan.
+
+TASK: {}
+YOUR ROLE: {}
+
+PREVIOUS PLAN (FAILED):
+{}
+
+ERROR ENCOUNTERED:
+{}
+
+AVAILABLE TOOLS:
+{}
+
+INSTRUCTIONS:
+1. Analyze why the previous plan failed (e.g., missing directory, wrong parameters).
+2. Create a new plan that fixes the issue.
+3. If a directory was missing, add a step to create it first.
+4. Respond with the complete new plan.
+
+RESPOND WITH VALID JSON ONLY (no markdown):
+{{
+  "steps": [
+    {{
+      "step_number": 1,
+      "tool": "server::tool_name",
+      "params": {{"param1": "value1"}},
+      "description": "Corrected step description",
+      "depends_on": []
+    }}
+  ]
+}}
+
+CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+"#,
+            task.description,
+            self.template.name,
+            failed_steps_json,
+            error,
+            formatted_metadata
+        );
+
+        let options = GenerationOptions {
+            temperature: Some(0.1),
+            max_tokens: Some(4096),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
+        
+        // Load user preference for Worker agent if available
+        let preferred_family = if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            match settings.get_model_preference("worker").await {
+                Ok(Some(family)) => {
+                    tracing::debug!("Loaded user preference for Worker (replanning): family='{}'", family);
+                    Some(family)
+                },
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::error!("Failed to load user preference for Worker: {:?}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
+            .await
+            .context("Failed to select model for replanning")?;
+        
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        tracing::info!("[DIAGNOSTIC] Worker {} calling LLM for replanning (model: {})", self.id.name, model_name);
+        
+        let llm_timeout = tokio::time::Duration::from_millis(
+            (self.execution_strategy.base_timeout_ms * 2) as u64
+        );
+        
+        let response = tokio::time::timeout(
+            llm_timeout,
+            client.generate(model_name, &replanning_prompt, options)
+        )
+        .await
+        .context(format!("LLM generation timed out after {:?}", llm_timeout))?
+        .context("Failed to generate corrected execution plan")?;
+        
+        tracing::debug!(
+            target: "llm_messages",
+            "[WORKER REPLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
+            model_name,
+            response.text.len(),
+            response.text
+        );
+
+        parse_execution_plan(&response.text)
+            .context("Failed to parse corrected execution plan")
+    }
+
     /// Execute discovery-based plan (Phase 4: Execution with Feedback)
     async fn execute_discovery_plan(
         &mut self,
@@ -1924,8 +2759,9 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
             }
             
             // Execute task
-            // We use execute_task() which includes the full lifecycle (Planning -> Working -> Reporting)
-            if let Err(e) = self.execute_task().await {
+            // We use execute_task_with_discovery() which includes the full lifecycle (Planning -> Working -> Reporting)
+            // and uses dynamic tool discovery instead of rigid hardcoded prompts
+            if let Err(e) = self.execute_task_with_discovery().await {
                  tracing::error!("Worker {} failed to execute task: {:?}", self.id.name, e);
                  // We continue to validation even on error, as the task might be marked as Failed
                  // and we need to clear the state or handle revision

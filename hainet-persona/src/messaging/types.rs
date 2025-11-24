@@ -244,7 +244,7 @@ pub enum PrivacyLevel {
 /// Task execution result
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskResult {
-    pub task_id: TaskId,
+    pub task_id: String,
     pub success: bool,
     pub output: serde_json::Value,
     pub error: Option<String>,

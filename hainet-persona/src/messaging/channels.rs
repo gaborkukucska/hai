@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 use serde::{Serialize, Deserialize};
 
-use super::types::{AgentId, ChannelType, Message, Priority};
+use super::types::{AgentId, AgentType, ChannelType, Message, Priority};
 
 /// Default channel buffer size per agent
 const DEFAULT_CHANNEL_BUFFER: usize = 100;
@@ -446,6 +446,17 @@ impl MessageBus {
                 status: statuses.get(id).cloned(),
             }
         }).collect()
+    }
+    
+    
+    /// Find an agent by name pattern (useful for finding PM agents by project ID)
+    /// Returns the first matching agent ID, or None if not found
+    pub async fn find_agent_by_name(&self, agent_type: AgentType, name_pattern: &str) -> Option<AgentId> {
+        let channels = self.channels.read().await;
+        
+        channels.keys()
+            .find(|id| id.agent_type == agent_type && id.name.contains(name_pattern))
+            .cloned()
     }
     
     /// Update agent status

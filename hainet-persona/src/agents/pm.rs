@@ -12,6 +12,8 @@ use std::time::SystemTime;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use std::path::Path;
+use serde::{Deserialize, Serialize};
 
 use crate::messaging::{MessageBus, AgentId};
 use crate::prompts::{PromptManager, AgentType, AgentState, PromptContext};
@@ -295,6 +297,18 @@ impl PMAgent {
             if !matches!(self.state_machine.current_state(), AgentState::Managing) {
                 break;
             }
+
+            // Process incoming messages
+            let mut messages = Vec::new();
+        if let Some(receiver) = &mut self._receiver {
+            while let Ok(msg) = receiver.try_recv() {
+                messages.push(msg);
+            }
+        }
+        
+        for msg in messages {
+            self.handle_message(msg).await?;
+        }
             
             // Check project status from manager
             {
@@ -388,8 +402,30 @@ impl PMAgent {
             
             // Check if all tasks are complete
             if self.is_project_complete().await? {
-                self.complete_project().await?;
-                break;
+                // Double check with LLM assessment
+                let assessment = self.assess_project_completeness().await?;
+                
+                if assessment.complete {
+                    tracing::info!("PM {} assessment: Project COMPLETE. Reasoning: {}", self.id.name, assessment.reasoning);
+                    self.complete_project().await?;
+                    break;
+                } else {
+                    tracing::info!("PM {} assessment: Project INCOMPLETE. Creating {} missing tasks. Reasoning: {}", 
+                        self.id.name, assessment.missing_tasks.len(), assessment.reasoning);
+                    
+                    for task in assessment.missing_tasks {
+                        let project_manager = self.project_manager.write().await;
+                        project_manager.create_task(
+                            &self.project_id,
+                            task.title.clone(),
+                            task.description,
+                        ).await?;
+                        
+                        // Add to session tasks
+                        self.session_tasks.add_task(task.title, None);
+                    }
+                    // Continue loop to process new tasks
+                }
             }
             
             // Sleep for 500ms to give workers time to execute (increased from 100ms)
@@ -556,7 +592,7 @@ impl PMAgent {
         // Call LLM for validation decision
         let options = GenerationOptions {
             temperature: Some(0.3),
-            max_tokens: Some(2048),
+            max_tokens: Some(4096),
             ..Default::default()
         };
         
@@ -849,6 +885,7 @@ impl PMAgent {
         };
         
         tracing::info!("PM {} validating task {} with file-based checks", pm_name, task_id);
+        tracing::debug!("PM {} validation context - Deliverables: {:?}", pm_name, task.deliverables);
         
         // Simple validation checks (no LLM needed):
         
@@ -899,6 +936,7 @@ impl PMAgent {
         // All checks passed - approve
         tracing::info!("PM {} approved task {} ({} deliverables, {} chars)", 
             pm_name, task_id, task.deliverables.len(), total_content);
+        tracing::debug!("PM {} approval details - Total Chars: {}", pm_name, total_content);
         
         Ok(ValidationResponse {
             approved: true,
@@ -1034,14 +1072,185 @@ JSON response:"#,
             .context(format!("Failed to parse validation response: {}", json_str))
     }
     
-    /// Check if project is complete
+    /// Check if project is complete (all tasks terminal AND LLM assessment passes)
     async fn is_project_complete(&self) -> Result<bool> {
         let project_manager = self.project_manager.read().await;
         let tasks = project_manager.get_project_tasks(&self.project_id).await?;
+        drop(project_manager);
         
-        Ok(tasks.iter().all(|task| 
+        // 1. Check if all tasks are terminal
+        let all_tasks_terminal = tasks.iter().all(|task| 
             matches!(task.status, crate::projects::TaskStatus::Complete | crate::projects::TaskStatus::Failed | crate::projects::TaskStatus::Stuck)
-        ))
+        );
+        
+        if !all_tasks_terminal {
+            return Ok(false);
+        }
+        
+        // 2. If all tasks terminal, ask LLM to assess completeness
+        // This prevents premature completion if key files are missing
+        let assessment = self.assess_project_completeness().await?;
+        
+        if assessment.complete {
+            tracing::info!("PM {} assessment: Project COMPLETE. Reasoning: {}", self.id.name, assessment.reasoning);
+            Ok(true)
+        } else {
+            tracing::info!("PM {} assessment: Project INCOMPLETE. Reasoning: {}", self.id.name, assessment.reasoning);
+            
+            // Create missing tasks
+            // Note: We can't easily create tasks here because we need mutable self.
+            // So we return false, and let manage_loop handle the assessment.
+            // Ideally, manage_loop should call assess_project_completeness directly.
+            Ok(false)
+        }
+    }
+
+    /// List all files in the project sandbox recursively
+    async fn list_files_recursive(&self, dir: &Path) -> Result<Vec<String>> {
+        let mut files = Vec::new();
+        if !dir.exists() {
+            return Ok(files);
+        }
+        
+        let mut entries = tokio::fs::read_dir(dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.is_dir() {
+                // Recurse
+                let sub_files = Box::pin(self.list_files_recursive(&path)).await?;
+                files.extend(sub_files);
+            } else {
+                // Store relative path if possible, or filename
+                if let Ok(filename) = entry.file_name().into_string() {
+                    // Try to get path relative to sandbox root
+                    // For now just use the filename or partial path
+                    // Better: pass root and strip prefix
+                    files.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+        Ok(files)
+    }
+
+    /// Assess project completeness using LLM
+    async fn assess_project_completeness(&self) -> Result<ProjectAssessment> {
+        let project_manager = self.project_manager.read().await;
+        let project = project_manager.get_project(&self.project_id).await?
+            .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
+        
+        let sandbox_path = crate::projects::ProjectManager::get_project_sandbox_path(&project.title);
+        drop(project_manager);
+        
+        // Get file list (relative paths)
+        let all_files = self.list_files_recursive(&sandbox_path).await?;
+        let relative_files: Vec<String> = all_files.iter()
+            .map(|f| f.replace(&sandbox_path.to_string_lossy().to_string(), "").trim_start_matches('/').to_string())
+            .collect();
+            
+        let file_tree = relative_files.join("\n");
+        
+        let prompt = format!(
+            r#"You are a Project Manager AI assessing if a project is complete.
+            
+PROJECT: {}
+OVERVIEW: {}
+
+CURRENT FILE STRUCTURE:
+{}
+
+INSTRUCTIONS:
+1. Analyze the file structure against the project overview.
+2. Determine if the project is functionally complete.
+3. IGNORE minor missing files if the core functionality is implemented.
+4. If incomplete, list specific missing tasks to finish it.
+5. BE REASONABLE. Do not ask for "tests" if the project is a simple script, unless explicitly requested.
+6. Do not ask for "docs" if a README exists.
+
+RESPOND WITH VALID JSON ONLY:
+{{
+  "complete": boolean,
+  "missing_tasks": [
+    {{ "title": "Fix: ...", "description": "..." }}
+  ],
+  "reasoning": "..."
+}}
+"#,
+            project.title,
+            project.overview,
+            file_tree
+        );
+
+        // Select model for assessment
+        let context = SelectionContext {
+            agent_type: crate::prompts::AgentType::PM,
+            required_capabilities: vec![crate::ai_providers::catalog::ModelCapability::LogicalReasoning],
+            preferred_capabilities: vec![crate::ai_providers::catalog::ModelCapability::TaskPlanning],
+            max_latency_ms: 2000,
+            min_context_length: 8192, // Need context for file tree
+            preferred_model_size: crate::ai_providers::selection::ModelSizePreference::Small,
+            requires_math: false,
+            requires_coding: false,
+            task_type: None,
+            preferred_family: None,
+            allow_fallback: true,
+        };
+        
+        let selected_model = self.ai_provider_manager.select_model_for_agent(context).await?;
+        let client = selected_model.get_client()?;
+        
+        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+            
+        let response = client.generate(model_name, &prompt, GenerationOptions::default()).await?;
+        
+        // Parse JSON
+        let json_str = if response.text.contains("```json") {
+            response.text.split("```json").nth(1)
+                .and_then(|s| s.split("```").next())
+                .unwrap_or(&response.text)
+        } else {
+            &response.text
+        }.trim();
+        
+        serde_json::from_str(json_str)
+            .context(format!("Failed to parse assessment response: {}", json_str))
+    }
+
+
+
+    /// Handle incoming message
+    async fn handle_message(&mut self, message: crate::messaging::Message) -> Result<()> {
+        tracing::info!("PM {} received message from {}: {:?}", self.id.name, message.from.name, message.content);
+        
+        match message.content {
+            crate::messaging::MessageContent::TaskResult(result) => {
+                tracing::info!("PM {} received task result for task {}", self.id.name, result.task_id);
+                // Task completion is handled via DB status updates, but we could log extra info here
+            },
+            crate::messaging::MessageContent::StatusUpdate(update) => {
+                tracing::info!("PM {} received status update from {}: {}", self.id.name, update.agent_id.name, update.message);
+            },
+            crate::messaging::MessageContent::ErrorReport(error) => {
+            tracing::error!("PM {} received error from {}: {}", self.id.name, message.from.name, error.message);
+        },
+            crate::messaging::MessageContent::Query(query) => {
+            tracing::info!("PM {} received query from {}: {}", self.id.name, message.from.name, query);
+            // TODO: Implement query handling (e.g., ask Admin/User)
+            // For now, we'll just log it.
+        },
+        crate::messaging::MessageContent::Response(response) => {
+            tracing::info!("PM {} received response from {}: {}", self.id.name, message.from.name, response);
+            // This would be where we unblock a task waiting for user input
+        },
+        _ => {
+            tracing::debug!("PM {} received unhandled message type", self.id.name);
+        }    }
+        
+        Ok(())
     }
     
     /// Complete project and transition to Idle
@@ -1238,7 +1447,7 @@ CRITICAL: JSON only. No explanations.
         
         let options = GenerationOptions {
             temperature: Some(0.5),
-            max_tokens: Some(2048),
+            max_tokens: Some(4096),
             ..Default::default()
         };
         
@@ -1364,7 +1573,7 @@ CRITICAL: JSON only. No explanations.
         
         let options = GenerationOptions {
             temperature: Some(0.7),
-            max_tokens: Some(2048),
+            max_tokens: Some(4096),
             system: Some(system_prompt),
             ..Default::default()
         };
@@ -1641,7 +1850,21 @@ pub struct TaskDependency {
 struct ValidationResponse {
     approved: bool,
     feedback: String,
-    revision_needed: bool,
+    pub revision_needed: bool,
+}
+
+/// Project assessment from LLM
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectAssessment {
+    pub complete: bool,
+    pub missing_tasks: Vec<MissingTask>,
+    pub reasoning: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissingTask {
+    pub title: String,
+    pub description: String,
 }
 
 /// Task dependency graph (DAG)

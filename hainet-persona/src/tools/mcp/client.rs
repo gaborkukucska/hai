@@ -226,6 +226,7 @@ impl MCPClientManager {
         arguments: Value,
     ) -> Result<Value> {
         debug!("Calling tool '{}' on server '{}'", tool_name, server_name);
+        tracing::debug!("Tool arguments for '{}': {}", tool_name, arguments);
 
         let clients = self.clients.read().await;
         let connection = clients
@@ -250,6 +251,8 @@ impl MCPClientManager {
             })
             .await
             .map_err(|e| anyhow!("Failed to call tool '{}' on '{}': {:?}", tool_name, server_name, e))?;
+
+        tracing::debug!("Tool '{}' execution completed successfully", tool_name);
 
         // Extract result from content
         if let Some(content_item) = result.content.first() {

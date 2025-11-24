@@ -55,6 +55,31 @@ struct FileMetadata {
     readonly: bool,
 }
 
+/// File match result
+#[derive(Debug, Serialize, Deserialize)]
+struct FileMatch {
+    line_number: usize,
+    line_content: String,
+}
+
+/// File search result
+#[derive(Debug, Serialize, Deserialize)]
+struct FileSearchResult {
+    path: String,
+    matches: Vec<FileMatch>,
+    count: usize,
+}
+
+/// File edit result
+#[derive(Debug, Serialize, Deserialize)]
+struct FileEditResult {
+    success: bool,
+    path: String,
+    original_hash: String,
+    new_hash: String,
+    replacements: usize,
+}
+
 /// HAI-Net Files Server
 #[derive(Clone)]
 pub(crate) struct FilesServer {
@@ -263,7 +288,6 @@ impl FilesServer {
             hash: hash.to_hex(),
             size: content.len(),
         };
-
         debug!("   ✅ File write operation completed successfully");
         Ok(serde_json::to_string(&result)?)
     }
@@ -273,6 +297,22 @@ impl FilesServer {
 
         // Normalize and validate path
         let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        // Check if directory exists
+        if !normalized_path.exists() {
+            debug!("Directory does not exist, returning empty list: {}", normalized_path.display());
+            let result = FileList {
+                path,
+                count: 0,
+                entries: Vec::new(),
+            };
+            return Ok(serde_json::to_string(&result)?);
+        }
+
+        // Check if path is actually a directory
+        if !normalized_path.is_dir() {
+            anyhow::bail!("Path exists but is not a directory: {}", path);
+        }
 
         let mut entries = Vec::new();
         let mut read_dir = tokio::fs::read_dir(&normalized_path)
@@ -336,6 +376,112 @@ impl FilesServer {
             path,
             hash: "".to_string(), // No hash for directories
             size: 0,
+        };
+
+        Ok(serde_json::to_string(&result)?)
+    }
+
+    async fn handle_file_search(&self, path: String, query: String, is_regex: bool, project_name: Option<String>) -> Result<String> {
+        debug!("Searching in file: {} (query: '{}', regex: {})", path, query, is_regex);
+
+        // Normalize and validate path
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        // Read file content
+        let content = tokio::fs::read_to_string(&normalized_path)
+            .await
+            .context("Failed to read file for search")?;
+
+        let mut matches = Vec::new();
+
+        if is_regex {
+            let re = regex::Regex::new(&query).context("Invalid regex pattern")?;
+            for (i, line) in content.lines().enumerate() {
+                if re.is_match(line) {
+                    matches.push(FileMatch {
+                        line_number: i + 1,
+                        line_content: line.trim().to_string(),
+                    });
+                }
+            }
+        } else {
+            for (i, line) in content.lines().enumerate() {
+                if line.contains(&query) {
+                    matches.push(FileMatch {
+                        line_number: i + 1,
+                        line_content: line.trim().to_string(),
+                    });
+                }
+            }
+        }
+
+        let result = FileSearchResult {
+            path,
+            count: matches.len(),
+            matches,
+        };
+
+        Ok(serde_json::to_string(&result)?)
+    }
+
+    async fn handle_file_edit(&self, path: String, find: String, replace: String, is_regex: bool, project_name: Option<String>) -> Result<String> {
+        debug!("Editing file: {} (find: '{}', replace: '{}', regex: {})", path, find, replace, is_regex);
+
+        // Normalize and validate path
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        // Read original content
+        let content = tokio::fs::read_to_string(&normalized_path)
+            .await
+            .context("Failed to read file for edit")?;
+
+        // Calculate original hash
+        let storage = self.storage.read().await;
+        let original_hash = storage.store().put(content.as_bytes(), None).await?.to_hex();
+        drop(storage);
+
+        // Perform replacement
+        let (new_content, replacements) = if is_regex {
+            let re = regex::Regex::new(&find).context("Invalid regex pattern")?;
+            let new_content = re.replace_all(&content, replace.as_str()).to_string();
+            let count = if new_content != content { 1 } else { 0 }; 
+            (new_content, count)
+        } else {
+            let count = content.matches(&find).count();
+            let new_content = content.replace(&find, &replace);
+            (new_content, count)
+        };
+
+        if replacements == 0 {
+            return Ok(serde_json::to_string(&FileEditResult {
+                success: false,
+                path,
+                original_hash: original_hash.clone(),
+                new_hash: original_hash,
+                replacements: 0,
+            })?);
+        }
+
+        // Write file
+        tokio::fs::write(&normalized_path, &new_content)
+            .await
+            .context(format!("Failed to write edited file to: {}", normalized_path.display()))?;
+
+        // Store in CAS
+        let storage = self.storage.read().await;
+        let new_hash = storage
+            .store()
+            .put(new_content.as_bytes(), Some(PathBuf::from(&path)))
+            .await
+            .context("Failed to store new content in CAS")?
+            .to_hex();
+
+        let result = FileEditResult {
+            success: true,
+            path,
+            original_hash,
+            new_hash,
+            replacements,
         };
 
         Ok(serde_json::to_string(&result)?)
@@ -421,6 +567,45 @@ impl ServerHandler for FilesServer {
                         title: Some("Create Directory".to_string()),
                         description: Some(Cow::Borrowed("Create a directory and all parent directories")),
                         input_schema: read_schema,
+                        output_schema: None,
+                        annotations: None,
+                        icons: None,
+                    },
+                    Tool {
+                        name: Cow::Borrowed("file_search"),
+                        title: Some("Search File".to_string()),
+                        description: Some(Cow::Borrowed("Search for text or regex in a file")),
+                        input_schema: Arc::new({
+                            let mut map = serde_json::Map::new();
+                            map.insert("type".to_string(), serde_json::json!("object"));
+                            let mut props = serde_json::Map::new();
+                            props.insert("path".to_string(), serde_json::json!({ "type": "string" }));
+                            props.insert("query".to_string(), serde_json::json!({ "type": "string" }));
+                            props.insert("is_regex".to_string(), serde_json::json!({ "type": "boolean" }));
+                            map.insert("properties".to_string(), serde_json::Value::Object(props));
+                            map.insert("required".to_string(), serde_json::json!(["path", "query"]));
+                            map
+                        }),
+                        output_schema: None,
+                        annotations: None,
+                        icons: None,
+                    },
+                    Tool {
+                        name: Cow::Borrowed("file_edit"),
+                        title: Some("Edit File".to_string()),
+                        description: Some(Cow::Borrowed("Replace text or regex in a file")),
+                        input_schema: Arc::new({
+                            let mut map = serde_json::Map::new();
+                            map.insert("type".to_string(), serde_json::json!("object"));
+                            let mut props = serde_json::Map::new();
+                            props.insert("path".to_string(), serde_json::json!({ "type": "string" }));
+                            props.insert("find".to_string(), serde_json::json!({ "type": "string" }));
+                            props.insert("replace".to_string(), serde_json::json!({ "type": "string" }));
+                            props.insert("is_regex".to_string(), serde_json::json!({ "type": "boolean" }));
+                            map.insert("properties".to_string(), serde_json::Value::Object(props));
+                            map.insert("required".to_string(), serde_json::json!(["path", "find", "replace"]));
+                            map
+                        }),
                         output_schema: None,
                         annotations: None,
                         icons: None,
@@ -530,6 +715,70 @@ impl ServerHandler for FilesServer {
                         .map_err(|e| ErrorData {
                             code: ErrorCode::INTERNAL_ERROR,
                             message: Cow::Owned(format!("Directory creation error: {}", e)),
+                            data: None,
+                        })?
+                }
+                "file_search" => {
+                    let path = args.get("path")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| ErrorData {
+                            code: ErrorCode::INVALID_PARAMS,
+                            message: Cow::Borrowed("Missing 'path' parameter"),
+                            data: None,
+                        })?
+                        .to_string();
+                    let query = args.get("query")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| ErrorData {
+                            code: ErrorCode::INVALID_PARAMS,
+                            message: Cow::Borrowed("Missing 'query' parameter"),
+                            data: None,
+                        })?
+                        .to_string();
+                    let is_regex = args.get("is_regex")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    
+                    self.handle_file_search(path, query, is_regex, project_name).await
+                        .map_err(|e| ErrorData {
+                            code: ErrorCode::INTERNAL_ERROR,
+                            message: Cow::Owned(format!("File search error: {}", e)),
+                            data: None,
+                        })?
+                }
+                "file_edit" => {
+                    let path = args.get("path")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| ErrorData {
+                            code: ErrorCode::INVALID_PARAMS,
+                            message: Cow::Borrowed("Missing 'path' parameter"),
+                            data: None,
+                        })?
+                        .to_string();
+                    let find = args.get("find")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| ErrorData {
+                            code: ErrorCode::INVALID_PARAMS,
+                            message: Cow::Borrowed("Missing 'find' parameter"),
+                            data: None,
+                        })?
+                        .to_string();
+                    let replace = args.get("replace")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| ErrorData {
+                            code: ErrorCode::INVALID_PARAMS,
+                            message: Cow::Borrowed("Missing 'replace' parameter"),
+                            data: None,
+                        })?
+                        .to_string();
+                    let is_regex = args.get("is_regex")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    
+                    self.handle_file_edit(path, find, replace, is_regex, project_name).await
+                        .map_err(|e| ErrorData {
+                            code: ErrorCode::INTERNAL_ERROR,
+                            message: Cow::Owned(format!("File edit error: {}", e)),
                             data: None,
                         })?
                 }

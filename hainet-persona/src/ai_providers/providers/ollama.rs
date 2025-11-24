@@ -106,8 +106,15 @@ impl ProviderClient for OllamaClient {
 
         let start = Instant::now();
 
+        // Strip "Ollama::" prefix if present, as the API expects just the model name
+        let model_name = if model.starts_with("Ollama::") {
+            &model["Ollama::".len()..]
+        } else {
+            model
+        };
+
         let request = OllamaRequest {
-            model: model.to_string(),
+            model: model_name.to_string(),
             prompt: prompt.to_string(),
             system: options.system,
             stream: false,

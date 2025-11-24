@@ -32,6 +32,7 @@ pub use types::{
     AgentId, AgentType, Message, MessageContent, MessageId, MessageMetadata,
     Priority, ChannelType, MessageContext, Task, TaskId, TaskResult,
     CoordinationMsg, StatusUpdate, Alert, ErrorReport,
+    TaskMetrics, ResourceTier,
 };
 
 pub use channels::{MessageBus, AgentInfo, AgentStatus};

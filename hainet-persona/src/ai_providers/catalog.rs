@@ -198,10 +198,21 @@ impl ModelCatalog {
         if name_lower.contains("gemma") {
             capabilities.push(ModelCapability::SafetyAnalysis);
             capabilities.push(ModelCapability::ConstitutionalCompliance);
+            // Gemma 3 is capable of reasoning and planning
+            capabilities.push(ModelCapability::LogicalReasoning);
+            capabilities.push(ModelCapability::TaskPlanning);
         }
 
         if name_lower.contains("llama") || name_lower.contains("qwen") {
             capabilities.push(ModelCapability::GeneralConversation);
+            capabilities.push(ModelCapability::LogicalReasoning);
+            // Llama 3 and Qwen 2.5 are capable planners
+            capabilities.push(ModelCapability::TaskPlanning);
+        }
+        
+        // Explicit tool use models
+        if name_lower.contains("tool") || name_lower.contains("plan") || name_lower.contains("reason") {
+            capabilities.push(ModelCapability::TaskPlanning);
             capabilities.push(ModelCapability::LogicalReasoning);
         }
 

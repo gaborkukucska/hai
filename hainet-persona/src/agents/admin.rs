@@ -1354,13 +1354,33 @@ impl Agent for AdminAgent {
                 while let Some(message) = receiver.recv().await {
                     tracing::debug!("Admin received message from {}: {:?}", message.from.name, message.content);
                     
-                    // Handle StatusUpdate messages from PM agents
-                    if let crate::messaging::MessageContent::StatusUpdate(status) = &message.content {
-                        // Check if this is a completion update (Idle state + 100% progress)
-                        if status.state == AgentState::Idle && status.progress == Some(1.0) {
-                            let user_msg = format!("🔔 PROJECT UPDATE from {}: {}", message.from.name, status.message);
+                    match &message.content {
+                        crate::messaging::MessageContent::StatusUpdate(status) => {
+                            tracing::info!("Admin received status update from {}: {}", message.from.name, status.message);
                             
-                            // Send notification to User
+                            // Check if this is a completion update (Idle state + 100% progress)
+                            if status.state == AgentState::Idle && status.progress == Some(1.0) {
+                                let user_msg = format!("🔔 PROJECT UPDATE from {}: {}", message.from.name, status.message);
+                                
+                                // Send notification to User
+                                let user_id = crate::messaging::AgentId::user("user".to_string());
+                                let response = crate::messaging::Message::new(
+                                    admin_id.clone(),
+                                    user_id,
+                                    crate::messaging::MessageContent::Response(user_msg)
+                                );
+                                
+                                if let Err(e) = message_bus.write().await.send_message(response).await {
+                                    tracing::error!("Failed to forward project update to user: {:?}", e);
+                                } else {
+                                    tracing::info!("Admin forwarded project completion to user");
+                                }
+                            }
+                        },
+                        crate::messaging::MessageContent::Query(query) => {
+                            tracing::info!("Admin received query from {}: {}", message.from.name, query);
+                            // Forward query to user
+                            let user_msg = format!("❓ QUESTION from {}: {}", message.from.name, query);
                             let user_id = crate::messaging::AgentId::user("user".to_string());
                             let response = crate::messaging::Message::new(
                                 admin_id.clone(),
@@ -1369,11 +1389,25 @@ impl Agent for AdminAgent {
                             );
                             
                             if let Err(e) = message_bus.write().await.send_message(response).await {
-                                tracing::error!("Failed to forward project update to user: {:?}", e);
-                            } else {
-                                tracing::info!("Admin forwarded project completion to user");
+                                tracing::error!("Failed to forward query to user: {:?}", e);
                             }
-                        }
+                        },
+                        crate::messaging::MessageContent::ErrorReport(error) => {
+                            tracing::error!("Admin received error from {}: {}", message.from.name, error.message);
+                            // Forward error to user
+                            let user_msg = format!("⚠️ ERROR from {}: {}", message.from.name, error.message);
+                            let user_id = crate::messaging::AgentId::user("user".to_string());
+                            let response = crate::messaging::Message::new(
+                                admin_id.clone(),
+                                user_id,
+                                crate::messaging::MessageContent::Response(user_msg)
+                            );
+                            
+                            if let Err(e) = message_bus.write().await.send_message(response).await {
+                                tracing::error!("Failed to forward error to user: {:?}", e);
+                            }
+                        },
+                        _ => {}
                     }
                 }
                 

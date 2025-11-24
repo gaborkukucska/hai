@@ -25,7 +25,7 @@ pub struct ToolSelectionRequest {
 /// Execution step generated with discovery-based approach
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveryExecutionStep {
-    pub step_number: usize,
+    pub step_number: Option<usize>,
     pub tool: String,  // Format: "server::tool_name"
     pub params: Value,
     pub description: String,
@@ -128,23 +128,21 @@ pub fn format_tool_metadata(metadata_map: &HashMap<String, String>) -> String {
 
 /// Parse tool selection from LLM response
 pub fn parse_tool_selection(llm_response: &str) -> Result<ToolSelectionRequest> {
-    // Try direct JSON parse
+    // Try direct JSON parse first
     if let Ok(selection) = serde_json::from_str::<ToolSelectionRequest>(llm_response) {
         return Ok(selection);
     }
     
-    // Try extracting from markdown code block
-    if let Some(json_str) = extract_json_from_markdown(llm_response) {
-        if let Ok(selection) = serde_json::from_str::<ToolSelectionRequest>(&json_str) {
-            return Ok(selection);
+    // Try robust extraction
+    if let Some(json_str) = extract_json(llm_response) {
+        match serde_json::from_str::<ToolSelectionRequest>(&json_str) {
+            Ok(selection) => return Ok(selection),
+            Err(e) => {
+                tracing::warn!("Failed to parse extracted JSON for tool selection: {}. Extracted: {}", e, json_str);
+            }
         }
-    }
-    
-    // Try extracting braces
-    if let Some(json_str) = extract_json_from_braces(llm_response) {
-        if let Ok(selection) = serde_json::from_str::<ToolSelectionRequest>(&json_str) {
-            return Ok(selection);
-        }
+    } else {
+        tracing::warn!("Failed to extract JSON from tool selection response");
     }
     
     Err(anyhow::anyhow!(
@@ -155,23 +153,41 @@ pub fn parse_tool_selection(llm_response: &str) -> Result<ToolSelectionRequest> 
 
 /// Parse execution plan from LLM response
 pub fn parse_execution_plan(llm_response: &str) -> Result<DiscoveryExecutionPlan> {
+    // Helper to parse JSON string into plan
+    fn parse_json_str(json_str: &str) -> Result<DiscoveryExecutionPlan> {
+        let mut steps = if let Ok(plan) = serde_json::from_str::<DiscoveryExecutionPlan>(json_str) {
+            plan.steps
+        } else if let Ok(steps) = serde_json::from_str::<Vec<DiscoveryExecutionStep>>(json_str) {
+            steps
+        } else {
+            return Err(anyhow::anyhow!("JSON structure matches neither DiscoveryExecutionPlan nor Vec<DiscoveryExecutionStep>"));
+        };
+
+        // Populate missing step numbers
+        for (i, step) in steps.iter_mut().enumerate() {
+            if step.step_number.is_none() {
+                step.step_number = Some(i + 1);
+            }
+        }
+
+        Ok(DiscoveryExecutionPlan { steps })
+    }
+
     // Try direct JSON parse
-    if let Ok(plan) = serde_json::from_str::<DiscoveryExecutionPlan>(llm_response) {
+    if let Ok(plan) = parse_json_str(llm_response) {
         return Ok(plan);
     }
     
-    // Try extracting from markdown
-    if let Some(json_str) = extract_json_from_markdown(llm_response) {
-        if let Ok(plan) = serde_json::from_str::<DiscoveryExecutionPlan>(&json_str) {
-            return Ok(plan);
+    // Try robust extraction
+    if let Some(json_str) = extract_json(llm_response) {
+        match parse_json_str(&json_str) {
+            Ok(plan) => return Ok(plan),
+            Err(e) => {
+                tracing::warn!("Failed to parse extracted JSON for execution plan: {}. Extracted: {}", e, json_str);
+            }
         }
-    }
-    
-    // Try extracting braces
-    if let Some(json_str) = extract_json_from_braces(llm_response) {
-        if let Ok(plan) = serde_json::from_str::<DiscoveryExecutionPlan>(&json_str) {
-            return Ok(plan);
-        }
+    } else {
+        tracing::warn!("Failed to extract JSON from execution plan response");
     }
     
     Err(anyhow::anyhow!(
@@ -187,18 +203,16 @@ pub fn parse_step_feedback(llm_response: &str) -> Result<StepFeedback> {
         return Ok(feedback);
     }
     
-    // Try extracting from markdown
-    if let Some(json_str) = extract_json_from_markdown(llm_response) {
-        if let Ok(feedback) = serde_json::from_str::<StepFeedback>(&json_str) {
-            return Ok(feedback);
+    // Try robust extraction
+    if let Some(json_str) = extract_json(llm_response) {
+        match serde_json::from_str::<StepFeedback>(&json_str) {
+            Ok(feedback) => return Ok(feedback),
+            Err(e) => {
+                tracing::warn!("Failed to parse extracted JSON for step feedback: {}. Extracted: {}", e, json_str);
+            }
         }
-    }
-    
-    // Try extracting braces
-    if let Some(json_str) = extract_json_from_braces(llm_response) {
-        if let Ok(feedback) = serde_json::from_str::<StepFeedback>(&json_str) {
-            return Ok(feedback);
-        }
+    } else {
+        tracing::warn!("Failed to extract JSON from step feedback response");
     }
     
     Err(anyhow::anyhow!(
@@ -207,31 +221,93 @@ pub fn parse_step_feedback(llm_response: &str) -> Result<StepFeedback> {
     ))
 }
 
+/// Extract JSON from text (robust)
+pub fn extract_json(text: &str) -> Option<String> {
+    // 1. Try Markdown code blocks first
+    if let Some(json) = extract_json_from_markdown(text) {
+        return Some(json);
+    }
+
+    // 2. Try finding the first JSON object or array
+    extract_json_structure(text)
+}
+
 /// Extract JSON from markdown code block
 fn extract_json_from_markdown(text: &str) -> Option<String> {
-    let markers = ["```json\n", "```\n", "```"];
+    // Handle various code block markers
+    let markers = ["```json", "```JSON", "```"];
     
     for marker in markers.iter() {
         if let Some(start_idx) = text.find(marker) {
-            let json_start = start_idx + marker.len();
-            
-            if let Some(end_idx) = text[json_start..].find("```") {
-                let json_text = &text[json_start..json_start + end_idx];
-                return Some(json_text.trim().to_string());
+            let content_start = start_idx + marker.len();
+            if let Some(end_idx) = text[content_start..].find("```") {
+                let content = &text[content_start..content_start + end_idx];
+                return Some(content.trim().to_string());
             }
         }
     }
-    
     None
 }
 
-/// Extract JSON from braces
-fn extract_json_from_braces(text: &str) -> Option<String> {
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            return Some(text[start..=end].to_string());
+/// Extract the first valid JSON structure (object or array) by counting braces
+fn extract_json_structure(text: &str) -> Option<String> {
+    let mut start_index = None;
+    let mut brace_count = 0;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut is_array = false;
+
+    // Use char_indices to handle multi-byte characters correctly
+    for (i, c) in text.char_indices() {
+        if start_index.is_none() {
+            if c == '{' {
+                start_index = Some(i);
+                brace_count = 1;
+                is_array = false;
+            } else if c == '[' {
+                start_index = Some(i);
+                brace_count = 1;
+                is_array = true;
+            }
+            continue;
+        }
+
+        // We are inside a potential JSON structure
+        if in_string {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match c {
+            '"' => in_string = true,
+            '{' if !is_array => brace_count += 1,
+            '}' if !is_array => {
+                brace_count -= 1;
+                if brace_count == 0 {
+                    // i is the byte index of the closing brace
+                    // We need to include the closing brace, so we slice up to i + c.len_utf8()
+                    let end = i + c.len_utf8();
+                    return Some(text[start_index.unwrap()..end].to_string());
+                }
+            }
+            '[' if is_array => brace_count += 1,
+            ']' if is_array => {
+                brace_count -= 1;
+                if brace_count == 0 {
+                    let end = i + c.len_utf8();
+                    return Some(text[start_index.unwrap()..end].to_string());
+                }
+            }
+            _ => {}
         }
     }
+
     None
 }
 

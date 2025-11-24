@@ -157,10 +157,12 @@ impl ProjectManager {
 
     /// Get the sandbox directory path for a project
     /// Matches the MCP server's path sanitization logic
-    fn get_project_sandbox_path(project_title: &str) -> PathBuf {
+    pub fn get_project_sandbox_path(project_title: &str) -> PathBuf {
         // Sanitize project name (match MCP server logic in hainet-files)
+        // Replace characters that are problematic for filesystems
         let sanitized = project_title
             .replace(' ', "_")
+            .replace(':', "_")  // Fix for project names like "Snakey: The Game"
             .replace('/', "_")
             .replace('\\', "_");
         
