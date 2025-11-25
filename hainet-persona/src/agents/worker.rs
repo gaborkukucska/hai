@@ -973,6 +973,7 @@ impl WorkerAgent {
             
             let step_start = SystemTime::now();
             let mut retry_count = 0u32;
+            let mut error_history: Vec<String> = Vec::new();
             
             let result = loop {
                 retry_count += 1;
@@ -1000,13 +1001,17 @@ impl WorkerAgent {
                         break result;
                     }
                     Err(error) => {
+                        let error_msg = format!("{}", error);
+                        error_history.push(error_msg.clone());
+                        
                         // Self-correction check
                         if self.self_correction_enabled {
                             let error_category = ErrorCategory::classify(&error.to_string());
                             
                             tracing::warn!(
-                                "Worker {} step failed (attempt {}): {:?} - {}",
+                                "Worker {} step {} failed (attempt {}): {:?} - {}",
                                 self.id.name,
+                                idx + 1,
                                 retry_count,
                                 error_category,
                                 error
@@ -1024,10 +1029,10 @@ impl WorkerAgent {
                                         // Max retries exceeded
                                         self.record_step_failure(task, step, retry_count, error_category);
                                         return Err(anyhow::anyhow!(
-                                            "Step {} failed after {} retries: {}",
+                                            "Step {} failed after {} retries. Error history: {:?}",
                                             idx + 1,
                                             self.execution_strategy.max_retries,
-                                            error
+                                            error_history
                                         ));
                                     }
                                 }
@@ -1041,16 +1046,54 @@ impl WorkerAgent {
                                     ));
                                 }
                                 ErrorCategory::Unknown => {
-                                    // Retry once, then request help
+                                    // For unknown errors, try re-planning with error context after first failure
                                     if retry_count == 1 {
-                                        tracing::info!("Retrying unknown error once");
+                                        tracing::info!("Retrying unknown error once with same plan");
                                         let delay_ms = self.execution_strategy.retry_delay_ms(retry_count);
                                         tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                                         continue;
+                                    } else if retry_count == 2 {
+                                        // Second failure: Re-plan with error context
+                                        tracing::warn!(
+                                            "Worker {} step {} failed twice. Re-planning with error context: {:?}",
+                                            self.id.name,
+                                            idx + 1,
+                                            error_history
+                                        );
+                                        
+                                        // Generate new plan with error context
+                                        match self.replan_with_error_context(task, &error_history).await {
+                                            Ok(new_plan) => {
+                                                tracing::info!(
+                                                    "Worker {} generated new plan with {} steps based on error context",
+                                                    self.id.name,
+                                                    new_plan.steps.len()
+                                                );
+                                                // Execute the new plan recursively (boxed to avoid recursion error)
+                                                return Box::pin(self.execute_with_learning(&new_plan, task)).await;
+                                            }
+                                            Err(replan_error) => {
+                                                tracing::error!(
+                                                    "Worker {} failed to re-plan: {}. Requesting PM help.",
+                                                    self.id.name,
+                                                    replan_error
+                                                );
+                                                self.record_step_failure(task, step, retry_count, error_category);
+                                                return Err(anyhow::anyhow!(
+                                                    "Re-planning failed after errors: {:?}. Original error: {}",
+                                                    error_history,
+                                                    error
+                                                ));
+                                            }
+                                        }
                                     } else {
-                                        tracing::error!("Unknown error persists, requesting PM help");
+                                        // Third+ failure after re-planning: Give up
+                                        tracing::error!("Unknown error persists after re-planning, requesting PM help");
                                         self.record_step_failure(task, step, retry_count, error_category);
-                                        return Err(error);
+                                        return Err(anyhow::anyhow!(
+                                            "Step failed after re-planning. Error history: {:?}",
+                                            error_history
+                                        ));
                                     }
                                 }
                             }
@@ -1072,6 +1115,75 @@ impl WorkerAgent {
         }
         
         Ok(deliverables)
+    }
+    
+    /// Re-plan task execution with error context from previous failures
+    async fn replan_with_error_context(&mut self, task: &crate::projects::Task, error_history: &Vec<String>) -> Result<ExecutionPlan> {
+        tracing::info!(
+            "Worker {} re-planning task '{}' with {} previous errors",
+            self.id.name,
+            task.title,
+            error_history.len()
+        );
+        
+        let planning_prompt = self.generate_planning_prompt_with_context(&task.description, Some(error_history));
+        
+        let options = GenerationOptions {
+            temperature: Some(0.2),
+            max_tokens: Some(4096),
+            system: Some(self.template.system_prompt.clone()),
+            ..Default::default()
+        };
+
+        let preferred_family = if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            match settings.get_model_preference("worker").await {
+                Ok(Some(family)) => Some(family),
+                _ => None
+            }
+        } else {
+            None
+        };
+        
+        let selection_context = SelectionContext::for_worker();
+        let selected_model = self
+            .ai_provider_manager
+            .select_model_for_agent_with_preferences(selection_context, preferred_family)
+            .await
+            .context("Failed to select a model for re-planning")?;
+
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        tracing::info!(
+            "Worker {} re-planning with LLM (model: {})",
+            self.id.name,
+            model_name
+        );
+        
+        let llm_timeout = tokio::time::Duration::from_millis(
+            (self.execution_strategy.base_timeout_ms * 2) as u64
+        );
+        let response = tokio::time::timeout(
+            llm_timeout,
+            client.generate(model_name, &planning_prompt, options)
+        )
+        .await
+        .context(format!("LLM re-planning timed out after {:?}", llm_timeout))?
+        .context("Failed to generate revised execution plan with LLM")?;
+        
+        tracing::debug!(
+            target: "llm_messages",
+            "[WORKER RE-PLANNING RESPONSE] Model: {}, Response ({} chars)",
+            model_name,
+            response.text.len()
+        );
+
+        self.parse_execution_plan(&response.text).await
     }
     
     /// Record success outcome for learning
@@ -1281,55 +1393,49 @@ CRITICAL: Only use tools from available servers: {}
     
     /// Generate structured planning prompt for LLM (backward compatible version)
     fn generate_planning_prompt(&self, task_description: &str) -> String {
-        format!(
-            r#"You are a Worker AI agent executing a task. Analyze this task and create a structured execution plan.
-
-TASK: {}
-YOUR ROLE: {}
-YOUR CAPABILITIES: {:?}
-
-AVAILABLE MCP TOOLS:
-{}
-
-INSTRUCTIONS:
-1. Break the task into concrete, executable steps.
-2. Each step must use ONE MCP tool with specific parameters.
-3. Steps can have dependencies on previous steps.
-4. Be specific with file paths, parameters, and expected outputs.
-5. **IMPORTANT - Tool Selection:**
-   - Use `hainet-files::directory_create` to create directories
-   - Use `hainet-files::file_write` to create/write files
-   - Use `hainet-files::file_read` to read existing files
-   - Do not attempt to read files that do not exist yet
-   - When setting up a new project, create directories FIRST using directory_create, then create files using file_write
-
-RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
-{{
-  "steps": [
-    {{
-      "step_number": 1,
-      "tool": "hainet-files::file_write",
-      "params": {{ "path": "src/main.rs", "content": "// Project entry point" }},
-      "description": "Create the main source file for the new project.",
-      "depends_on": []
-    }},
-    {{
-      "step_number": 2,
-      "tool": "hainet-files::file_read",
-      "params": {{ "path": "src/main.rs" }},
-      "description": "Read the newly created file to verify its content.",
-      "depends_on": [1]
-    }}
-  ]
-}}
-
-CRITICAL: Respond with ONLY the JSON object above. No markdown code blocks, no explanations.
-"#,
-            task_description,
-            self.template.name,
-            self.template.capabilities,
-            self.format_available_tools()
-        )
+        self.generate_planning_prompt_with_context(task_description, None)
+    }
+    
+    /// Generate planning prompt with optional error context from previous failures
+    fn generate_planning_prompt_with_context(&self, task_description: &str, error_context: Option<&Vec<String>>) -> String {
+        let mut lines = vec![
+            format!("Task: {}", task_description),
+            String::new(),
+            format!("You are a {} agent. Plan how to accomplish this task using available tools.", self.template.name),
+            String::new(),
+        ];
+        
+        // Add error context if previous attempts failed
+        if let Some(errors) = error_context {
+            if !errors.is_empty() {
+                lines.push("## PREVIOUS ATTEMPT FAILURES:".to_string());
+                lines.push(String::new());
+                for (i, error) in errors.iter().enumerate() {
+                    lines.push(format!("Attempt {}: {}", i + 1, error));
+                    lines.push(String::new());
+                }
+                lines.push("## IMPORTANT - Learn from Previous Failures:".to_string());
+                lines.push(String::new());
+                lines.push("The above errors occurred in previous attempts. Please revise your plan to avoid these issues.".to_string());
+                lines.push(String::new());
+                lines.push("Common Solutions:".to_string());
+                lines.push("- If a file does not exist: Create it first using file_write before trying to read it".to_string());
+                lines.push("- If a file read failed: Use file_list to check what files exist, then adjust your approach".to_string());
+                lines.push("- If a tool failed: Try a different tool or approach".to_string());
+                lines.push("- If a path was wrong: Double-check the file path and directory structure".to_string());
+                lines.push(String::new());
+                lines.push("Your revised plan should:".to_string());
+                lines.push("1. Address the specific errors mentioned above".to_string());
+                lines.push("2. Use a different approach if the previous one failed".to_string());
+                lines.push("3. Include validation steps (e.g., check file existence before reading)".to_string());
+                lines.push(String::new());
+            }
+        }
+        
+        lines.push("Return your plan as a JSON array of steps.".to_string());
+        lines.push("CRITICAL: Return ONLY valid JSON. Do not include explanatory text before or after the JSON.".to_string());
+        
+        lines.join("\\n")
     }
     
     /// Format available MCP tools for prompt

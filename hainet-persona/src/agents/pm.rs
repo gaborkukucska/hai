@@ -353,27 +353,13 @@ impl PMAgent {
             self.detect_stuck_tasks().await?;
             self.detect_blocked_tasks().await?;
             
-            // Get executable tasks (unassigned + dependencies met)
-            let executable_tasks = self.get_executable_tasks().await?;
-            
-            tracing::info!(
-                "PM {} found {} executable tasks",
-                self.id.name,
-                executable_tasks.len()
-            );
-            
-            // Spawn workers and assign tasks
-            for task_id in executable_tasks {
-                self.assign_task_to_worker(&task_id).await?;
-            }
-            
-            // Poll pending validations (non-blocking)
+            // PRIORITY 1: Poll pending validations (non-blocking)
             self.poll_pending_validations().await?;
             
-            // Timeout stale validations (>60s)
+            // PRIORITY 2: Timeout stale validations (>60s)
             self.timeout_stale_validations().await?;
             
-            // Check for completed tasks needing validation
+            // PRIORITY 3: Check for completed tasks needing validation
             let tasks_under_review = self.get_tasks_under_review().await?;
             
             tracing::info!(
@@ -387,7 +373,7 @@ impl PMAgent {
                 self.spawn_validation(task_id)?;
             }
             
-            // Check for tasks needing revision
+            // PRIORITY 4: Check for tasks needing revision
             let tasks_needing_revision = self.get_tasks_needing_revision().await?;
             
             tracing::info!(
@@ -398,6 +384,20 @@ impl PMAgent {
             
             for task_id in tasks_needing_revision {
                 self.handle_revision_task(&task_id).await?;
+            }
+            
+            // PRIORITY 5: Get executable tasks (unassigned + dependencies met)
+            let executable_tasks = self.get_executable_tasks().await?;
+            
+            tracing::info!(
+                "PM {} found {} executable tasks",
+                self.id.name,
+                executable_tasks.len()
+            );
+            
+            // Spawn workers and assign tasks
+            for task_id in executable_tasks {
+                self.assign_task_to_worker(&task_id).await?;
             }
             
             // Check if all tasks are complete
