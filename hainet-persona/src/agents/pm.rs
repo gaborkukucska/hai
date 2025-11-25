@@ -428,8 +428,8 @@ impl PMAgent {
                 }
             }
             
-            // Sleep for 500ms to give workers time to execute (increased from 100ms)
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // Sleep for 5s to balance responsiveness and load (reduced from 15s, increased from 500ms)
+            tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
         }
         
         Ok(())

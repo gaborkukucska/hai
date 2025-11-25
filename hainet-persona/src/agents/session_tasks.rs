@@ -139,10 +139,20 @@ impl SessionTaskList {
             return "No active tasks.".to_string();
         }
         
-        self.tasks.iter()
+        // Only show the last 5 tasks to save context window
+        let start_idx = if self.tasks.len() > 5 { self.tasks.len() - 5 } else { 0 };
+        
+        let mut output = String::new();
+        if start_idx > 0 {
+            output.push_str(&format!("... ({} older tasks omitted)\n", start_idx));
+        }
+        
+        output.push_str(&self.tasks[start_idx..].iter()
             .map(|task| format!("- [{}] {}", task.status.symbol(), task.title))
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n"));
+            
+        output
     }
     
     /// Get summary statistics

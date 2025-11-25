@@ -654,9 +654,9 @@ impl WorkerAgent {
             task_id
         );
         
-        // Poll every 100ms for status changes
-        let poll_interval = tokio::time::Duration::from_millis(100);
-        let max_wait = tokio::time::Duration::from_secs(60); // 1 minute timeout
+        // Poll every 5s for status changes
+        let poll_interval = tokio::time::Duration::from_secs(5);
+        let max_wait = tokio::time::Duration::from_secs(300); // 5 minute timeout
         let start = tokio::time::Instant::now();
         
         loop {
@@ -743,7 +743,7 @@ impl WorkerAgent {
                     
                     // Task is still in progress but no feedback? 
                     // This might be a race where PM reset it but we haven't seen feedback yet, or a crash recovery.
-                    tracing::warn!(
+                    tracing::debug!(
                         "Worker {} found task {} still in InProgress during validation wait. Feedback: {:?}. Waiting for status change...",
                         self.id.name,
                         task_id,
@@ -2007,16 +2007,64 @@ RESPOND WITH JSON ONLY:
             &selected_model.model_id
         };
         
-        let response = client.generate(model_name, &prompt, options).await?;
-        
-        #[derive(Deserialize)]
-        struct Response { subtasks: Vec<SubTask> }
-        
-        let json_str = super::worker_discovery::extract_json(&response.text)
-            .ok_or_else(|| anyhow::anyhow!("Failed to extract JSON from response"))?;
-        
-        let res: Response = serde_json::from_str(&json_str)?;
-        Ok(res.subtasks)
+        // Retry loop for JSON parsing
+        let mut last_error = String::new();
+        let mut current_prompt = prompt.clone();
+
+        for attempt in 1..=3 {
+            if attempt > 1 {
+                tracing::warn!("Worker {} retrying subtask decomposition (attempt {}/3). Error: {}", self.id.name, attempt, last_error);
+                current_prompt = format!("{}\n\nPREVIOUS ATTEMPT FAILED. ERROR: {}\n\nCRITICAL: DO NOT EXPLAIN. DO NOT APOLOGIZE. OUTPUT RAW JSON ONLY.\nFIX THE JSON STRUCTURE AND TRY AGAIN.", prompt, last_error);
+            }
+
+            // Use timeout for generation
+            let llm_timeout = tokio::time::Duration::from_millis(
+                (self.execution_strategy.base_timeout_ms * 2) as u64
+            );
+
+            let response = match tokio::time::timeout(
+                llm_timeout,
+                client.generate(model_name, &current_prompt, options.clone())
+            ).await {
+                Ok(Ok(res)) => res,
+                Ok(Err(e)) => return Err(e.into()),
+                Err(_) => return Err(anyhow::anyhow!("LLM generation timed out")),
+            };
+
+            tracing::debug!(
+                target: "llm_messages",
+                "[WORKER SUBTASK DECOMPOSITION RESPONSE] Model: {}, Response ({} chars):\n{}",
+                model_name,
+                response.text.len(),
+                response.text
+            );
+
+            if response.text.trim().is_empty() {
+                last_error = "LLM returned empty response".to_string();
+                continue;
+            }
+
+            #[derive(Deserialize)]
+            struct Response { subtasks: Vec<SubTask> }
+            
+            let json_str = match super::worker_discovery::extract_json(&response.text) {
+                Some(json) => json,
+                None => {
+                    last_error = "Failed to extract JSON from response".to_string();
+                    continue;
+                }
+            };
+            
+            match serde_json::from_str::<Response>(&json_str) {
+                Ok(res) => return Ok(res.subtasks),
+                Err(e) => {
+                    last_error = e.to_string();
+                    // Continue to next attempt
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!("Failed to generate valid subtasks after 3 attempts. Last error: {}", last_error))
     }
 
     async fn identify_needed_tools_for_subtask(
@@ -2085,22 +2133,33 @@ RESPOND WITH JSON ONLY:
     ) -> Result<DiscoveryExecutionPlan> {
         let formatted_metadata = format_tool_metadata(tool_metadata);
         let prompt = format!(
-            r#"You are planning execution for a sub-task.
+            r#"You are planning a sub-task.
 MAIN TASK: {}
 SUB-TASK: {}
 GOAL: {}
-VERIFICATION CRITERIA: {}
+CRITERIA: {}
 FEEDBACK: {}
 
 TOOLS:
 {}
 
-CRITICAL RULES:
-1. NO PLACEHOLDERS (e.g. // TODO). Write complete code.
-2. Use file_edit to modify existing files.
-3. Verify your own work if possible (e.g. read back file).
+RULES:
+1. Use tools EXACTLY as shown.
+2. hainet-files::directory_create BEFORE hainet-files::file_write.
+3. Paths relative to project root.
 
-RESPOND WITH JSON ONLY (steps array).
+RESPONSE FORMAT (JSON ONLY):
+{{
+  "steps": [
+    {{
+      "step_number": 1,
+      "tool": "hainet-files::file_write",
+      "params": {{"path": "/src/main.rs", "content": "..."}},
+      "description": "Write file",
+      "depends_on": []
+    }}
+  ]
+}}
 "#,
             main_task.title,
             subtask.description,
@@ -2127,8 +2186,53 @@ RESPOND WITH JSON ONLY (steps array).
             &selected_model.model_id
         };
         
-        let response = client.generate(model_name, &prompt, options).await?;
-        parse_execution_plan(&response.text)
+        // Retry loop for JSON parsing
+        let mut last_error = String::new();
+        let mut current_prompt = prompt.clone();
+
+        for attempt in 1..=3 {
+            if attempt > 1 {
+                tracing::warn!("Worker {} retrying subtask planning (attempt {}/3). Error: {}", self.id.name, attempt, last_error);
+                current_prompt = format!("{}\n\nPREVIOUS ATTEMPT FAILED. ERROR: {}\n\nCRITICAL: DO NOT EXPLAIN. DO NOT APOLOGIZE. OUTPUT RAW JSON ONLY.\nFIX THE JSON STRUCTURE AND TRY AGAIN.", prompt, last_error);
+            }
+
+            // Use timeout for generation
+            let llm_timeout = tokio::time::Duration::from_millis(
+                (self.execution_strategy.base_timeout_ms * 2) as u64
+            );
+
+        let response = match tokio::time::timeout(
+                llm_timeout,
+                client.generate(model_name, &current_prompt, options.clone())
+            ).await {
+                Ok(Ok(res)) => res,
+                Ok(Err(e)) => return Err(e.into()),
+                Err(_) => return Err(anyhow::anyhow!("LLM generation timed out")),
+            };
+
+            tracing::debug!(
+                target: "llm_messages",
+                "[WORKER SUBTASK PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
+                model_name,
+                response.text.len(),
+                response.text
+            );
+
+            if response.text.trim().is_empty() {
+                last_error = "LLM returned empty response".to_string();
+                continue;
+            }
+
+            match parse_execution_plan(&response.text) {
+                Ok(plan) => return Ok(plan),
+                Err(e) => {
+                    last_error = e.to_string();
+                    // Continue to next attempt
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!("Failed to generate valid subtask plan after 3 attempts. Last error: {}", last_error))
     }
 
     async fn verify_execution(
@@ -2336,61 +2440,32 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no code blocks, no exp
         let formatted_metadata = format_tool_metadata(tool_metadata);
         
         let execution_prompt = format!(
-            r#"You are executing a task step-by-step.
-
+            r#"You are executing a task.
 TASK: {}
-YOUR ROLE: {}
-
-SESSION PROGRESS:
+ROLE: {}
+PROGRESS:
 {}
 
-TOOLS YOU REQUESTED (with details):
+TOOLS:
 {}
 
-PREVIOUS STEP RESULTS:
-No previous results yet
+RULES:
+1. Use tools EXACTLY as shown above.
+2. hainet-files::directory_create BEFORE hainet-files::file_write.
+3. Paths relative to project root.
 
-CRITICAL RULES FOR EXECUTION PLAN:
-1. Tool identifiers MUST match the exact format from TOOLS YOU REQUESTED above
-2. Use hainet-files::directory_create (NOT 'create-directory' or 'server::directory_create')
-3. Use hainet-files::file_write (NOT 'file-write' or 'server::file_write')
-4. All file paths are relative to the project sandbox
-5. Create directories BEFORE writing files to them
-
-COMMON PATTERNS:
-- Create directory: {{"tool": "hainet-files::directory_create", "params": {{"path": "/src"}}}}
-- Write file: {{"tool": "hainet-files::file_write", "params": {{"path": "/src/main.rs", "content": "..."}}}}
-- Read file: {{"tool": "hainet-files::file_read", "params": {{"path": "/src/main.rs"}}}}
-- List directory: {{"tool": "hainet-files::file_list", "params": {{"path": "/"}}}}
-
-INSTRUCTIONS:
-1. Create concrete, executable steps using the tools above
-2. Each step uses ONE tool with specific parameters
-3. Be precise with parameters (paths, values, etc.)
-4. Steps can depend on previous step outputs
-5. When creating a new project, create directories FIRST, then files
-
-RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
+RESPONSE FORMAT (JSON ONLY):
 {{
   "steps": [
     {{
       "step_number": 1,
       "tool": "hainet-files::directory_create",
       "params": {{"path": "/src"}},
-      "description": "Create source directory for the project",
+      "description": "Create directory",
       "depends_on": []
-    }},
-    {{
-      "step_number": 2,
-      "tool": "hainet-files::file_write",
-      "params": {{"path": "/src/main.js", "content": "// Main entry point\nconsole.log('Hello World');"}},
-      "description": "Create main JavaScript file",
-      "depends_on": [1]
     }}
   ]
 }}
-
-CRITICAL: Respond with ONLY the JSON object. No markdown, no code blocks, no explanations.
 "#,
             task.description,
             self.template.name,
@@ -2443,24 +2518,49 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no code blocks, no exp
         let llm_timeout = tokio::time::Duration::from_millis(
             (self.execution_strategy.base_timeout_ms * 2) as u64 // 2x base timeout for LLM calls
         );
-        let response = tokio::time::timeout(
-            llm_timeout,
-            client.generate(model_name, &execution_prompt, options)
-        )
-        .await
-        .context(format!("LLM generation timed out after {:?}", llm_timeout))?
-        .context("Failed to generate execution plan")?;
-        
-        tracing::debug!(
-            target: "llm_messages",
-            "[WORKER DISCOVERY PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
-            model_name,
-            response.text.len(),
-            response.text
-        );
 
-        parse_execution_plan(&response.text)
-            .context("Failed to parse execution plan")
+        // Retry loop for JSON parsing
+        let mut last_error = String::new();
+        let mut current_prompt = execution_prompt.clone();
+
+        for attempt in 1..=3 {
+            if attempt > 1 {
+                tracing::warn!("Worker {} retrying execution plan generation (attempt {}/3). Error: {}", self.id.name, attempt, last_error);
+                // Append error to prompt to guide LLM
+                current_prompt = format!("{}\n\nPREVIOUS ATTEMPT FAILED. ERROR: {}\n\nCRITICAL: DO NOT EXPLAIN. DO NOT APOLOGIZE. OUTPUT RAW JSON ONLY.\nFIX THE JSON STRUCTURE AND TRY AGAIN.", execution_prompt, last_error);
+            }
+
+            let response = tokio::time::timeout(
+                llm_timeout,
+                client.generate(model_name, &current_prompt, options.clone())
+            )
+            .await
+            .context(format!("LLM generation timed out after {:?}", llm_timeout))?
+            .context("Failed to generate execution plan")?;
+            
+            tracing::debug!(
+                target: "llm_messages",
+                "[WORKER DISCOVERY PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
+                model_name,
+                response.text.len(),
+                response.text
+            );
+
+            if response.text.trim().is_empty() {
+                last_error = "LLM returned empty response".to_string();
+                continue;
+            }
+
+            match parse_execution_plan(&response.text) {
+                Ok(plan) => return Ok(plan),
+                Err(e) => {
+                    last_error = e.to_string();
+                    // Continue to next attempt
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!("Failed to generate valid execution plan after 3 attempts. Last error: {}", last_error))
     }
     
     /// Generate a new execution plan based on failure feedback

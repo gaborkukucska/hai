@@ -241,8 +241,11 @@ fn extract_json_from_markdown(text: &str) -> Option<String> {
         if let Some(start_idx) = text.find(marker) {
             let content_start = start_idx + marker.len();
             if let Some(end_idx) = text[content_start..].find("```") {
-                let content = &text[content_start..content_start + end_idx];
-                return Some(content.trim().to_string());
+                let content = text[content_start..content_start + end_idx].trim();
+                if content.is_empty() {
+                    return None;
+                }
+                return Some(content.to_string());
             }
         }
     }
