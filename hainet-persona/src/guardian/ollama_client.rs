@@ -62,6 +62,7 @@ JSON response:"#,
             top_p: Some(0.9),
             stop: None,
             system: None,
+            num_ctx: None,
         };
 
         let selection_context = SelectionContext::for_guardian();
@@ -142,6 +143,7 @@ JSON response:"#,
             top_p: Some(0.9),
             stop: None,
             system: None,
+            num_ctx: None,
         };
 
         let selection_context = SelectionContext::for_guardian();
@@ -222,6 +224,7 @@ JSON response:"#,
             top_p: Some(0.9),
             stop: None,
             system: None,
+            num_ctx: None,
         };
 
         let selection_context = SelectionContext::for_guardian();
@@ -389,7 +392,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_json_from_markdown() {
-        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
         let client = GuardianOllamaClient::new(
             ai_provider_manager,
             "gemma3:4b-it".to_string(),

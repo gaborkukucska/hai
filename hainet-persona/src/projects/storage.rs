@@ -484,6 +484,8 @@ fn row_to_task(row: &SqliteRow) -> Result<Task> {
         pm_feedback: row.try_get("pm_feedback")?,
         revision_count: row.try_get::<i64, _>("revision_count")? as u32,
         max_revisions: row.try_get::<i64, _>("max_revisions")? as u32,
+        stuck_retry_count: 0, // Default for existing tasks
+        max_stuck_retries: 2, // Default for existing tasks
         blocking_reason: row.try_get("blocking_reason")?,
         failure_reason: row.try_get("failure_reason")?,
         created_at: i64_to_system_time(row.try_get("created_at")?),

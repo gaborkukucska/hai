@@ -100,8 +100,24 @@ impl AdminBridge {
         
         log::info!("Prompts path: {:?}", prompts_path);
         
-        // Create AIProviderManager first (needed by GuardianSystem)
-        let ai_provider_manager = Arc::new(AIProviderManager::new().await?);
+        // Create project manager with SQLite database
+        // Use a more reliable path in the user's home directory
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let hainet_dir = home_dir.join(".hainet");
+        let data_dir = hainet_dir.join("data");
+        
+        // Create directories with proper permissions
+        std::fs::create_dir_all(&data_dir)?;
+        
+        // Create user settings manager FIRST (needed by AIProviderManager)
+        let settings_db_path = data_dir.join("user_settings.db");
+        let user_settings = Arc::new(RwLock::new(
+            hainet_persona::UserSettingsManager::new(&format!("sqlite://{}?mode=rwc", settings_db_path.display())).await?
+        ));
+        
+        // Create AIProviderManager with user settings (needed by GuardianSystem)
+        let ai_provider_manager = Arc::new(AIProviderManager::new(Some(user_settings.clone())).await?);
         
         // Create shared context
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await?));
@@ -136,16 +152,6 @@ impl AdminBridge {
             }
         }
         
-        // Create project manager with SQLite database
-        // Use a more reliable path in the user's home directory
-        let home_dir = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        let hainet_dir = home_dir.join(".hainet");
-        let data_dir = hainet_dir.join("data");
-        
-        // Create directories with proper permissions
-        std::fs::create_dir_all(&data_dir)?;
-        
         let db_path = data_dir.join("projects.db");
         log::info!("Database path: {:?}", db_path);
         
@@ -162,12 +168,6 @@ impl AdminBridge {
         let metrics_db_path = data_dir.join("metrics.db");
         let metrics_collector = Arc::new(RwLock::new(
             MetricsCollector::new(&format!("sqlite://{}?mode=rwc", metrics_db_path.display())).await?
-        ));
-        
-        // Create user settings manager with database path
-        let settings_db_path = data_dir.join("user_settings.db");
-        let user_settings = Arc::new(RwLock::new(
-            hainet_persona::UserSettingsManager::new(&format!("sqlite://{}?mode=rwc", settings_db_path.display())).await?
         ));
         
         // Create memory and profile DB paths

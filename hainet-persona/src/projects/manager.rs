@@ -820,6 +820,23 @@ impl ProjectManager {
         Ok(())
     }
 
+    /// Reset a stuck task for retry (unassign and reset to Unassigned)
+    pub async fn reset_stuck_task(&self, task_id: &TaskId) -> Result<()> {
+        let mut task = self.get_task(task_id).await?;
+        task.reset_stuck_for_retry()?;
+        self.storage.update_task(&task).await?;
+        
+        tracing::info!(
+            "Task {} reset for retry (attempt {}/{})",
+            task_id,
+            task.stuck_retry_count,
+            task.max_stuck_retries
+        );
+        
+        Ok(())
+    }
+
+
     // ========== Milestone Management ==========
 
     /// Create a new milestone for a project

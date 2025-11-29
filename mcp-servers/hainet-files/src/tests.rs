@@ -31,3 +31,30 @@ fn test_normalize_path_traversal() {
     let result = server.normalize_path(path, Some(project_name));
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn test_directory_create_on_existing_file() {
+    let base_path = std::env::temp_dir().join("hainet_test_dir_create");
+    let storage_path = base_path.join("storage");
+    let _ = std::fs::remove_dir_all(&base_path); // Clean up
+    std::fs::create_dir_all(&base_path).unwrap();
+    
+    let server = FilesServer::new(storage_path, base_path.clone()).unwrap();
+    let project_name = "TestProject";
+    
+    // 1. Create a file
+    let file_path = "src/main.rs";
+    let content = "fn main() {}";
+    server.handle_file_write(file_path.to_string(), content.to_string(), Some(project_name.to_string())).await.unwrap();
+    
+    // 2. Try to create a directory with the same name
+    let result = server.handle_directory_create(file_path.to_string(), Some(project_name.to_string())).await;
+    
+    // 3. Assert failure
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("Path already exists as a file"));
+    
+    // Clean up
+    let _ = std::fs::remove_dir_all(&base_path);
+}

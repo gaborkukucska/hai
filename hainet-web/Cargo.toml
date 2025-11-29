@@ -1,0 +1,30 @@
+[package]
+name = "hainet-web"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hainet-web"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rmcp = { workspace = true, features = ["server", "transport-io"] }
+
+# Web scraping and HTTP
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+scraper = "0.20"
+url = "2.5"
+urlencoding = "2.1"
+
+# HTML to text conversion
+html2text = "0.12"
+
+# Rate limiting
+governor = "0.6"

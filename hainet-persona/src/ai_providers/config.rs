@@ -105,6 +105,14 @@ impl OllamaConfig {
     
     /// Load configuration with fallback to defaults
     pub fn load_or_default<P: AsRef<Path>>(path: P) -> Self {
+        if !path.as_ref().exists() {
+            tracing::info!(
+                "Configuration file {} not found. Using defaults.",
+                path.as_ref().display()
+            );
+            return Self::default();
+        }
+
         match Self::load_from_file(&path) {
             Ok(config) => config,
             Err(e) => {

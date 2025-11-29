@@ -23,11 +23,17 @@ pub struct OllamaClient {
 }
 
 impl OllamaClient {
-    /// Create new Ollama client
     pub fn new(base_url: String) -> Self {
+        // Configure HTTP client with generous timeouts for LLM generation
+        let client = Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .build()
+            .expect("Failed to build HTTP client");
+        
         Self {
             base_url,
-            client: Client::new(),
+            client,
         }
     }
 
@@ -123,6 +129,7 @@ impl ProviderClient for OllamaClient {
                 num_predict: options.max_tokens.map(|t| t as i32),
                 top_p: options.top_p,
                 stop: options.stop,
+                num_ctx: options.num_ctx.map(|t| t as i32),
             }),
             keep_alive: Some("10m".to_string()),
         };
@@ -143,7 +150,7 @@ impl ProviderClient for OllamaClient {
             .client
             .post(&url)
             .json(&request)
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(300))
             .send()
             .await
             .context("Failed to send generation request to Ollama")?;
@@ -263,6 +270,8 @@ pub struct OllamaOptions {
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_ctx: Option<i32>,
 }
 
 /// Ollama generation response (exposed for request queue)

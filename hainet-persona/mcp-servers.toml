@@ -41,6 +41,16 @@ working_dir = "/home/tom/hai"
 # Environment variables
 env = { HAINET_FILES_BASE_PATH = "/home/tom/hai" }
 
+[servers.hainet-web]
+name = "HAI-Net Web"
+description = "Web search, URL fetching, and documentation search for research tasks"
+command = "cargo"
+args = ["run", "--package", "hainet-web", "--release"]
+enabled = true
+working_dir = "/home/tom/hai"
+# Environment variables
+env = { RUST_LOG = "info" }
+
 # Additional servers can be added here following the same pattern
 # [servers.your-server]
 # name = "Your Server Name"

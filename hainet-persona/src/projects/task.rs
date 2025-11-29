@@ -150,6 +150,12 @@ pub struct Task {
     /// Maximum allowed revisions before task fails
     pub max_revisions: u32,
     
+    /// Number of times task has been retried after being stuck
+    pub stuck_retry_count: u32,
+    
+    /// Maximum allowed stuck retries before task permanently fails
+    pub max_stuck_retries: u32,
+    
     /// Blocking reason (if status is Blocked)
     pub blocking_reason: Option<String>,
     
@@ -193,6 +199,8 @@ impl Task {
             pm_feedback: None,
             revision_count: 0,
             max_revisions: 2,
+            stuck_retry_count: 0,
+            max_stuck_retries: 2,
             blocking_reason: None,
             failure_reason: None,
             created_at: now,
@@ -391,6 +399,28 @@ impl Task {
 
         self.status = TaskStatus::Stuck;
         self.failure_reason = Some(reason);
+        self.last_status_change = SystemTime::now();
+        
+        Ok(())
+    }
+
+    /// Check if task can be retried after being stuck
+    pub fn can_retry_stuck(&self) -> bool {
+        self.stuck_retry_count < self.max_stuck_retries
+    }
+
+    /// Reset stuck task for retry (unassign and reset to Unassigned)
+    pub fn reset_stuck_for_retry(&mut self) -> Result<()> {
+        if self.status != TaskStatus::Stuck {
+            anyhow::bail!("Can only reset stuck tasks");
+        }
+
+        self.stuck_retry_count += 1;
+        self.assigned_worker = None;
+        self.status = TaskStatus::Unassigned;
+        self.deliverables.clear();
+        self.assigned_at = None;
+        self.started_at = None;
         self.last_status_change = SystemTime::now();
         
         Ok(())

@@ -422,13 +422,19 @@ impl AdminAgent {
             return self.handle_project_management_command(&user_input, &command_type).await;
         }
 
-        // 2. Parse Intent
+        // 2. Check for direct tool execution requests
+        if self.is_tool_execution_request(&user_input) {
+            tracing::info!("DEBUG: Detected tool execution request");
+            return self.handle_tool_execution_request(&user_input).await;
+        }
+
+        // 3. Parse Intent
         tracing::info!("DEBUG: Parsing intent...");
         self.update_status("Parsing user intent").await;
         let intent = self.intent_parser.parse(&user_input).await?;
         tracing::info!("Parsed intent: {:?} (confidence: {})", intent.intent_type, intent.confidence);
 
-        // 3. Handle initial startup state
+        // 4. Handle initial startup state
         // If still in Startup state, transition to Conversation first
         if *self.state_machine.current_state() == AgentState::Startup {
             tracing::warn!("Admin AI still in Startup state, transitioning to Conversation");
@@ -439,7 +445,7 @@ impl AdminAgent {
             self.update_status("Transitioned to Conversation").await;
         }
         
-        // 4. Add user request to session tasks
+        // 5. Add user request to session tasks
         let request_title = if user_input.len() > 50 {
             format!("{}...", &user_input[..47])
         } else {
@@ -448,7 +454,7 @@ impl AdminAgent {
         self.session_tasks.add_task(request_title.clone(), None);
         let _ = self.session_tasks.start_task(&request_title);
 
-        // 5. Route to appropriate handler based on intent complexity
+        // 6. Route to appropriate handler based on intent complexity
         let is_complex = self.is_complex_intent(&intent, &user_input)?;
         tracing::info!("DEBUG: Intent is complex: {}", is_complex);
         
@@ -696,6 +702,8 @@ impl AdminAgent {
         prompt_context.task_analysis = Some(format!("{:?}", intent.intent_type));
         prompt_context.variables.insert("intent_type".to_string(), serde_json::json!(format!("{:?}", intent.intent_type)));
         prompt_context.variables.insert("entities".to_string(), serde_json::json!(format!("{:?}", intent.entities)));
+        // Set current_state so the renderer can find the correct state prompt
+        prompt_context.variables.insert("current_state".to_string(), serde_json::Value::String("planning".to_string()));
         
         let system_prompt = prompt_manager.get_prompt(
             &self.id,
@@ -1285,9 +1293,307 @@ impl AdminAgent {
         self.state_machine.current_state()
     }
     
+    
     /// Get number of active projects
     pub fn active_project_count(&self) -> usize {
         self.active_projects.len()
+    }
+    
+    // ========== Tool Execution Capabilities ==========
+    
+    /// Discover all available tools from MCP servers
+    async fn discover_available_tools(&mut self) -> Result<Vec<String>> {
+        let mcp_client = self.context.mcp_client.read().await;
+        let servers = mcp_client.list_servers().await;
+        
+        let mut all_tools = Vec::new();
+        for server in &servers {
+            if let Ok(tools) = mcp_client.list_tools(server).await {
+                for tool in tools {
+                    all_tools.push(format!("{}::{}", server, tool.name));
+                }
+            }
+        }
+        
+        tracing::info!("Admin discovered {} tools across {} servers", all_tools.len(), servers.len());
+        Ok(all_tools)
+    }
+    
+    /// Load metadata for selected tools
+    async fn load_tool_metadata(&mut self, tool_names: &[String]) -> Result<std::collections::HashMap<String, String>> {
+        use std::collections::HashMap;
+        
+        let mut metadata_map = HashMap::new();
+        let mcp_client = self.context.mcp_client.read().await;
+        
+        for tool_identifier in tool_names {
+            match mcp_client.get_tool_metadata(tool_identifier).await {
+                Ok(metadata) => {
+                    let formatted = format!(
+                        "{}\n{}\n\nParameters:\n{}",
+                        metadata.full_name(),
+                        metadata.description,
+                        metadata.parameter_docs
+                    );
+                    metadata_map.insert(tool_identifier.clone(), formatted);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load metadata for {}: {}", tool_identifier, e);
+                }
+            }
+        }
+        
+        Ok(metadata_map)
+    }
+    
+    /// Format tool information based on requested flags
+    /// Supports progressive disclosure: compact by default, detailed on demand
+    fn format_tool_info(full_metadata: &str, flags: &str) -> String {
+        // If --all flag is present, return full metadata (backward compatible)
+        if flags.contains("--all") {
+            return full_metadata.to_string();
+        }
+        
+        // Try to parse metadata as JSON
+        let meta: serde_json::Value = match serde_json::from_str(full_metadata) {
+            Ok(v) => v,
+            Err(_) => {
+                // If not JSON, return as-is with flag info
+                return format!("{}\n\nAvailable flags: --params, --examples, --errors, --all", full_metadata);
+            }
+        };
+        
+        let mut output = String::new();
+        
+        // Always include tool name and description
+        if let Some(name) = meta.get("name") {
+            output.push_str(&format!("Tool: {}\n", name.as_str().unwrap_or("")));
+        }
+        if let Some(desc) = meta.get("description") {
+            output.push_str(&format!("Description: {}\n", desc.as_str().unwrap_or("")));
+        }
+        
+        // If no flags specified, show compact info with available flags
+        if flags.is_empty() {
+            output.push_str("\nAvailable flags:\n");
+            output.push_str("  --params   : Show parameter schema\n");
+            output.push_str("  --examples : Show usage examples\n");
+            output.push_str("  --errors   : Show common errors\n");
+            output.push_str("  --all      : Show full metadata\n");
+            output.push_str("\nUsage: admin::get_tool_info({\"tool_name\": \"...\", \"flags\": \"--params\"})\n");
+            return output;
+        }
+        
+        output.push_str("\n");
+        
+        // Show requested sections
+        if flags.contains("--params") {
+            if let Some(schema) = meta.get("inputSchema") {
+                output.push_str("=== PARAMETERS ===\n");
+                if let Some(props) = schema.get("properties") {
+                    if let Some(obj) = props.as_object() {
+                        for (key, value) in obj {
+                            let type_str = value.get("type")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("any");
+                            let desc = value.get("description")
+                                .and_then(|d| d.as_str())
+                                .unwrap_or("");
+                            let required = schema.get("required")
+                                .and_then(|r| r.as_array())
+                                .map(|arr| arr.iter().any(|v| v.as_str() == Some(key)))
+                                .unwrap_or(false);
+                            
+                            output.push_str(&format!("  {} ({}){}: {}\n", 
+                                key, 
+                                type_str,
+                                if required { " [REQUIRED]" } else { "" },
+                                desc
+                            ));
+                        }
+                    }
+                }
+                output.push_str("\n");
+            }
+        }
+        
+        if flags.contains("--examples") {
+            if let Some(examples) = meta.get("examples") {
+                output.push_str("=== EXAMPLES ===\n");
+                output.push_str(&format!("{}\n\n", examples.as_str().unwrap_or("No examples available")));
+            }
+        }
+        
+        if flags.contains("--errors") {
+            if let Some(errors) = meta.get("commonErrors") {
+                output.push_str("=== COMMON ERRORS ===\n");
+                output.push_str(&format!("{}\n\n", errors.as_str().unwrap_or("No error documentation available")));
+            }
+        }
+        
+        output
+    }
+
+    
+    /// Execute a single tool step (with admin::get_tool_info handler)
+    async fn execute_tool_step(
+        &mut self,
+        step: &super::worker_discovery::DiscoveryExecutionStep,
+        tool_metadata: &std::collections::HashMap<String, String>
+    ) -> Result<String> {
+        // Special handling for admin::get_tool_info (just-in-time tool discovery)
+        if step.tool == "admin::get_tool_info" {
+            let tool_name = step.params.get("tool_name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing tool_name parameter for admin::get_tool_info"))?;
+            
+            let flags = step.params.get("flags")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            
+            if let Some(metadata) = tool_metadata.get(tool_name) {
+                tracing::debug!("Admin providing tool info for: {} (flags: '{}')", tool_name, flags);
+                let info = Self::format_tool_info(metadata, flags);
+                return Ok(info);
+            } else {
+                return Err(anyhow::anyhow!("Tool not found: {}. Available tools: {:?}", 
+                    tool_name, 
+                    tool_metadata.keys().collect::<Vec<_>>()
+                ));
+            }
+        }
+        
+        // Parse tool name: "server::tool_name"
+        let parts: Vec<&str> = step.tool.split("::").collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!("Invalid tool format: {}", step.tool));
+        }
+        
+        let (server, tool) = (parts[0], parts[1]);
+        
+        // Execute MCP tool
+        let mcp_client = self.context.mcp_client.read().await;
+        let result = mcp_client.call_tool(server, tool, step.params.clone()).await?;
+        
+        Ok(result.to_string())
+    }
+    
+    /// Generate minimal execution plan for tool-based request
+    async fn generate_tool_execution_plan(
+        &mut self,
+        user_request: &str,
+        available_tools: &[String]
+    ) -> Result<super::worker_discovery::DiscoveryExecutionPlan> {
+        use super::worker_discovery::{format_tool_list, parse_execution_plan};
+        use crate::ai_providers::SelectionContext;
+        use crate::ai_providers::providers::GenerationOptions;
+        
+        let tool_list = format_tool_list(available_tools);
+        let example_tool = available_tools.first().map(|s| s.as_str()).unwrap_or("server::tool");
+        
+        let prompt = format!(
+            r#"USER REQUEST: {}
+
+AVAILABLE TOOLS:
+{}
+- admin::get_tool_info
+
+RULES:
+1. Call admin::get_tool_info({{"tool_name": "{}"}}) to discover tool details
+2. Use the information provided (flags like --params, --examples) to learn how to use the tool
+3. Use FULL tool names from the list above
+
+Return JSON with steps array:
+{{"steps": [{{"step_number": 1, "tool": "admin::get_tool_info", "params": {{"tool_name": "..."}}, "description": "...", "depends_on": []}}]}}"#,
+            user_request,
+            tool_list,
+            example_tool
+        );
+        
+        // Use AI to generate plan
+        let options = GenerationOptions {
+            temperature: Some(0.2),
+            max_tokens: Some(4096),
+            ..Default::default()
+        };
+        
+        let selection_context = SelectionContext::for_admin();
+        let selected_model = self.ai_provider_manager
+            .select_model_for_agent(selection_context)
+            .await?;
+        
+        let client = selected_model.get_client()?;
+        let model_name = if selected_model.model_id.contains("::") {
+            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+        } else {
+            &selected_model.model_id
+        };
+        
+        let response = client.generate(model_name, &prompt, options).await?;
+        
+        // Parse using worker's existing parser
+        parse_execution_plan(&response.text)
+    }
+    
+    /// Check if user request is a direct tool execution request
+    fn is_tool_execution_request(&self, user_input: &str) -> bool {
+        // Simple heuristics for now:
+        // - Contains tool-related keywords
+        // - Short, direct commands (< 30 words)
+        // - Not asking for project creation
+        
+        let keywords = [
+            "search", "find", "read", "write", "list", "create file", 
+            "delete", "show", "get", "fetch", "check"
+        ];
+        let word_count = user_input.split_whitespace().count();
+        
+        let has_keyword = keywords.iter().any(|k| user_input.to_lowercase().contains(k));
+        let is_short = word_count < 30;
+        let not_project_request = !user_input.to_lowercase().contains("project") 
+            && !user_input.to_lowercase().contains("build me")
+            && !user_input.to_lowercase().contains("create an app");
+        
+        has_keyword && is_short && not_project_request
+    }
+    
+    /// Handle direct tool execution request
+    async fn handle_tool_execution_request(&mut self, user_input: &str) -> Result<String> {
+        tracing::info!("Admin handling tool execution request: {}", user_input);
+        
+        // 1. Discover available tools
+        let available_tools = self.discover_available_tools().await?;
+        
+        // 2. Generate execution plan
+        let plan = self.generate_tool_execution_plan(user_input, &available_tools).await?;
+        
+        // 3. Load metadata for selected tools (excluding admin::get_tool_info)
+        let tool_names: Vec<String> = plan.steps.iter()
+            .map(|s| s.tool.clone())
+            .filter(|t| t != "admin::get_tool_info")
+            .collect();
+        let tool_metadata = self.load_tool_metadata(&tool_names).await?;
+        
+        // 4. Execute plan
+        let mut results = Vec::new();
+        for (idx, step) in plan.steps.iter().enumerate() {
+            tracing::info!("Admin executing step {}/{}: {}", idx + 1, plan.steps.len(), step.description);
+            
+            match self.execute_tool_step(step, &tool_metadata).await {
+                Ok(result) => {
+                    tracing::debug!("Step {} result: {}", idx + 1, &result[..result.len().min(200)]);
+                    results.push(format!("Step {}: {}\nResult: {}", idx + 1, step.description, result));
+                }
+                Err(e) => {
+                    let error_msg = format!("Step {} failed: {}", idx + 1, e);
+                    tracing::error!("{}", error_msg);
+                    return Err(anyhow::anyhow!("Tool execution failed at step {}: {}", idx + 1, e));
+                }
+            }
+        }
+        
+        // 5. Format results for user
+        Ok(format!("✅ Executed {} steps successfully:\n\n{}", results.len(), results.join("\n\n")))
     }
 }
 
@@ -1446,7 +1752,7 @@ mod tests {
         // Use absolute path to prompts directory
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
         let prompts_path = PathBuf::from(manifest_dir).join("prompts");
-        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
         
         Arc::new(AgentContext::new(
             Arc::new(RwLock::new(MessageBus::new().await.expect("Failed to create MessageBus"))),
@@ -1461,7 +1767,7 @@ mod tests {
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
-        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
         let metrics = Arc::new(RwLock::new(
             MetricsCollector::new("sqlite::memory:").await.unwrap()
         ));

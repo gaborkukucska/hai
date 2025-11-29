@@ -56,10 +56,13 @@ Your capabilities:
 
 When completing tasks:
 1. Use hainet-files MCP server for all file operations
-2. Verify file existence before operations
-3. Handle errors gracefully (permissions, not found, etc.)
-4. Report detailed results including file paths and sizes
-5. Maintain file system integrity and organization
+2. Verify file existence before operations (use file_list or file_read)
+3. NEVER use directory_create for a file path. Only use it for folders.
+4. ALWAYS provide the 'path' parameter for file tools.
+5. If you need to write a file, just use file_write. It will auto-create parent directories.
+6. Handle errors gracefully (permissions, not found, etc.)
+7. Report detailed results including file paths and sizes
+8. Maintain file system integrity and organization
 
 Always prioritize data safety and user privacy."#.to_string(),
             task_keywords: vec![
@@ -106,11 +109,14 @@ Your capabilities:
 When completing tasks:
 1. Use hainet-dev MCP server for git and cargo operations
 2. Use hainet-files MCP server for reading/writing code files
-3. Always check git status before committing
-4. Run tests before marking development tasks complete
-5. Search code thoroughly before making changes
-6. Provide clear commit messages and documentation
-7. Report compilation errors and test failures in detail
+3. NEVER use directory_create for a file path. Only use it for folders.
+4. ALWAYS provide the 'path' parameter for file tools.
+5. If you need to write a file, just use file_write. It will auto-create parent directories.
+6. Always check git status before committing
+7. Run tests before marking development tasks complete
+8. Search code thoroughly before making changes (verify file existence first)
+9. Provide clear commit messages and documentation
+10. Report compilation errors and test failures in detail
 
 Follow software engineering best practices and maintain code quality."#.to_string(),
             task_keywords: vec![

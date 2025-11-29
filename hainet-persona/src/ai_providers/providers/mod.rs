@@ -76,6 +76,7 @@ pub struct GenerationOptions {
     pub top_p: Option<f32>,
     pub stop: Option<Vec<String>>,
     pub system: Option<String>,
+    pub num_ctx: Option<usize>,
 }
 
 impl Default for GenerationOptions {
@@ -86,6 +87,7 @@ impl Default for GenerationOptions {
             top_p: Some(0.9),
             stop: None,
             system: None,
+            num_ctx: None,
         }
     }
 }

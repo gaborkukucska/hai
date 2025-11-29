@@ -3,9 +3,9 @@
 # Last Updated: 2025-10-25T09:40:20+08:00
 
 [meta]
-last_updated = "2025-11-17T06:25:00.000000+00:00"
+last_updated = "2025-11-26T05:17:00.000000+00:00"
 project_name = "HAI-Net Seed"
-version = "0.52"
+version = "0.54"
 [[completed_cycles]]
 id = "10.1"
 date = "2025-11-20"
@@ -19,9 +19,9 @@ changes = [
     "Verified with auto_healing_test.rs"
 ]
 status = "success"
-next_session = "Service Recovery & Migration"
-current_phase = "Advanced Mesh Features"
-current_cycle = "Session 10.1 - Network Resilience & Auto-Healing - COMPLETE"
+next_session = "Runtime Testing & Validation"
+current_phase = "Agent Intelligence Enhancement"
+current_cycle = "Session 58 - Admin Tool Execution with Minimal Context - COMPLETE"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -2764,3 +2764,51 @@ files_modified = 2
 compilation_errors = 0
 test_results = "Manual verification: 100% success - all tool execution errors eliminated"
 next_session = "Content Quality Enhancement (address placeholder content issue)"
+
+[[completed_cycles]]
+id = "57"
+date = "2025-11-26"
+phase = "Agent Intelligence Enhancement"
+session = "Worker Minimal Prompts & Just-In-Time Tool Discovery"
+changes = [
+    "Refactored Worker agent prompts to use minimal, focused context for 4B models",
+    "Implemented worker::get_tool_info handler for just-in-time tool metadata discovery",
+    "Simplified generate_execution_plan_discovery from ~60 lines to ~25 lines (~1000 token savings)",
+    "Simplified generate_replanning_discovery from ~65 lines to ~30 lines (~1000 token savings)",
+    "Simplified generate_plan_for_subtask from ~45 lines to ~35 lines (~500 token savings)",
+    "Replaced verbose format_tool_metadata with minimal format_tool_list in all worker prompts",
+    "Total token savings: ~2500 tokens per task execution",
+    "Verified all 5 worker prompt functions updated (3 execution, 2 selection)",
+    "Made format_tool_list and parse_execution_plan public for code reuse"
+]
+status = "success"
+verification_status = "compiled_successfully"
+loc_changed = 150
+files_modified = 2
+compilation_errors = 0
+test_results = "Build successful - ready for runtime testing"
+next_session = "Admin Tool Execution Implementation"
+
+[[completed_cycles]]
+id = "58"
+date = "2025-11-26"
+phase = "Agent Intelligence Enhancement"
+session = "Admin Tool Execution with Minimal Context"
+changes = [
+    "Added direct tool execution capabilities to Admin agent using minimal context pattern",
+    "Implemented 6 new functions: discover_available_tools, load_tool_metadata, execute_tool_step, generate_tool_execution_plan, is_tool_execution_request, handle_tool_execution_request",
+    "Added admin::get_tool_info handler for just-in-time tool discovery (same pattern as Worker)",
+    "Integrated smart request routing: project commands → tool requests → complex intents → simple intents",
+    "Admin can now execute tools directly without creating projects for simple requests",
+    "Reused Worker's infrastructure: DiscoveryExecutionStep, format_tool_list, parse_execution_plan",
+    "Token savings: ~1000 tokens per simple tool request (no project overhead)",
+    "Minimal execution plan prompts: ~25 lines (consistent with Worker pattern)",
+    "Foundation for future tool management: Admin can create/manage tools for other agents"
+]
+status = "success"
+verification_status = "compiled_successfully"
+loc_changed = 230
+files_modified = 1
+compilation_errors = 0
+test_results = "Build successful - ready for runtime testing"
+next_session = "Runtime Testing & Validation"

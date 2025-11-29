@@ -258,6 +258,7 @@ pub fn extract_json(text: &str) -> Option<String> {
     extract_json_structure(text)
 }
 
+
 /// Extract JSON from markdown code block
 fn extract_json_from_markdown(text: &str) -> Option<String> {
     // Handle various code block markers
@@ -266,17 +267,28 @@ fn extract_json_from_markdown(text: &str) -> Option<String> {
     for marker in markers.iter() {
         if let Some(start_idx) = text.find(marker) {
             let content_start = start_idx + marker.len();
+            
+            // Try to find closing ```
             if let Some(end_idx) = text[content_start..].find("```") {
                 let content = text[content_start..content_start + end_idx].trim();
                 if content.is_empty() {
                     return None;
                 }
                 return Some(content.to_string());
+            } else {
+                // No closing ``` found - LLM response was likely truncated
+                // Extract everything after the opening marker
+                let content = text[content_start..].trim();
+                if !content.is_empty() {
+                    tracing::debug!("Markdown code block missing closing ```, extracting {} chars", content.len());
+                    return Some(content.to_string());
+                }
             }
         }
     }
     None
 }
+
 
 /// Extract the first valid JSON structure (object or array) by counting braces
 fn extract_json_structure(text: &str) -> Option<String> {
@@ -341,8 +353,10 @@ fn extract_json_structure(text: &str) -> Option<String> {
 }
 
 /// Extract JSON with multiple fallback strategies (robust version)
-fn extract_json_robust(text: &str) -> Option<String> {
-    // Strategy 1: Try markdown code blocks first
+/// This function is designed to handle messy LLM output with explanatory text,
+/// multiple JSON objects, and incorrect/missing markdown markers.
+pub fn extract_json_robust(text: &str) -> Option<String> {
+    // Strategy 1: Try markdown code blocks first (most reliable when present)
     if let Some(mut json) = extract_json_from_markdown(text) {
         // Always attempt repair on extracted JSON (handles truncation in markdown blocks)
         if let Some(repaired) = repair_json(&json) {
@@ -351,13 +365,44 @@ fn extract_json_robust(text: &str) -> Option<String> {
         return Some(json);
     }
 
-    // Strategy 2: Try finding complete JSON structure
-    if let Some(mut json) = extract_json_structure(text) {
-        // Attempt repair in case structure extraction found incomplete JSON
-        if let Some(repaired) = repair_json(&json) {
-            json = repaired;
+    // Strategy 2: Extract ALL JSON-like structures and try each one
+    // This handles cases where LLM writes explanatory text before/after JSON
+    let json_candidates = extract_all_json_structures(text);
+    
+    if !json_candidates.is_empty() {
+        tracing::debug!("Found {} JSON candidate(s) in text", json_candidates.len());
+        
+        // Try each candidate, preferring the largest valid one
+        // (larger JSON is more likely to be the complete execution plan)
+        let mut best_candidate: Option<String> = None;
+        let mut best_size = 0;
+        
+        for candidate in &json_candidates {
+            let mut repaired = candidate.clone();
+            if let Some(fixed) = repair_json(candidate) {
+                repaired = fixed;
+            }
+            
+            // Quick validation: try to parse as JSON Value
+            if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
+                if repaired.len() > best_size {
+                    best_size = repaired.len();
+                    best_candidate = Some(repaired);
+                }
+            }
         }
-        return Some(json);
+        
+        if let Some(best) = best_candidate {
+            tracing::debug!("Selected best JSON candidate ({} chars)", best.len());
+            return Some(best);
+        }
+        
+        // If no candidate parsed successfully, return the first one anyway
+        // (let the caller's repair logic handle it)
+        if let Some(first) = json_candidates.first() {
+            tracing::debug!("No valid JSON found, returning first candidate for repair");
+            return repair_json(first).or_else(|| Some(first.clone()));
+        }
     }
 
     // Strategy 3: Handle truncated JSON - find first { to last available }
@@ -386,6 +431,76 @@ fn extract_json_robust(text: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Extract ALL JSON structures from text (objects and arrays)
+/// Returns a vector of JSON strings, ordered by appearance in text
+fn extract_all_json_structures(text: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    
+    while i < chars.len() {
+        // Skip non-JSON characters
+        if chars[i] != '{' && chars[i] != '[' {
+            i += 1;
+            continue;
+        }
+        
+        // Found potential JSON start
+        let start = i;
+        let is_array = chars[i] == '[';
+        let mut brace_count = 1;
+        let mut in_string = false;
+        let mut escape = false;
+        i += 1;
+        
+        // Find matching closing brace/bracket
+        while i < chars.len() {
+            let c = chars[i];
+            
+            if in_string {
+                if escape {
+                    escape = false;
+                } else if c == '\\' {
+                    escape = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+            } else {
+                match c {
+                    '"' => in_string = true,
+                    '{' if !is_array => brace_count += 1,
+                    '}' if !is_array => {
+                        brace_count -= 1;
+                        if brace_count == 0 {
+                            // Found complete JSON object
+                            let json_str: String = chars[start..=i].iter().collect();
+                            results.push(json_str);
+                            break;
+                        }
+                    }
+                    '[' if is_array => brace_count += 1,
+                    ']' if is_array => {
+                        brace_count -= 1;
+                        if brace_count == 0 {
+                            // Found complete JSON array
+                            let json_str: String = chars[start..=i].iter().collect();
+                            results.push(json_str);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        
+        // Move to next character after this JSON structure
+        i += 1;
+    }
+    
+    results
 }
 
 /// Repair common JSON errors (missing closing braces, trailing commas, etc.)

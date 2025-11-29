@@ -353,6 +353,9 @@ impl PMAgent {
             self.detect_stuck_tasks().await?;
             self.detect_blocked_tasks().await?;
             
+            // Handle stuck tasks - attempt recovery or permanent failure
+            self.handle_stuck_tasks().await?;
+            
             // PRIORITY 1: Poll pending validations (non-blocking)
             self.poll_pending_validations().await?;
             
@@ -538,6 +541,62 @@ impl PMAgent {
                 }
             }
         }
+        Ok(())
+    }
+    
+    /// Handle stuck tasks - attempt recovery or permanent failure
+    /// This method runs after detect_stuck_tasks() to process tasks that have been marked as Stuck
+    async fn handle_stuck_tasks(&mut self) -> Result<()> {
+        let project_manager = self.project_manager.read().await;
+        let tasks = project_manager.get_project_tasks(&self.project_id).await?;
+        drop(project_manager);
+        
+        for task in tasks {
+            if task.status != crate::projects::TaskStatus::Stuck {
+                continue;
+            }
+            
+            // Check if task can be retried
+            if task.can_retry_stuck() {
+                tracing::info!(
+                    "PM {} attempting to recover stuck task: {} ({}) - retry {}/{}",
+                    self.id.name,
+                    task.id,
+                    task.title,
+                    task.stuck_retry_count + 1,
+                    task.max_stuck_retries
+                );
+                
+                // Reset task to Unassigned for reassignment
+                let mut project_manager = self.project_manager.write().await;
+                project_manager.reset_stuck_task(&task.id).await?;
+                
+                tracing::info!(
+                    "PM {} reset stuck task {} to Unassigned for retry",
+                    self.id.name,
+                    task.id
+                );
+            } else {
+                // Max retries exceeded - permanently fail the task
+                tracing::error!(
+                    "PM {} permanently failing stuck task: {} ({}) - max retries ({}) exceeded",
+                    self.id.name,
+                    task.id,
+                    task.title,
+                    task.max_stuck_retries
+                );
+                
+                let failure_reason = format!(
+                    "Task failed after {} stuck retry attempts. Last failure: {}",
+                    task.max_stuck_retries,
+                    task.failure_reason.as_ref().unwrap_or(&"Unknown".to_string())
+                );
+                
+                let mut project_manager = self.project_manager.write().await;
+                project_manager.fail_task(&task.id, failure_reason).await?;
+            }
+        }
+        
         Ok(())
     }
     
@@ -949,24 +1008,21 @@ impl PMAgent {
     /// Static version of generate_validation_prompt
     fn generate_validation_prompt_static(task: &crate::projects::Task) -> Result<String> {
         Ok(format!(
-            r#"You are a Project Manager AI validating worker output.
-
+            r#"Review worker output.
 TASK: {}
 DESCRIPTION: {}
 
 WORKER DELIVERABLES:
 {}
 
-Evaluate if the deliverables meet the task requirements.
+Evaluate if deliverables meet requirements.
 
-Respond with ONLY this JSON format (no other text):
+Return JSON:
 {{
   "approved": true,
   "feedback": "your feedback here",
   "revision_needed": false
-}}
-
-JSON response:"#,
+}}"#,
             task.title,
             task.description,
             task.deliverables.join("\n")
@@ -1036,21 +1092,21 @@ JSON response:"#,
         let deliverables = task.deliverables.join("\n");
         
         Ok(format!(
-            "You are a Project Manager reviewing worker task completion.\n\n\
-             Task: {}\n\
-             Description: {}\n\n\
-             Worker Deliverables:\n{}\n\n\
-             Review the deliverables and determine:\n\
-             1. Are all task requirements met?\n\
-             2. Is the quality acceptable?\n\
-             3. Are there any issues?\n\n\
-             Return ONLY valid JSON:\n\
-             {{\n\
-               \"approved\": true/false,\n\
-               \"feedback\": \"detailed feedback\",\n\
-               \"revision_needed\": true/false\n\
-             }}\n\n\
-             Your response (JSON only):",
+            "Review worker task completion.
+Task: {}
+Description: {}
+
+Worker Deliverables:
+{}
+
+Evaluate requirements, quality, and issues.
+
+Return JSON:
+{{
+  \"approved\": true/false,
+  \"feedback\": \"detailed feedback\",
+  \"revision_needed\": true/false
+}}",
             task.title,
             task.description,
             deliverables
@@ -1514,7 +1570,7 @@ CRITICAL: JSON only. No explanations.
              - Clear titles (max 60 chars)\n\
              - Detailed descriptions\n\
              - List dependencies (0-based indices)\n\n\
-             OUTPUT (JSON only):\n\
+             Return JSON:\n\
              {{\n\
                \"tasks\": [{{\"title\": \"...\", \"description\": \"...\", \"worker_type\": \"...\"}}],\n\
                \"dependencies\": [{{\"task_index\": 1, \"depends_on\": [0]}}]\n\
@@ -1980,7 +2036,7 @@ mod tests {
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
-        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
         let mcp_client = Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new()));
         
         let project_id = ProjectId::new();
@@ -1994,7 +2050,7 @@ mod tests {
     }
     
     async fn check_ollama_gemma3() -> (bool, Vec<String>) {
-        let ai_provider_manager = match AIProviderManager::new().await {
+        let ai_provider_manager = match AIProviderManager::new(None).await {
             Ok(manager) => manager,
             Err(_) => return (false, vec![]),
         };
@@ -2041,7 +2097,7 @@ mod tests {
             ).await.unwrap()
         };
 
-        let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
         let mcp_client = Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new()));
         let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager, mcp_client, None);
         

@@ -98,17 +98,8 @@ impl PMDiscoveryContext {
 
 /// Parse PM tool selection from LLM response
 pub fn parse_pm_tool_selection(llm_response: &str) -> Result<PMToolSelectionRequest> {
-    if let Ok(selection) = serde_json::from_str::<PMToolSelectionRequest>(llm_response) {
-        return Ok(selection);
-    }
-    
-    if let Some(json_str) = extract_json_from_markdown(llm_response) {
-        if let Ok(selection) = serde_json::from_str::<PMToolSelectionRequest>(&json_str) {
-            return Ok(selection);
-        }
-    }
-    
-    if let Some(json_str) = extract_json_from_braces(llm_response) {
+    // Use robust JSON extraction from worker_discovery
+    if let Some(json_str) = super::worker_discovery::extract_json_robust(llm_response) {
         if let Ok(selection) = serde_json::from_str::<PMToolSelectionRequest>(&json_str) {
             return Ok(selection);
         }
@@ -122,17 +113,8 @@ pub fn parse_pm_tool_selection(llm_response: &str) -> Result<PMToolSelectionRequ
 
 /// Parse project execution plan from LLM response
 pub fn parse_project_execution_plan(llm_response: &str) -> Result<ProjectExecutionPlan> {
-    if let Ok(plan) = serde_json::from_str::<ProjectExecutionPlan>(llm_response) {
-        return Ok(plan);
-    }
-    
-    if let Some(json_str) = extract_json_from_markdown(llm_response) {
-        if let Ok(plan) = serde_json::from_str::<ProjectExecutionPlan>(&json_str) {
-            return Ok(plan);
-        }
-    }
-    
-    if let Some(json_str) = extract_json_from_braces(llm_response) {
+    // Use robust JSON extraction from worker_discovery
+    if let Some(json_str) = super::worker_discovery::extract_json_robust(llm_response) {
         if let Ok(plan) = serde_json::from_str::<ProjectExecutionPlan>(&json_str) {
             return Ok(plan);
         }
@@ -146,17 +128,8 @@ pub fn parse_project_execution_plan(llm_response: &str) -> Result<ProjectExecuti
 
 /// Parse worker task feedback from LLM response
 pub fn parse_worker_task_feedback(llm_response: &str) -> Result<WorkerTaskFeedback> {
-    if let Ok(feedback) = serde_json::from_str::<WorkerTaskFeedback>(llm_response) {
-        return Ok(feedback);
-    }
-    
-    if let Some(json_str) = extract_json_from_markdown(llm_response) {
-        if let Ok(feedback) = serde_json::from_str::<WorkerTaskFeedback>(&json_str) {
-            return Ok(feedback);
-        }
-    }
-    
-    if let Some(json_str) = extract_json_from_braces(llm_response) {
+    // Use robust JSON extraction from worker_discovery
+    if let Some(json_str) = super::worker_discovery::extract_json_robust(llm_response) {
         if let Ok(feedback) = serde_json::from_str::<WorkerTaskFeedback>(&json_str) {
             return Ok(feedback);
         }
@@ -166,32 +139,6 @@ pub fn parse_worker_task_feedback(llm_response: &str) -> Result<WorkerTaskFeedba
         "Failed to parse worker task feedback: {}",
         &llm_response[..llm_response.len().min(200)]
     ))
-}
-
-fn extract_json_from_markdown(text: &str) -> Option<String> {
-    let markers = ["```json\n", "```\n", "```"];
-    
-    for marker in markers.iter() {
-        if let Some(start_idx) = text.find(marker) {
-            let json_start = start_idx + marker.len();
-            
-            if let Some(end_idx) = text[json_start..].find("```") {
-                let json_text = &text[json_start..json_start + end_idx];
-                return Some(json_text.trim().to_string());
-            }
-        }
-    }
-    
-    None
-}
-
-fn extract_json_from_braces(text: &str) -> Option<String> {
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            return Some(text[start..=end].to_string());
-        }
-    }
-    None
 }
 
 #[cfg(test)]

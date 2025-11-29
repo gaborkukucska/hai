@@ -364,6 +364,11 @@ impl FilesServer {
 
         debug!("Normalized directory path: {}", normalized_path.display());
 
+        // Check if path exists as a file
+        if normalized_path.exists() && normalized_path.is_file() {
+            anyhow::bail!("Path already exists as a file: {}", path);
+        }
+
         // Create directory and all parent directories
         tokio::fs::create_dir_all(&normalized_path)
             .await
@@ -386,6 +391,16 @@ impl FilesServer {
 
         // Normalize and validate path
         let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        // Check if file exists
+        if !normalized_path.exists() {
+            anyhow::bail!("File not found: {}", path);
+        }
+        
+        // Check if it is a directory
+        if normalized_path.is_dir() {
+            anyhow::bail!("Path is a directory, not a file: {}", path);
+        }
 
         // Read file content
         let content = tokio::fs::read_to_string(&normalized_path)
@@ -429,6 +444,16 @@ impl FilesServer {
 
         // Normalize and validate path
         let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        // Check if file exists
+        if !normalized_path.exists() {
+            anyhow::bail!("File not found: {}", path);
+        }
+        
+        // Check if it is a directory
+        if normalized_path.is_dir() {
+            anyhow::bail!("Path is a directory, not a file: {}", path);
+        }
 
         // Read original content
         let content = tokio::fs::read_to_string(&normalized_path)

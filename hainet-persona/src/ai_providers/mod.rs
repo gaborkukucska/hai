@@ -44,11 +44,12 @@ pub struct AIProviderManager {
     pub selector: ModelSelector,
     pub request_queue: Option<Arc<OllamaRequestQueue>>,
     pub api_registry: Option<Arc<ApiRegistry>>,
+    pub user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>,
 }
 
 impl AIProviderManager {
     /// Create new provider manager and perform initial discovery
-    pub async fn new() -> Result<Self> {
+    pub async fn new(user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>) -> Result<Self> {
         info!("Initializing AI Provider Manager...");
         
         let discovery = ProviderDiscovery::new();
@@ -63,6 +64,7 @@ impl AIProviderManager {
             selector,
             request_queue: None,
             api_registry: None,
+            user_settings,
         };
 
         // Perform initial discovery
@@ -77,7 +79,22 @@ impl AIProviderManager {
     /// Initialize Ollama load balancing from configuration and discovered endpoints
     async fn initialize_load_balancing(manager: &AIProviderManager) -> Result<()> {
         // Try to load configuration
-        let config_path = std::path::PathBuf::from("hainet-persona/ollama-endpoints.toml");
+        // Try to load configuration from multiple potential paths
+        let potential_paths = vec![
+            "hainet-persona/ollama-endpoints.toml",
+            "../hainet-persona/ollama-endpoints.toml",
+            "ollama-endpoints.toml",
+        ];
+        
+        let mut config_path = std::path::PathBuf::from("hainet-persona/ollama-endpoints.toml");
+        for path_str in &potential_paths {
+            let path = std::path::PathBuf::from(path_str);
+            if path.exists() {
+                config_path = path;
+                break;
+            }
+        }
+        
         let config = OllamaConfig::load_or_default(&config_path);
         
         // Get all discovered Ollama endpoints
@@ -201,14 +218,33 @@ impl AIProviderManager {
 
         info!("Selecting model for agent {:?}. Catalog has {} models.", context.agent_type, catalog.model_count());
 
-        let ranked_models = self.ranker.rank_models(&catalog, &context).await?;
+        // Automatically load user preference for this agent type if available
+        let mut context_with_prefs = context;
+        if let Some(ref user_settings) = self.user_settings {
+            let settings = user_settings.read().await;
+            let agent_type_str = context_with_prefs.agent_type.to_string();
+            match settings.get_model_preference(&agent_type_str).await {
+                Ok(Some(family)) => {
+                    info!("✅ Applying user preference for {}: family='{}'", agent_type_str, family);
+                    context_with_prefs = context_with_prefs.with_preferred_family(Some(family));
+                },
+                Ok(None) => {
+                    tracing::debug!("No user preference set for {} agent", agent_type_str);
+                },
+                Err(e) => {
+                    tracing::error!("Failed to load user preference for {}: {:?}", agent_type_str, e);
+                }
+            }
+        }
+
+        let ranked_models = self.ranker.rank_models(&catalog, &context_with_prefs).await?;
         
-        let selected = self.selector.select_best(&ranked_models, &context).await?;
+        let selected = self.selector.select_best(&ranked_models, &context_with_prefs).await?;
         
         info!(
             "Selected model {} for agent {} (score: {:.2})",
             selected.model_id,
-            context.agent_type,
+            context_with_prefs.agent_type,
             selected.score
         );
         
