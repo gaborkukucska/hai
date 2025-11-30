@@ -1507,6 +1507,11 @@ CRITICAL: Only use tools from available servers: {}
         }
         
         // Try to parse the execution plan with multiple strategies
+        // Check if LLM returned a verification result instead of a plan
+        if llm_response.contains("\"success\":") || llm_response.contains("\"status\": \"success\"") {
+            return Err(anyhow::anyhow!("Response looks like a verification result. You must provide an EXECUTION PLAN with a 'steps' array."));
+        }
+
         let parse_result: Result<Vec<ExecutionStep>> = (|| {
             // Strategy 1: Direct JSON extraction (simple case)
             let json_str = self.extract_json_from_response(llm_response);
@@ -2218,7 +2223,7 @@ Return JSON:
     ) -> Result<super::worker_discovery::ToolSelectionRequest> {
         let tool_list = format_tool_list(available_tools);
         let prompt = format!(
-            r#"Select ALL tools needed for this sub-task. Be generous - include any tool you might need.
+            r#"Select the tools needed for this sub-task. Choose wisely from the available tools.
 
 MAIN TASK: {}
 SUB-TASK: {}
@@ -2228,8 +2233,15 @@ FEEDBACK: {}
 AVAILABLE TOOLS:
 {}
 
-Return JSON:
-{{"needed_tools": [...], "reasoning": "..."}}
+CRITICAL INSTRUCTIONS:
+1. Select ONLY the tools you actually need (typically 1-5 tools)
+2. Each tool should appear ONLY ONCE in your list
+3. DO NOT repeat the same tool multiple times
+4. DO NOT list all available tools - be selective
+5. Return ONLY valid JSON, no explanations
+
+Return JSON (ONLY the JSON object, nothing else):
+{{"needed_tools": ["tool1", "tool2"], "reasoning": "brief explanation"}}
 "#,
             main_task.title,
             subtask.description,
@@ -2240,8 +2252,8 @@ Return JSON:
 
         // Reuse existing selection logic/model
         let options = GenerationOptions {
-            temperature: Some(0.3),
-            max_tokens: Some(4096),  // Increased from 1024 to prevent JSON truncation
+            temperature: Some(0.2),  // Lower temperature for more focused output
+            max_tokens: Some(1024),  // Reduced from 4096 - tool selection should be brief
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
@@ -2279,16 +2291,37 @@ Return JSON:
             
             match parse_tool_selection(&response.text) {
                 Ok(selection) => {
-                    // Validate tools exist in available_tools
+                    // Validate tools exist in available_tools (with fuzzy matching)
+                    let mut resolved_tools = Vec::new();
                     let mut invalid_tools = Vec::new();
+                    
                     for tool in &selection.needed_tools {
-                        if !available_tools.contains(tool) {
-                            invalid_tools.push(tool.clone());
+                        if available_tools.contains(tool) {
+                            resolved_tools.push(tool.clone());
+                        } else {
+                            // Try to find by suffix (e.g. "file_read" -> "hainet-files::file_read")
+                            let suffix = format!("::{}", tool);
+                            let matches: Vec<&String> = available_tools.iter()
+                                .filter(|t| t.ends_with(&suffix) || t.ends_with(tool)) // check for ::tool or just tool if it matches end
+                                .collect();
+                                
+                            if matches.len() == 1 {
+                                resolved_tools.push(matches[0].clone());
+                            } else if matches.len() > 1 {
+                                // Ambiguous, pick first but warn
+                                tracing::warn!("Ambiguous tool selection '{}', defaulting to '{}'", tool, matches[0]);
+                                resolved_tools.push(matches[0].clone());
+                            } else {
+                                invalid_tools.push(tool.clone());
+                            }
                         }
                     }
 
                     if invalid_tools.is_empty() {
-                        return Ok(selection);
+                        // Update selection with resolved full names
+                        let mut final_selection = selection;
+                        final_selection.needed_tools = resolved_tools;
+                        return Ok(final_selection);
                     } else {
                         last_error = format!(
                             "Selected tools do not exist in AVAILABLE TOOLS list: {:?}. You MUST select ONLY from the provided list.",
@@ -2330,14 +2363,31 @@ AVAILABLE TOOLS:
 {}
 - worker::get_tool_info
 
+CRITICAL DISTINCTION - PARAMETERS vs FLAGS:
+1. TOOL PARAMETERS: Actual JSON fields required by the tool (e.g., "path", "query", "content")
+2. FLAGS: Only used with worker::get_tool_info to request documentation (e.g., {{"flags": "--params"}})
+
+NEVER use "flags" as a parameter for actual MCP tools! Flags are ONLY for worker::get_tool_info.
+
+CORRECT EXAMPLES:
+✓ {{"tool": "worker::get_tool_info", "params": {{"tool_name": "hainet-files::file_search", "flags": "--params"}}}}
+✓ {{"tool": "hainet-files::file_search", "params": {{"path": ".", "query": "example.txt"}}}}
+✓ {{"tool": "hainet-files::file_read", "params": {{"path": "./src/main.rs"}}}}
+✓ {{"tool": "hainet-files::file_write", "params": {{"path": "./output.txt", "content": "Hello"}}}}
+
+INCORRECT EXAMPLES (DO NOT DO THIS):
+✗ {{"tool": "hainet-files::file_search", "params": {{"flags": {{"recursive": "true"}}, "query": "example"}}}}
+✗ {{"tool": "hainet-files::file_read", "params": {{"flags": "--all"}}}}
+
 RULES:
-1. Call worker::get_tool_info({{"tool_name": "{}"}}) to discover tool details
-2. Use the information provided (flags like --params, --examples) to learn how to use the tool
-3. Use FULL tool names from the list above
-5. step_number must be a simple integer (1, 2, 3...), NOT an object or string.
+1. First call worker::get_tool_info({{"tool_name": "{}"}}) to discover required parameters
+2. Read the parameter documentation carefully (use flags: "--params" to see parameter details)
+3. Use ONLY the parameters listed in the tool's schema, NOT flags
+4. step_number must be a simple integer (1, 2, 3...), NOT an object or string
+5. Always include required parameters like "path" for file operations
 
 Return JSON with steps array:
-{{"steps": [{{"step_number": 1, "tool": "worker::get_tool_info", "params": {{"tool_name": "..."}}, "description": "...", "depends_on": []}}]}}
+{{"steps": [{{"step_number": 1, "tool": "worker::get_tool_info", "params": {{"tool_name": "...", "flags": "--params"}}, "description": "...", "depends_on": []}}]}}
 "#,
             subtask.description,
             subtask.goal,
@@ -2672,6 +2722,8 @@ CRITICAL RULES FOR TOOL SELECTION:
 3. Do NOT invent tool names or use generic names like 'server::tool' or 'server::file_write'
 4. Do NOT use tools that are not in the list above
 5. Do NOT use 'filesystem' server (it is restricted). Use 'hainet-files' instead.
+6. SELECT AT MOST 5 UNIQUE TOOLS - do not repeat the same tool multiple times
+7. If you need to use a tool multiple times, list it ONCE - you will call it multiple times later
 
 COMMON TOOLS FOR FILE OPERATIONS:
 - hainet-files::directory_create (create directories - NOT 'create-directory')
@@ -2680,15 +2732,16 @@ COMMON TOOLS FOR FILE OPERATIONS:
 - hainet-files::file_list (list directory contents)
 - hainet-files::file_metadata (get file information)
 
-EXAMPLE VALID SELECTIONS:
+EXAMPLE VALID SELECTIONS (notice: NO DUPLICATES, MAX 5 TOOLS):
 - ["hainet-files::directory_create", "hainet-files::file_write"]
-- ["sequential-thinking::sequentialthinking", "hainet-files::file_read"]
-- ["context7::search-library", "hainet-files::file_write"]
+- ["hainet-files::file_read", "hainet-files::file_edit"]
+- ["hainet-files::file_list", "hainet-files::file_write", "hainet-files::directory_create"]
 
 INSTRUCTIONS:
-1. Identify which tools you need from the AVAILABLE TOOLS list
-2. Use the EXACT tool identifier format shown (server::tool)
-3. Provide brief reasoning for your selection
+1. Identify which UNIQUE tools you need from the AVAILABLE TOOLS list
+2. Select AT MOST 5 tools - NO DUPLICATES
+3. You can use simple tool names (e.g. "file_read") or full names (e.g. "hainet-files::file_read")
+4. Provide brief reasoning for your selection
 
 RESPOND WITH VALID JSON ONLY (no markdown, no explanations):
 {{
@@ -2706,8 +2759,9 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no code blocks, no exp
         );
         
         let options = GenerationOptions {
-            temperature: Some(0.3),
-            max_tokens: Some(8192),  // Increased to prevent JSON truncation
+            temperature: Some(0.2),  // Lower temperature for more focused output
+            max_tokens: Some(1024),  // Reduced from 8192 - tool selection should be brief (1-5 tools)
+            num_ctx: Some(4096),     // Reduced context window - sufficient for tool selection
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
@@ -2742,16 +2796,37 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no code blocks, no exp
             
             match parse_tool_selection(&response.text) {
                 Ok(selection) => {
-                    // Validate tools exist in available_tools
+                    // Validate tools exist in available_tools (with fuzzy matching)
+                    let mut resolved_tools = Vec::new();
                     let mut invalid_tools = Vec::new();
+                    
                     for tool in &selection.needed_tools {
-                        if !available_tools.contains(tool) {
-                            invalid_tools.push(tool.clone());
+                        if available_tools.contains(tool) {
+                            resolved_tools.push(tool.clone());
+                        } else {
+                            // Try to find by suffix (e.g. "file_read" -> "hainet-files::file_read")
+                            let suffix = format!("::{}", tool);
+                            let matches: Vec<&String> = available_tools.iter()
+                                .filter(|t| t.ends_with(&suffix) || t.ends_with(tool))
+                                .collect();
+                                
+                            if matches.len() == 1 {
+                                resolved_tools.push(matches[0].clone());
+                            } else if matches.len() > 1 {
+                                // Ambiguous, pick first but warn
+                                tracing::warn!("Ambiguous tool selection '{}', defaulting to '{}'", tool, matches[0]);
+                                resolved_tools.push(matches[0].clone());
+                            } else {
+                                invalid_tools.push(tool.clone());
+                            }
                         }
                     }
 
                     if invalid_tools.is_empty() {
-                        return Ok(selection);
+                        // Update selection with resolved full names
+                        let mut final_selection = selection;
+                        final_selection.needed_tools = resolved_tools;
+                        return Ok(final_selection);
                     } else {
                         last_error = format!(
                             "Selected tools do not exist in AVAILABLE TOOLS list: {:?}. You MUST select ONLY from the provided list.",
@@ -3284,7 +3359,7 @@ Return JSON with steps array:
             
             let flags = step.params.get("flags")
                 .and_then(|v| v.as_str())
-                .unwrap_or("");
+                .unwrap_or("--params");
             
             if let Some(metadata) = tool_metadata.get(tool_name) {
                 tracing::debug!("Worker {} providing tool info for: {} (flags: '{}')", self.id.name, tool_name, flags);
@@ -3293,7 +3368,7 @@ Return JSON with steps array:
             } else {
                 return Err(anyhow::anyhow!("Tool not found: {}. Available tools: {:?}", 
                     tool_name, 
-                    tool_metadata.keys().collect::<Vec<_>>()
+                            tool_metadata.keys().collect::<Vec<_>>()
                 ));
             }
         }
@@ -3305,6 +3380,37 @@ Return JSON with steps array:
         }
         
         let (server, tool) = (parts[0], parts[1]);
+        
+        // Pre-execution parameter validation to catch common mistakes
+        if server == "hainet-files" {
+            // Check for common mistake: using "flags" as a parameter for MCP tools
+            if step.params.get("flags").is_some() {
+                return Err(anyhow::anyhow!(
+                    "Invalid parameter 'flags' for tool '{}'. \
+                    Flags are ONLY for worker::get_tool_info, not for MCP tools. \
+                    Please use the actual tool parameters (e.g., 'path', 'query', 'content') instead. \
+                    Call worker::get_tool_info with flags='--params' to see required parameters.",
+                    step.tool
+                ));
+            }
+            
+            // Validate required 'path' parameter for file operations
+            let file_ops_requiring_path = [
+                "file_read", "file_write", "file_append", "file_list", 
+                "file_metadata", "directory_create", "file_search", "file_edit"
+            ];
+            
+            if file_ops_requiring_path.contains(&tool) {
+                if step.params.get("path").is_none() {
+                    return Err(anyhow::anyhow!(
+                        "Missing required 'path' parameter for tool '{}'. \
+                        File operations require a 'path' parameter. \
+                        Example: {{\"path\": \"./src/main.rs\"}} or {{\"path\": \".\"}}",
+                        step.tool
+                    ));
+                }
+            }
+        }
         
         // Add project_name to params for sandboxing (Session 52)
         let mut params = step.params.clone();

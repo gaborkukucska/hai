@@ -593,7 +593,25 @@ impl PMAgent {
                 );
                 
                 let mut project_manager = self.project_manager.write().await;
-                project_manager.fail_task(&task.id, failure_reason).await?;
+                project_manager.fail_task(&task.id, failure_reason.clone()).await?;
+                
+                // ESCALATION: Notify Admin of permanent failure
+                let error_report = crate::messaging::ErrorReport {
+                    error_type: "TaskPermanentFailure".to_string(),
+                    message: format!("Task '{}' ({}) permanently failed: {}", task.title, task.id, failure_reason),
+                    stack_trace: None,
+                    recoverable: false,
+                };
+                
+                let msg = crate::messaging::Message::new(
+                    self.id.clone(),
+                    crate::messaging::AgentId::new_admin("main-admin".to_string()),
+                    crate::messaging::MessageContent::ErrorReport(error_report)
+                ).with_priority(crate::messaging::Priority::High);
+                
+                if let Err(e) = self.message_bus.write().await.send_message(msg).await {
+                    tracing::error!("Failed to send error report to Admin: {:?}", e);
+                }
             }
         }
         

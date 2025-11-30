@@ -507,6 +507,30 @@ fn extract_all_json_structures(text: &str) -> Vec<String> {
 fn repair_json(json_str: &str) -> Option<String> {
     let mut repaired = json_str.trim().to_string();
     
+    // Check for unclosed string
+    let mut in_string = false;
+    let mut escape = false;
+    for c in repaired.chars() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+        } else {
+            if c == '"' {
+                in_string = true;
+            }
+        }
+    }
+    
+    if in_string {
+        tracing::debug!("Repairing JSON: closing unclosed string");
+        repaired.push('"');
+    }
+
     // Remove trailing commas before closing braces/brackets (common LLM error)
     repaired = repaired.replace(",}", "}").replace(",]", "]");
     
@@ -516,10 +540,33 @@ fn repair_json(json_str: &str) -> Option<String> {
     }
     
     // Count opening and closing braces/brackets
-    let open_braces = repaired.matches('{').count();
-    let close_braces = repaired.matches('}').count();
-    let open_brackets = repaired.matches('[').count();
-    let close_brackets = repaired.matches(']').count();
+    let mut open_braces = 0;
+    let mut close_braces = 0;
+    let mut open_brackets = 0;
+    let mut close_brackets = 0;
+    let mut in_string = false;
+    let mut escape = false;
+    
+    for c in repaired.chars() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+        } else {
+            match c {
+                '"' => in_string = true,
+                '{' => open_braces += 1,
+                '}' => close_braces += 1,
+                '[' => open_brackets += 1,
+                ']' => close_brackets += 1,
+                _ => {}
+            }
+        }
+    }
     
     // Add missing closing brackets first (arrays need to close before objects)
     if open_brackets > close_brackets {

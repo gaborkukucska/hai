@@ -101,7 +101,7 @@ Always prioritize data safety and user privacy."#.to_string(),
 Your capabilities:
 - Git operations (status, diff, commit, branch management)
 - Cargo operations (build, test, check, clippy)
-- Code search and analysis using ripgrep
+- Code search and analysis using file search tools
 - Reading and analyzing source code
 - Dependency management
 - Test execution and result interpretation

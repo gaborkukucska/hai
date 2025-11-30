@@ -208,6 +208,29 @@ impl AdminBridge {
             stt_handler,
         };
 
+        // Spawn listener for Admin agent messages (e.g. error escalations)
+        let admin_clone = bridge.admin.clone();
+        // We need to take the receiver out of the admin agent to use it in the loop
+        let receiver_opt = {
+            let mut admin_write = admin_clone.write().await;
+            admin_write.take_receiver()
+        };
+        
+        if let Some(mut receiver) = receiver_opt {
+            tokio::spawn(async move {
+                log::info!("Admin agent message listener started");
+                while let Some(msg) = receiver.recv().await {
+                    let mut admin = admin_clone.write().await;
+                    if let Err(e) = admin.handle_message(msg).await {
+                        log::error!("Error handling message in Admin agent: {:?}", e);
+                    }
+                }
+                log::warn!("Admin agent message listener ended");
+            });
+        } else {
+            log::warn!("Could not take receiver from Admin agent - message listening disabled");
+        }
+
         // Register User agent to receive notifications
         let user_id = hainet_persona::messaging::AgentId::user("user".to_string());
         let (mut user_rx, _) = context.message_bus.write().await.register_agent(user_id.clone()).await?;

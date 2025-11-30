@@ -511,6 +511,50 @@ impl FilesServer {
 
         Ok(serde_json::to_string(&result)?)
     }
+    async fn handle_file_append(&self, path: String, content: String, project_name: Option<String>) -> Result<String> {
+        debug!("Appending to file: {}", path);
+
+        // Normalize and validate path
+        let normalized_path = self.normalize_path(&path, project_name.as_deref())?;
+
+        // Check if it is a directory
+        if normalized_path.is_dir() {
+            anyhow::bail!("Path is a directory, not a file: {}", path);
+        }
+
+        // Ensure parent directory exists
+        if let Some(parent) = normalized_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .context("Failed to create parent directories")?;
+        }
+
+        // Read existing content if file exists to calculate hash
+        let mut full_content = String::new();
+        if normalized_path.exists() {
+            full_content = tokio::fs::read_to_string(&normalized_path)
+                .await
+                .context("Failed to read existing file")?;
+        }
+        
+        full_content.push_str(&content);
+
+        // Write appended content
+        tokio::fs::write(&normalized_path, &full_content)
+            .await
+            .context(format!("Failed to write to file: {}", normalized_path.display()))?;
+
+        // Store in CAS
+        let storage = self.storage.read().await;
+        let new_hash = storage
+            .store()
+            .put(full_content.as_bytes(), Some(PathBuf::from(&path)))
+            .await
+            .context("Failed to store new content in CAS")?
+            .to_hex();
+
+        Ok(format!("Successfully appended to file (new hash: {})", new_hash))
+    }
 }
 
 impl ServerHandler for FilesServer {
@@ -563,7 +607,16 @@ impl ServerHandler for FilesServer {
                     Tool {
                         name: Cow::Borrowed("file_write"),
                         title: Some("Write File".to_string()),
-                        description: Some(Cow::Borrowed("Write content to a file")),
+                        description: Some(Cow::Borrowed("Write content to a file (overwrites existing)")),
+                        input_schema: write_schema.clone(),
+                        output_schema: None,
+                        annotations: None,
+                        icons: None,
+                    },
+                    Tool {
+                        name: Cow::Borrowed("file_append"),
+                        title: Some("Append File".to_string()),
+                        description: Some(Cow::Borrowed("Append content to a file")),
                         input_schema: write_schema.clone(),
                         output_schema: None,
                         annotations: None,
@@ -658,10 +711,13 @@ impl ServerHandler for FilesServer {
                 "file_read" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| ErrorData {
-                            code: ErrorCode::INVALID_PARAMS,
-                            message: Cow::Borrowed("Missing 'path' parameter"),
-                            data: None,
+                        .ok_or_else(|| {
+                            tracing::error!("Parameter validation failed: Missing required 'path' parameter for file_read");
+                            ErrorData {
+                                code: ErrorCode::INVALID_PARAMS,
+                                message: Cow::Borrowed("Missing required 'path' parameter"),
+                                data: None,
+                            }
                         })?
                         .to_string();
                     self.handle_file_read(path, project_name.clone()).await
@@ -674,10 +730,13 @@ impl ServerHandler for FilesServer {
                 "file_write" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| ErrorData {
-                            code: ErrorCode::INVALID_PARAMS,
-                            message: Cow::Borrowed("Missing 'path' parameter"),
-                            data: None,
+                        .ok_or_else(|| {
+                            tracing::error!("Parameter validation failed: Missing required 'path' parameter for file_write");
+                            ErrorData {
+                                code: ErrorCode::INVALID_PARAMS,
+                                message: Cow::Borrowed("Missing required 'path' parameter"),
+                                data: None,
+                            }
                         })?
                         .to_string();
                     let content = args.get("content")
@@ -695,13 +754,43 @@ impl ServerHandler for FilesServer {
                             data: None,
                         })?
                 }
-                "file_list" => {
+                "file_append" => {
                     let path = args.get("path")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            tracing::error!("Parameter validation failed: Missing required 'path' parameter for file_append");
+                            ErrorData {
+                                code: ErrorCode::INVALID_PARAMS,
+                                message: Cow::Borrowed("Missing required 'path' parameter"),
+                                data: None,
+                            }
+                        })?
+                        .to_string();
+                    let content = args.get("content")
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| ErrorData {
                             code: ErrorCode::INVALID_PARAMS,
-                            message: Cow::Borrowed("Missing 'path' parameter"),
+                            message: Cow::Borrowed("Missing 'content' parameter"),
                             data: None,
+                        })?
+                        .to_string();
+                    self.handle_file_append(path, content, project_name.clone()).await
+                        .map_err(|e| ErrorData {
+                            code: ErrorCode::INTERNAL_ERROR,
+                            message: Cow::Owned(format!("File append error: {}", e)),
+                            data: None,
+                        })?
+                }
+                "file_list" => {
+                    let path = args.get("path")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            tracing::error!("Parameter validation failed: Missing required 'path' parameter for file_list");
+                            ErrorData {
+                                code: ErrorCode::INVALID_PARAMS,
+                                message: Cow::Borrowed("Missing required 'path' parameter"),
+                                data: None,
+                            }
                         })?
                         .to_string();
                     self.handle_file_list(path, project_name.clone()).await
@@ -714,10 +803,13 @@ impl ServerHandler for FilesServer {
                 "file_metadata" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| ErrorData {
-                            code: ErrorCode::INVALID_PARAMS,
-                            message: Cow::Borrowed("Missing 'path' parameter"),
-                            data: None,
+                        .ok_or_else(|| {
+                            tracing::error!("Parameter validation failed: Missing required 'path' parameter for file_metadata");
+                            ErrorData {
+                                code: ErrorCode::INVALID_PARAMS,
+                                message: Cow::Borrowed("Missing required 'path' parameter"),
+                                data: None,
+                            }
                         })?
                         .to_string();
                     self.handle_file_metadata(path, project_name.clone()).await
@@ -730,10 +822,13 @@ impl ServerHandler for FilesServer {
                 "directory_create" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| ErrorData {
-                            code: ErrorCode::INVALID_PARAMS,
-                            message: Cow::Borrowed("Missing 'path' parameter"),
-                            data: None,
+                        .ok_or_else(|| {
+                            tracing::error!("Parameter validation failed: Missing required 'path' parameter for directory_create");
+                            ErrorData {
+                                code: ErrorCode::INVALID_PARAMS,
+                                message: Cow::Borrowed("Missing required 'path' parameter"),
+                                data: None,
+                            }
                         })?
                         .to_string();
                     self.handle_directory_create(path, project_name).await
@@ -746,10 +841,13 @@ impl ServerHandler for FilesServer {
                 "file_search" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| ErrorData {
-                            code: ErrorCode::INVALID_PARAMS,
-                            message: Cow::Borrowed("Missing 'path' parameter"),
-                            data: None,
+                        .ok_or_else(|| {
+                            tracing::error!("Parameter validation failed: Missing required 'path' parameter for file_search");
+                            ErrorData {
+                                code: ErrorCode::INVALID_PARAMS,
+                                message: Cow::Borrowed("Missing required 'path' parameter"),
+                                data: None,
+                            }
                         })?
                         .to_string();
                     let query = args.get("query")
@@ -774,10 +872,13 @@ impl ServerHandler for FilesServer {
                 "file_edit" => {
                     let path = args.get("path")
                         .and_then(|v| v.as_str())
-                        .ok_or_else(|| ErrorData {
-                            code: ErrorCode::INVALID_PARAMS,
-                            message: Cow::Borrowed("Missing 'path' parameter"),
-                            data: None,
+                        .ok_or_else(|| {
+                            tracing::error!("Parameter validation failed: Missing required 'path' parameter for file_edit");
+                            ErrorData {
+                                code: ErrorCode::INVALID_PARAMS,
+                                message: Cow::Borrowed("Missing required 'path' parameter"),
+                                data: None,
+                            }
                         })?
                         .to_string();
                     let find = args.get("find")

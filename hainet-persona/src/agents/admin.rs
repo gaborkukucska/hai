@@ -165,6 +165,41 @@ impl AdminAgent {
             activity.to_string()
         ).await;
     }
+    
+    /// Take the message receiver (can only be done once)
+    pub fn take_receiver(&mut self) -> Option<tokio::sync::mpsc::Receiver<crate::messaging::Message>> {
+        self.receiver.take()
+    }
+    
+    /// Handle incoming message from other agents
+    pub async fn handle_message(&mut self, msg: crate::messaging::Message) -> Result<()> {
+        match msg.content {
+            crate::messaging::MessageContent::ErrorReport(report) => {
+                tracing::warn!("Admin received error report from {}: {}", msg.from, report.message);
+                
+                // Format user-friendly notification
+                let notification = format!(
+                    "⚠️ **Issue Reported**\n\nI received an error from **{}**:\n\n> {}\n\nI'm looking into it. You may need to check the project status.",
+                    msg.from.name,
+                    report.message
+                );
+                
+                // Send to User agent so it appears in chat
+                let user_id = crate::messaging::AgentId::user("user".to_string());
+                let response_msg = crate::messaging::Message::new(
+                    self.id.clone(),
+                    user_id,
+                    crate::messaging::MessageContent::Response(notification)
+                );
+                
+                self.context.message_bus.write().await.send_message(response_msg).await?;
+            },
+            _ => {
+                tracing::debug!("Admin received unhandled message type from {}", msg.from);
+            }
+        }
+        Ok(())
+    }
 
     // ========== Project Management Commands ==========
 
@@ -1149,15 +1184,6 @@ impl AdminAgent {
         let project_context = self.get_project_context().await;
         memory_context.push_str("\n");
         memory_context.push_str(&project_context);
-        
-        // Combine with user input
-        let full_request = if !memory_context.is_empty() {
-            format!("CONTEXT:\n{}\n\nUSER REQUEST:\n{}", memory_context, user_input)
-        } else {
-            user_input.to_string()
-        };
-        
-        tracing::info!("DEBUG: Admin conversation full_request:\n{}", full_request);
         
         // Set prompt variables - use user_input for current_request since memory_context is injected separately
         prompt_context.current_request = Some(user_input.to_string());

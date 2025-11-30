@@ -1,36 +1,6 @@
 # MCP Server Configuration for HAI-Net
 # This file defines available MCP servers that can be connected to
 
-[servers.filesystem]
-name = "Filesystem"
-description = "File operations on allowed directories"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/tom/hai", "/home/tom/Documents", "/home/tom/Desktop"]
-enabled = true
-
-[servers.github]
-name = "GitHub"
-description = "GitHub repository operations"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-enabled = false
-# Requires GITHUB_PERSONAL_ACCESS_TOKEN environment variable
-
-[servers.context7]
-name = "Context7"
-description = "Up-to-date library documentation"
-command = "npx"
-args = ["-y", "@upstash/context7-mcp"]
-enabled = true
-# Requires UPSTASH_VECTOR_REST_URL and UPSTASH_VECTOR_REST_TOKEN
-
-[servers.sequential-thinking]
-name = "Sequential Thinking"
-description = "Structured problem-solving through chain of thought"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-enabled = true
-
 [servers.hainet-files]
 name = "HAI-Net Files"
 description = "Local HAI-Net file server with content-addressed storage"
@@ -51,18 +21,23 @@ working_dir = "/home/tom/hai"
 # Environment variables
 env = { RUST_LOG = "info" }
 
-# Additional servers can be added here following the same pattern
-# [servers.your-server]
-# name = "Your Server Name"
-# description = "What your server does"
-# command = "command-to-run"
-# args = ["arg1", "arg2"]
-# enabled = true/false
-# working_dir = "/optional/working/directory" (optional)
-
 [servers.hainet-mcp]
 name = "HAI-Net MCP"
 description = "Core HAI-Net MCP server"
 command = "cargo"
 args = ["run", "--package", "hainet-mcp-server", "--release"]
+enabled = true
+
+[servers.hainet-dev]
+name = "HAI-Net Dev"
+description = "Development tools for HAI-Net"
+command = "cargo"
+args = ["run", "--package", "hainet-dev", "--release"]
+enabled = true
+
+[servers.hainet-system]
+name = "HAI-Net System"
+description = "System management and monitoring for HAI-Net"
+command = "cargo"
+args = ["run", "--package", "hainet-system", "--release"]
 enabled = true

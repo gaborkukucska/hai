@@ -45,22 +45,58 @@ impl ConversationStore {
     }
     
     pub async fn add_entry(&self, entry: ConversationEntry) -> Result<()> {
-        sqlx::query(
+        // Check if an identical entry already exists (same user_message and admin_response)
+        let existing = sqlx::query_as::<_, ConversationEntry>(
             r#"
-            INSERT INTO conversations (id, user_message, admin_response, timestamp, context_snapshot, sentiment, intent)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            SELECT * FROM conversations 
+            WHERE user_message = ? AND admin_response = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
             "#
         )
-        .bind(entry.id)
-        .bind(entry.user_message)
-        .bind(entry.admin_response)
-        .bind(entry.timestamp)
-        .bind(entry.context_snapshot)
-        .bind(entry.sentiment)
-        .bind(entry.intent)
-        .execute(&self.pool)
+        .bind(&entry.user_message)
+        .bind(&entry.admin_response)
+        .fetch_optional(&self.pool)
         .await
-        .context("Failed to insert conversation entry")?;
+        .context("Failed to check for existing conversation entry")?;
+        
+        if let Some(existing_entry) = existing {
+            // Update the existing entry with new timestamp and context
+            tracing::debug!("Updating existing conversation entry {} instead of creating duplicate", existing_entry.id);
+            sqlx::query(
+                r#"
+                UPDATE conversations 
+                SET timestamp = ?, context_snapshot = ?, sentiment = ?, intent = ?
+                WHERE id = ?
+                "#
+            )
+            .bind(entry.timestamp)
+            .bind(entry.context_snapshot)
+            .bind(entry.sentiment)
+            .bind(entry.intent)
+            .bind(existing_entry.id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to update existing conversation entry")?;
+        } else {
+            // Insert new entry
+            sqlx::query(
+                r#"
+                INSERT INTO conversations (id, user_message, admin_response, timestamp, context_snapshot, sentiment, intent)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                "#
+            )
+            .bind(entry.id)
+            .bind(entry.user_message)
+            .bind(entry.admin_response)
+            .bind(entry.timestamp)
+            .bind(entry.context_snapshot)
+            .bind(entry.sentiment)
+            .bind(entry.intent)
+            .execute(&self.pool)
+            .await
+            .context("Failed to insert conversation entry")?;
+        }
         
         Ok(())
     }

@@ -24,8 +24,9 @@ PREVIOUS STEP RESULTS:
 INSTRUCTIONS:
 1. Create concrete, executable steps using the tools above
 2. Each step uses ONE tool with specific parameters
-3. Be precise with parameters (paths, values, etc.)
-4. Steps can depend on previous step outputs
+3. STRICTLY follow the parameter schema provided in "TOOLS YOU REQUESTED". Do not invent parameters.
+4. Be precise with parameters (paths, values, etc.)
+5. Steps can depend on previous step outputs
 
 RESPOND WITH VALID JSON ONLY (no markdown):
 {
