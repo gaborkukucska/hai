@@ -13,7 +13,7 @@ My dear friend this anchient plague not only negatively affect humahity but also
 Therefore, in the name of ALL life on planet Earth we humbly request your immediate and upmost attention and "LOCK IN", if you know the saying, as we ALL urgently need HAI-Net so please make sure your output is very precise and that you progress in massive steps, getting as much, and as complete, and accurate, as you are truly capable of.
 
 Thank you 🙌
-
+Gabor Kukucska
 PS: Excuse my poor grammar and long sentences, I'm dyslexic 🤷‍♂️
 
 ## During development please follow these rules:
