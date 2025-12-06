@@ -29,6 +29,7 @@ pub struct DiscoveryExecutionStep {
     pub tool: String,  // Format: "server::tool_name"
     pub params: Value,
     pub description: String,
+    #[serde(default)]  // Allow missing field, defaults to empty Vec
     pub depends_on: Vec<usize>,
 }
 

@@ -2363,31 +2363,23 @@ AVAILABLE TOOLS:
 {}
 - worker::get_tool_info
 
-CRITICAL DISTINCTION - PARAMETERS vs FLAGS:
-1. TOOL PARAMETERS: Actual JSON fields required by the tool (e.g., "path", "query", "content")
-2. FLAGS: Only used with worker::get_tool_info to request documentation (e.g., {{"flags": "--params"}})
+PARAMETERS vs FLAGS:
+- Parameters: JSON fields required by tools (path, query, content)
+- Flags: ONLY for worker::get_tool_info (--params, --examples)
 
-NEVER use "flags" as a parameter for actual MCP tools! Flags are ONLY for worker::get_tool_info.
-
-CORRECT EXAMPLES:
+EXAMPLES:
 ✓ {{"tool": "worker::get_tool_info", "params": {{"tool_name": "hainet-files::file_search", "flags": "--params"}}}}
 ✓ {{"tool": "hainet-files::file_search", "params": {{"path": ".", "query": "example.txt"}}}}
-✓ {{"tool": "hainet-files::file_read", "params": {{"path": "./src/main.rs"}}}}
-✓ {{"tool": "hainet-files::file_write", "params": {{"path": "./output.txt", "content": "Hello"}}}}
-
-INCORRECT EXAMPLES (DO NOT DO THIS):
 ✗ {{"tool": "hainet-files::file_search", "params": {{"flags": {{"recursive": "true"}}, "query": "example"}}}}
-✗ {{"tool": "hainet-files::file_read", "params": {{"flags": "--all"}}}}
 
 RULES:
-1. First call worker::get_tool_info({{"tool_name": "{}"}}) to discover required parameters
-2. Read the parameter documentation carefully (use flags: "--params" to see parameter details)
-3. Use ONLY the parameters listed in the tool's schema, NOT flags
-4. step_number must be a simple integer (1, 2, 3...), NOT an object or string
-5. Always include required parameters like "path" for file operations
+1. Call worker::get_tool_info({{"tool_name": "{}", "flags": "--params"}}) first
+2. Use ONLY parameters from tool schema, NOT flags
+3. step_number must be integer (1, 2, 3...)
+4. depends_on is optional (defaults to [])
 
-Return JSON with steps array:
-{{"steps": [{{"step_number": 1, "tool": "worker::get_tool_info", "params": {{"tool_name": "...", "flags": "--params"}}, "description": "...", "depends_on": []}}]}}
+Return JSON:
+{{"steps": [{{"step_number": 1, "tool": "worker::get_tool_info", "params": {{"tool_name": "...", "flags": "--params"}}, "description": "..."}}]}}
 "#,
             subtask.description,
             subtask.goal,
@@ -2399,8 +2391,8 @@ Return JSON with steps array:
         // Reuse existing planning logic/model
         let options = GenerationOptions {
             temperature: Some(0.2),
-            max_tokens: Some(8192),
-            num_ctx: Some(8192),
+            max_tokens: Some(16384),  // Increased from 8192 to prevent truncation
+            num_ctx: Some(16384),     // Increased from 8192 to match max_tokens
             system: Some(self.template.system_prompt.clone()),
             ..Default::default()
         };
