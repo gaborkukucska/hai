@@ -55,6 +55,7 @@ $RECYCLE.BIN/
 /local/
 /scratch/
 /experiments/
+_workspace/
 
 # Node.js (for UI components)
 node_modules/
