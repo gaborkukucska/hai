@@ -424,7 +424,7 @@ impl Installer {
             
             // Step 5: Set up SSH keys and deploy (if user wants to proceed)
             if self.prompt_deploy_mesh()? {
-                self.setup_and_deploy_mesh(&capabilities, credentials_map).await?;
+                self.setup_and_deploy_mesh(&capabilities, credentials_map, &remote_devices).await?;
             } else {
                 info!("\n⚠️  Skipping mesh deployment");
                 info!("📋 You can deploy later using the hainet-seed CLI");
@@ -452,31 +452,38 @@ impl Installer {
     }
     
     /// Set up SSH keys and deploy to mesh
-    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities], credentials_map: std::collections::HashMap<String, (String, String)>) -> Result<()> {
+    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities], credentials_map: std::collections::HashMap<String, (String, String)>, scanned_devices: &[DeviceCandidate]) -> Result<()> {
         info!("\n🔐 Setting up SSH keys and deploying to mesh...");
         
-        // Step 1: Generate SSH key pair
+        // Step 1: Generate SSH key pair (idempotent — reuses existing key)
         let key_manager = SSHKeyManager::new()?;
         key_manager.generate_key_pair("hainet-mesh")?;
 
-        // Step 2: Distribute SSH key to all devices
-        info!("\n🔐 Distributing SSH keys for passwordless access...");
+        // Step 2: Distribute SSH key and set up passwordless sudo on devices that used password auth
+        // (Skip devices that already authenticated via mesh key — they have it)
+        info!("\n🔐 Distributing mesh keys and configuring sudo access...");
         for (ip, (username, password)) in &credentials_map {
+            if password.is_empty() {
+                info!("✓ {} — already configured (skipping)", ip);
+                continue;
+            }
             match key_manager.copy_to_remote(ip, username, password) {
-                Ok(_) => info!("✓ SSH key distributed successfully to {}", ip),
-                Err(e) => info!("⚠️  Failed to distribute SSH key to {}: {}", ip, e),
+                Ok(_) => info!("✓ Mesh key distributed to {}", ip),
+                Err(e) => info!("⚠️  Failed to distribute mesh key to {}: {}", ip, e),
+            }
+            // Set up passwordless sudo for hainet commands while we still have the password
+            if let Err(e) = key_manager.setup_sudoers_on_remote(ip, username, password) {
+                info!("⚠️  Could not configure sudoers on {}: {}", ip, e);
             }
         }
         
-        // The username is now collected per-device, so this generic prompt is no longer needed.
-        // We will extract the username from the credentials_map when calling deploy_all.
         let username = credentials_map.values().next().map(|(u, _)| u.clone()).unwrap_or_else(|| "root".to_string());
         
-        // Step 3: Display manual key setup instructions (now automated)
-        info!("\n📋 SSH Key Setup:");
+        // Step 3: Display key info
+        info!("\n📋 HAI-Net Mesh Key:");
         info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        info!("Public key location: {}", key_manager.public_key_path().display());
-        info!("NOTE: Public key will be automatically distributed.");
+        info!("Key location: {}", key_manager.private_key_path().display());
+        info!("This key persists for re-installs, updates, and uninstall.");
         info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         
         // Step 4: Assign roles and deploy
@@ -495,6 +502,29 @@ impl Installer {
                 SSHClient::new(ip, credentials)
             };
             orchestrator.deploy_all(&username, &credentials_map, client_factory).await?;
+            
+            // Step 5: Save mesh manifest with MAC addresses for IP change resilience
+            use crate::installer::ssh_keys::{MeshManifest, MeshNode};
+            let manifest = MeshManifest {
+                updated_at: chrono::Utc::now().to_rfc3339(),
+                nodes: orchestrator.assignments().iter().map(|a| {
+                    let node_username = credentials_map.get(&a.ip)
+                        .map(|(u, _)| u.clone())
+                        .unwrap_or_else(|| username.clone());
+                    // Look up MAC address from scan results
+                    let mac = scanned_devices.iter()
+                        .find(|d| d.ip == a.ip)
+                        .and_then(|d| d.mac_address.clone());
+                    MeshNode {
+                        ip: a.ip.clone(),
+                        hostname: a.hostname.clone(),
+                        username: node_username,
+                        role: format!("{}", a.role),
+                        mac_address: mac,
+                    }
+                }).collect(),
+            };
+            key_manager.save_manifest(&manifest)?;
             
             let summary = orchestrator.summary();
             info!("\n📊 Deployment Summary:");
@@ -533,11 +563,109 @@ impl Installer {
         let mut capabilities = Vec::new();
         let mut credentials_map = HashMap::new();
         
+        // Check if we have a saved mesh manifest and key for re-installs
+        let key_manager = SSHKeyManager::new()?;
+        let manifest = key_manager.load_manifest();
+        let has_mesh_key = key_manager.has_key_pair();
+        
+        if has_mesh_key && manifest.is_some() {
+            info!("🔑 Found existing HAI-Net mesh key — attempting key-based auth (no passwords needed)...");
+            
+            // Check for IP changes: try to reconnect manifest nodes that aren't in the scan
+            if let Some(ref m) = manifest {
+                for mnode in &m.nodes {
+                    let still_in_scan = devices.iter().any(|d| d.ip == mnode.ip);
+                    if !still_in_scan {
+                        // This node's IP may have changed — try to find it by MAC or hostname
+                        let new_ip = devices.iter().find(|d| {
+                            // Match by MAC address (most reliable)
+                            if let (Some(ref scan_mac), Some(ref manifest_mac)) = (&d.mac_address, &mnode.mac_address) {
+                                if scan_mac.to_lowercase() == manifest_mac.to_lowercase() {
+                                    return true;
+                                }
+                            }
+                            // Fall back to hostname match
+                            if let Some(ref scan_host) = d.hostname {
+                                if scan_host.to_lowercase() == mnode.hostname.to_lowercase() {
+                                    return true;
+                                }
+                            }
+                            false
+                        });
+                        
+                        if let Some(found) = new_ip {
+                            info!("🔄 IP change detected for {}: {} → {} (matched by {})",
+                                mnode.hostname, mnode.ip, found.ip,
+                                if found.mac_address.is_some() { "MAC address" } else { "hostname" }
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
         // Then assess remote devices
         for device in devices {
             info!("\n🔍 Assessing device: {}", device.ip);
             
-            // Retry loop for authentication
+            // Try 1: If we have a mesh key, try key auth silently first
+            if has_mesh_key {
+                // Find username: check manifest by current IP, then by MAC/hostname for moved devices
+                let username = manifest.as_ref()
+                    .and_then(|m| {
+                        // Direct IP match first
+                        m.nodes.iter().find(|n| n.ip == device.ip)
+                            .or_else(|| {
+                                // MAC address match (device may have new IP)
+                                m.nodes.iter().find(|n| {
+                                    if let (Some(ref manifest_mac), Some(ref scan_mac)) = (&n.mac_address, &device.mac_address) {
+                                        manifest_mac.to_lowercase() == scan_mac.to_lowercase()
+                                    } else {
+                                        false
+                                    }
+                                })
+                            })
+                            .or_else(|| {
+                                // Hostname match
+                                if let Some(ref scan_host) = device.hostname {
+                                    m.nodes.iter().find(|n| n.hostname.to_lowercase() == scan_host.to_lowercase())
+                                } else {
+                                    None
+                                }
+                            })
+                    })
+                    .map(|n| n.username.clone())
+                    .unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "root".to_string()));
+                
+                if key_manager.test_mesh_key_auth(&device.ip, &username) {
+                    info!("✓ Mesh key auth succeeded for {}@{}", username, device.ip);
+                    
+                    let credentials = SSHCredentials {
+                        username: username.clone(),
+                        password: String::new(),
+                    };
+                    let mut client = SSHClient::new(device.ip.clone(), credentials);
+                    
+                    if client.connect().is_ok() {
+                        if client.authenticate_pubkey(key_manager.private_key_path(), None).is_ok() {
+                            match client.assess_capabilities() {
+                                Ok(caps) => {
+                                    credentials_map.insert(device.ip.clone(), (username, String::new()));
+                                    capabilities.push(caps);
+                                    let _ = client.disconnect();
+                                    continue; // Skip password prompt
+                                }
+                                Err(e) => {
+                                    info!("⚠️  Key auth worked but capability assessment failed: {}", e);
+                                }
+                            }
+                        }
+                        let _ = client.disconnect();
+                    }
+                }
+            }
+            
+            // Try 2: Fall back to password-based authentication
             loop {
                 // Prompt for credentials per device (they might differ)
                 print!("Username for {} (default: current user): ", device.ip);

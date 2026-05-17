@@ -25,15 +25,14 @@ uuid = { workspace = true }
 config = { workspace = true }
 futures = { workspace = true }
 
-# Tauri for desktop app
-tauri = { version = "1.0", features = ["api-all"] }
-tauri-build = { version = "1.0", features = [] }
+# Tauri for desktop app (will be added when UI is implemented)
+# tauri = { version = "2.0", features = [] }
 
 # WebSocket for real-time communication
 tungstenite = { workspace = true }
 
 [build-dependencies]
-tauri-build = { version = "1.0", features = [] }
+# tauri-build = { version = "2.0", features = [] }
 
 [dev-dependencies]
 tempfile = "3.0"

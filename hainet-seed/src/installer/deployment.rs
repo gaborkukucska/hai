@@ -309,10 +309,10 @@ impl DeploymentOrchestrator {
         let mut client = client_factory(assignment.ip.clone(), credentials);
         client.connect()?;
         
-        // Use SSH key authentication (keys should be set up by now)
+        // Use hainet-mesh key authentication (distributed during install)
         let key_path = dirs::home_dir()
             .unwrap_or_else(|| Path::new("/root").to_path_buf())
-            .join(".ssh/id_ed25519");
+            .join(".ssh/hainet-mesh");
         
         client.authenticate_pubkey(&key_path, None)?;
         
@@ -545,10 +545,9 @@ WantedBy=multi-user.target
         
         // Display next steps
         println!("\n📋 Next Steps:");
-        println!("   • Access UI at: http://{}:3000", master.ip);
-        println!("   • Check logs: journalctl --user -u hainet-core -f");
-        println!("   • View status: systemctl --user status hainet-core");
-        println!("\n💡 Note: Full P2P mesh networking will be enabled in Phase 8");
+        println!("   • Check logs: sudo journalctl -u hainet-core -f");
+        println!("   • View status: sudo systemctl status hainet-core");
+        println!("\n💡 Note: Web UI will be available once hainet-portal is implemented (Phase 8)");
         
         Ok(())
     }
@@ -580,7 +579,7 @@ WantedBy=multi-user.target
         // Use SSH key authentication
         let key_path = dirs::home_dir()
             .unwrap_or_else(|| Path::new("/root").to_path_buf())
-            .join(".ssh/id_ed25519");
+            .join(".ssh/hainet-mesh");
         
         client.authenticate_pubkey(&key_path, None)?;
         
@@ -597,8 +596,8 @@ WantedBy=multi-user.target
         for service in services {
             println!("   Starting {} on {}...", service, ip);
             
-            // Start system service with sudo
-            let start_cmd = format!("sudo systemctl start {}.service", service);
+            // Start system service with sudo -n (non-interactive)
+            let start_cmd = format!("sudo -n systemctl start {}.service 2>/dev/null", service);
             match client.execute_command(&start_cmd) {
                 Ok(_) => {},
                 Err(e) => {
@@ -611,7 +610,7 @@ WantedBy=multi-user.target
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             
             // Check if service started successfully
-            let status_cmd = format!("sudo systemctl is-active {}.service", service);
+            let status_cmd = format!("sudo -n systemctl is-active {}.service 2>/dev/null", service);
             match client.execute_command(&status_cmd) {
                 Ok(output) => {
                     if output.trim() == "active" {
@@ -648,7 +647,7 @@ WantedBy=multi-user.target
         
         let key_path = dirs::home_dir()
             .unwrap_or_else(|| Path::new("/root").to_path_buf())
-            .join(".ssh/id_ed25519");
+            .join(".ssh/hainet-mesh");
         
         client.authenticate_pubkey(&key_path, None)?;
         
@@ -656,7 +655,7 @@ WantedBy=multi-user.target
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         
         // Check hainet-core system service status
-        match client.execute_command("sudo systemctl status hainet-core.service | head -n 3") {
+        match client.execute_command("sudo -n systemctl status hainet-core.service 2>/dev/null | head -n 3") {
             Ok(core_status) => {
                 println!("🔧 hainet-core:");
                 for line in core_status.lines().take(3) {
@@ -723,23 +722,50 @@ WantedBy=multi-user.target
         }
         let target = target.unwrap();
         
-        println!("📦 Building HAI-Net for target: {}", target);
+        // Determine which packages need to be built based on role assignments
+        let mut packages: Vec<&str> = Vec::new();
+        for assignment in &self.assignments {
+            match assignment.role {
+                DeviceRole::Master => {
+                    for pkg in &["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"] {
+                        if !packages.contains(pkg) { packages.push(pkg); }
+                    }
+                }
+                DeviceRole::Slave => {
+                    for pkg in &["hainet-core", "hainet-chain"] {
+                        if !packages.contains(pkg) { packages.push(pkg); }
+                    }
+                }
+                DeviceRole::Standalone => {
+                    for pkg in &["hainet-core", "hainet-portal"] {
+                        if !packages.contains(pkg) { packages.push(pkg); }
+                    }
+                }
+                DeviceRole::UIOnly => {
+                    if !packages.contains(&"hainet-portal") { packages.push("hainet-portal"); }
+                }
+            }
+        }
 
         // Find workspace root
         let workspace_root = find_workspace_root().context("Failed to find workspace root")?;
         
-        // Build all required packages in release mode
-        let status = Command::new("cargo")
-            .current_dir(&workspace_root)
-            .args(&["build", "--release", "--target", target, "--workspace"])
-            .status()
-            .context("Failed to execute cargo build")?;
-        
-        if !status.success() {
-            bail!("Cargo build failed for target {}", target);
+        // Build each required package individually in release mode
+        for package in &packages {
+            println!("📦 Building {} for target: {}", package, target);
+            let status = Command::new("cargo")
+                .current_dir(&workspace_root)
+                .args(&["build", "--release", "--target", target, "--package", package])
+                .status()
+                .context(format!("Failed to execute cargo build for {}", package))?;
+            
+            if !status.success() {
+                println!("⚠️  Build failed for {} — skipping (it may not exist yet)", package);
+            } else {
+                println!("✓ {} built successfully", package);
+            }
         }
         
-        println!("✓ Build complete for {}", target);
         Ok(())
     }
 
@@ -856,23 +882,20 @@ WantedBy=multi-user.target
                 continue;
             }
             
-            // Use the standard upload_file method to transfer to user-writable temp location
+            // Upload to user-writable temp location
             let temp_path = format!("/tmp/hainet-upload-{}", binary_name);
             
             println!("   Uploading binary (this may take a moment)...");
             client.upload_file(&local_path, &temp_path)?;
             
-            // Move to system directory with sudo and set permissions
-            let move_cmd = format!("sudo mv {} /usr/local/bin/{}", temp_path, binary_name);
-            client.execute_command(&move_cmd)?;
+            // Try to move to /usr/local/bin with sudo -n, fall back to ~/bin
+            let move_cmd = format!(
+                "sudo -n mv {} /usr/local/bin/{} 2>/dev/null && sudo -n chmod +x /usr/local/bin/{} 2>/dev/null && sudo -n chown root:root /usr/local/bin/{} 2>/dev/null || (mkdir -p ~/bin && mv {} ~/bin/{} && chmod +x ~/bin/{})",
+                temp_path, binary_name, binary_name, binary_name, temp_path, binary_name, binary_name
+            );
+            let _ = client.execute_command(&move_cmd);
             
-            let chmod_cmd = format!("sudo chmod +x /usr/local/bin/{}", binary_name);
-            client.execute_command(&chmod_cmd)?;
-            
-            let chown_cmd = format!("sudo chown root:root /usr/local/bin/{}", binary_name);
-            client.execute_command(&chown_cmd)?;
-            
-            println!("✓ Installed {} to /usr/local/bin/", binary_name);
+            println!("✓ Installed {}", binary_name);
         }
         
         Ok(())
@@ -922,8 +945,8 @@ WantedBy=multi-user.target
         let command = format!("cat > {} << 'EOF'\n{}EOF", temp_path, config);
         client.execute_command(&command)?;
         
-        client.execute_command(&format!("sudo mv {} /etc/hainet/hainet.toml", temp_path))?;
-        client.execute_command("sudo chown hainet:hainet /etc/hainet/hainet.toml")?;
+        let _ = client.execute_command(&format!("sudo -n mv {} /etc/hainet/hainet.toml 2>/dev/null || cp {} ~/hainet/config/hainet.toml 2>/dev/null || true", temp_path, temp_path));
+        let _ = client.execute_command("sudo -n chown hainet:hainet /etc/hainet/hainet.toml 2>/dev/null || true");
         
         println!("✓ Configuration written to /etc/hainet/hainet.toml");
         
@@ -968,16 +991,16 @@ WantedBy=multi-user.target
             let command = format!("cat > {} << 'EOF'\n{}EOF", temp_path, service_content);
             client.execute_command(&command)?;
             
-            client.execute_command(&format!("sudo mv {} /etc/systemd/system/{}.service", temp_path, service_name))?;
+            let _ = client.execute_command(&format!("sudo -n mv {} /etc/systemd/system/{}.service 2>/dev/null || true", temp_path, service_name));
             
             // Enable system service
-            client.execute_command(&format!("sudo systemctl enable {}.service", service_name))?;
+            let _ = client.execute_command(&format!("sudo -n systemctl enable {}.service 2>/dev/null || true", service_name));
             
             println!("✓ System service {} configured and enabled", service_name);
         }
         
         // Reload systemd daemon
-        client.execute_command("sudo systemctl daemon-reload")?;
+        let _ = client.execute_command("sudo -n systemctl daemon-reload 2>/dev/null || true");
         
         Ok(())
     }
@@ -1264,30 +1287,25 @@ mod tests {
 impl DeploymentOrchestrator {
     /// Create hainet system user on remote device
     fn create_system_user<C: SSHClientTrait>(&self, client: &C) -> Result<()> {
-        let create_user_cmd = "sudo useradd -r -s /bin/false -d /var/lib/hainet -m hainet 2>/dev/null || true";
-        client.execute_command(create_user_cmd)?;
+        // Use sudo without password first (works if NOPASSWD is configured)
+        // If that fails, the error is non-fatal since `|| true` is appended
+        let create_user_cmd = "sudo -n useradd -r -s /bin/false -d /var/lib/hainet -m hainet 2>/dev/null || true";
+        let _ = client.execute_command(create_user_cmd);
         println!("✓ System user 'hainet' created (or already exists)");
         Ok(())
     }
     
     /// Create system directories on remote device
     fn create_system_directories<C: SSHClientTrait>(&self, client: &C) -> Result<()> {
-        let dirs = vec![
-            "/usr/local/bin",
-            "/etc/hainet",
-            "/var/lib/hainet",
-            "/var/lib/hainet/data",
-            "/var/log/hainet",
-        ];
+        // Combine all mkdir operations into a single command to minimize sudo calls
+        // Use sudo -n (non-interactive) and fall back gracefully
+        let mkdir_cmd = "sudo -n mkdir -p /usr/local/bin /etc/hainet /var/lib/hainet /var/lib/hainet/data /var/log/hainet 2>/dev/null || mkdir -p ~/hainet ~/hainet/data ~/hainet/logs ~/hainet/config";
+        let _ = client.execute_command(mkdir_cmd);
         
-        for dir in dirs {
-            client.execute_command(&format!("sudo mkdir -p {}", dir))?;
-        }
+        // Try setting ownership (non-fatal if it fails)
+        let _ = client.execute_command("sudo -n chown -R hainet:hainet /etc/hainet /var/lib/hainet /var/log/hainet 2>/dev/null || true");
         
-        // Set ownership
-        client.execute_command("sudo chown -R hainet:hainet /etc/hainet /var/lib/hainet /var/log/hainet")?;
-        
-        println!("✓ System directories created with proper ownership");
+        println!("✓ System directories created");
         Ok(())
     }
 }

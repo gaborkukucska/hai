@@ -1,6 +1,6 @@
 //! # START OF FILE hainet-seed/src/installer/ssh_keys.rs
 //! SSH key management for passwordless authentication.
-//! Handles key generation, distribution, and verification.
+//! Uses a dedicated `hainet-mesh` key pair for mesh operations.
 
 use anyhow::{Result, Context, bail};
 use std::path::{Path, PathBuf};
@@ -10,28 +10,54 @@ use std::net::TcpStream;
 use ssh2::Session;
 use std::io::Read;
 
-/// SSH key pair manager
+/// Path to the mesh manifest file
+const MESH_MANIFEST_FILENAME: &str = "mesh.json";
+
+/// SSH key pair manager using dedicated hainet-mesh keys
 pub struct SSHKeyManager {
-    /// Path to private key (~/.ssh/id_ed25519)
+    /// Path to private key (~/.ssh/hainet-mesh)
     private_key_path: PathBuf,
-    /// Path to public key (~/.ssh/id_ed25519.pub)
+    /// Path to public key (~/.ssh/hainet-mesh.pub)
     public_key_path: PathBuf,
+    /// Path to mesh data directory (~/.hainet/)
+    hainet_dir: PathBuf,
+}
+
+/// Persistent mesh manifest — remembers the mesh between runs
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct MeshManifest {
+    /// When the manifest was last updated
+    pub updated_at: String,
+    /// Nodes in the mesh
+    pub nodes: Vec<MeshNode>,
+}
+
+/// A single node in the mesh manifest
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct MeshNode {
+    pub ip: String,
+    pub hostname: String,
+    pub username: String,
+    pub role: String,
+    /// MAC address for stable identification across IP changes (DHCP)
+    #[serde(default)]
+    pub mac_address: Option<String>,
 }
 
 impl SSHKeyManager {
-    /// Create new SSH key manager with default paths
+    /// Create new SSH key manager with dedicated hainet-mesh paths
     pub fn new() -> Result<Self> {
         let home_dir = dirs::home_dir()
             .context("Cannot determine home directory")?;
         
         let ssh_dir = home_dir.join(".ssh");
+        let hainet_dir = home_dir.join(".hainet");
         
         // Ensure .ssh directory exists
         if !ssh_dir.exists() {
             fs::create_dir_all(&ssh_dir)
                 .context("Failed to create .ssh directory")?;
             
-            // Set proper permissions (700)
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -41,9 +67,16 @@ impl SSHKeyManager {
             }
         }
         
+        // Ensure ~/.hainet directory exists
+        if !hainet_dir.exists() {
+            fs::create_dir_all(&hainet_dir)
+                .context("Failed to create .hainet directory")?;
+        }
+        
         Ok(Self {
-            private_key_path: ssh_dir.join("id_ed25519"),
-            public_key_path: ssh_dir.join("id_ed25519.pub"),
+            private_key_path: ssh_dir.join("hainet-mesh"),
+            public_key_path: ssh_dir.join("hainet-mesh.pub"),
+            hainet_dir,
         })
     }
     
@@ -53,16 +86,11 @@ impl SSHKeyManager {
     }
     
     /// Generate new SSH key pair using ed25519 algorithm
-    /// 
-    /// # Errors
-    /// Returns an error if:
-    /// - ssh-keygen command fails
-    /// - Cannot set proper file permissions
     pub fn generate_key_pair(&self, comment: &str) -> Result<()> {
-        println!("🔑 Generating SSH key pair...");
+        println!("🔑 Generating HAI-Net mesh SSH key pair...");
         
         if self.has_key_pair() {
-            println!("✓ SSH key pair already exists");
+            println!("✓ HAI-Net mesh key pair already exists at {}", self.private_key_path.display());
             return Ok(());
         }
         
@@ -89,7 +117,7 @@ impl SSHKeyManager {
             fs::set_permissions(&self.private_key_path, perms)?;
         }
         
-        println!("✓ SSH key pair generated at {}", self.private_key_path.display());
+        println!("✓ HAI-Net mesh key pair generated at {}", self.private_key_path.display());
         
         Ok(())
     }
@@ -100,15 +128,9 @@ impl SSHKeyManager {
             .context("Failed to read public key file")
     }
     
-    /// Copy public key to remote device's authorized_keys
-    /// 
-    /// This enables passwordless SSH authentication.
-    /// 
-    /// # Note
-    /// This is a placeholder. Actual implementation requires ssh2 crate
-    /// to handle the file transfer over SSH.
+    /// Copy public key to remote device's authorized_keys using password auth
     pub fn copy_to_remote(&self, ip: &str, username: &str, password: &str) -> Result<()> {
-        println!("📤 Copying public key to {}@{}...", username, ip);
+        println!("📤 Copying HAI-Net mesh key to {}@{}...", username, ip);
 
         let tcp = TcpStream::connect(format!("{}:22", ip))?;
         let mut sess = Session::new()?;
@@ -120,9 +142,10 @@ impl SSHKeyManager {
         let public_key = self.read_public_key()?;
         let mut channel = sess.channel_session()?;
         
+        // Only add the key if it's not already present
         let command = format!(
-            "mkdir -p ~/.ssh && echo '{}' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys",
-            public_key.trim()
+            "mkdir -p ~/.ssh && grep -qF '{}' ~/.ssh/authorized_keys 2>/dev/null || echo '{}' >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys",
+            public_key.trim(), public_key.trim()
         );
         
         channel.exec(&command)?;
@@ -134,38 +157,121 @@ impl SSHKeyManager {
         
         let exit_code = channel.exit_status()?;
         if exit_code == 0 {
-            println!("✓ Public key copied successfully.");
+            println!("✓ Mesh key installed on {}.", ip);
         } else {
-            bail!("Failed to copy public key. Exit code: {}", exit_code);
+            bail!("Failed to copy mesh key. Exit code: {}", exit_code);
         }
 
         Ok(())
     }
     
-    /// Test SSH connection using key-based authentication
-    /// 
-    /// # Errors
-    /// Returns an error if connection fails
-    pub fn test_key_auth(&self, ip: &str, username: &str) -> Result<bool> {
-        println!("🔐 Testing key-based authentication to {}@{}...", username, ip);
+    /// Set up passwordless sudo for hainet operations on a remote node.
+    /// This must be called while we still have the user's password (during initial install).
+    /// Creates /etc/sudoers.d/hainet granting NOPASSWD access for systemctl, file operations, etc.
+    pub fn setup_sudoers_on_remote(&self, ip: &str, username: &str, password: &str) -> Result<()> {
+        println!("🔧 Setting up passwordless sudo for HAI-Net on {}...", ip);
+
+        let tcp = TcpStream::connect(format!("{}:22", ip))?;
+        let mut sess = Session::new()?;
+        sess.set_tcp_stream(tcp);
+        sess.handshake()?;
+        sess.userauth_password(username, password)?;
         
-        let output = Command::new("ssh")
-            .arg("-o").arg("BatchMode=yes") // Disable password prompt
-            .arg("-o").arg("ConnectTimeout=5")
-            .arg("-o").arg("StrictHostKeyChecking=no")
-            .arg(format!("{}@{}", username, ip))
-            .arg("echo 'Connection successful'")
-            .output()
-            .context("Failed to execute ssh command")?;
+        // Create a sudoers entry that allows the user to run hainet-related commands without a password
+        // This is scoped to specific commands only for security
+        let sudoers_content = format!(
+            "{user} ALL=(ALL) NOPASSWD: /usr/bin/systemctl * hainet-*, /usr/bin/systemctl daemon-reload, /bin/mv /tmp/hainet-upload-* /usr/local/bin/*, /bin/mv /tmp/hainet* /etc/*, /bin/mkdir -p /usr/local/bin*, /bin/mkdir -p /etc/hainet*, /bin/mkdir -p /var/lib/hainet*, /bin/mkdir -p /var/log/hainet*, /bin/chown * hainet*, /usr/sbin/useradd *, /usr/sbin/userdel *, /usr/sbin/groupdel *, /bin/rm -f /usr/local/bin/hainet-*, /bin/rm -f /etc/systemd/system/hainet-*, /bin/rm -rf /etc/hainet*, /bin/rm -rf /var/lib/hainet*, /bin/rm -rf /var/log/hainet*, /bin/rm -rf /opt/hainet*",
+            user = username
+        );
         
-        if output.status.success() {
-            println!("✓ Key-based authentication working");
-            Ok(true)
+        // Use echo password | sudo -S to write the sudoers file
+        let command = format!(
+            "echo '{}' | sudo -S bash -c 'echo \"{}\" > /etc/sudoers.d/hainet && chmod 440 /etc/sudoers.d/hainet' 2>/dev/null",
+            password, sudoers_content
+        );
+        
+        let mut channel = sess.channel_session()?;
+        channel.exec(&command)?;
+        
+        let mut s = String::new();
+        channel.read_to_string(&mut s)?;
+        channel.wait_close()?;
+        
+        let exit_code = channel.exit_status()?;
+        if exit_code == 0 {
+            println!("✓ Passwordless sudo configured for HAI-Net commands on {}.", ip);
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            println!("⚠️  Key-based authentication failed: {}", stderr);
-            Ok(false)
+            println!("⚠️  Could not set up sudoers on {} (exit {}). sudo commands may require a password.", ip, exit_code);
         }
+
+        Ok(())
+    }
+    
+    /// Test if the hainet-mesh key can authenticate to a remote host
+    pub fn test_mesh_key_auth(&self, ip: &str, username: &str) -> bool {
+        if !self.has_key_pair() {
+            return false;
+        }
+        
+        let tcp = match TcpStream::connect(format!("{}:22", ip)) {
+            Ok(tcp) => tcp,
+            Err(_) => return false,
+        };
+        let mut sess = match Session::new() {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        sess.set_tcp_stream(tcp);
+        if sess.handshake().is_err() {
+            return false;
+        }
+        
+        sess.userauth_pubkey_file(username, None, &self.private_key_path, None).is_ok()
+    }
+    
+    /// Save the mesh manifest to ~/.hainet/mesh.json
+    pub fn save_manifest(&self, manifest: &MeshManifest) -> Result<()> {
+        let path = self.hainet_dir.join(MESH_MANIFEST_FILENAME);
+        let json = serde_json::to_string_pretty(manifest)?;
+        fs::write(&path, json)?;
+        println!("✓ Mesh manifest saved to {}", path.display());
+        Ok(())
+    }
+    
+    /// Load the mesh manifest from ~/.hainet/mesh.json
+    pub fn load_manifest(&self) -> Option<MeshManifest> {
+        let path = self.hainet_dir.join(MESH_MANIFEST_FILENAME);
+        if !path.exists() {
+            return None;
+        }
+        fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+    }
+    
+    /// Check if a saved manifest exists
+    pub fn has_manifest(&self) -> bool {
+        self.hainet_dir.join(MESH_MANIFEST_FILENAME).exists()
+    }
+    
+    /// Remove the mesh key pair and manifest (final uninstall step)
+    pub fn destroy(&self) -> Result<()> {
+        println!("🗑️  Removing HAI-Net mesh SSH key pair...");
+        if self.private_key_path.exists() {
+            fs::remove_file(&self.private_key_path)?;
+        }
+        if self.public_key_path.exists() {
+            fs::remove_file(&self.public_key_path)?;
+        }
+        
+        let manifest_path = self.hainet_dir.join(MESH_MANIFEST_FILENAME);
+        if manifest_path.exists() {
+            println!("🗑️  Removing mesh manifest...");
+            fs::remove_file(&manifest_path)?;
+        }
+        
+        println!("✓ HAI-Net mesh credentials destroyed.");
+        Ok(())
     }
     
     /// Get path to private key
@@ -195,8 +301,8 @@ mod tests {
         assert!(manager.is_ok());
         
         let manager = manager.unwrap();
-        assert!(manager.private_key_path.to_str().unwrap().contains(".ssh/id_ed25519"));
-        assert!(manager.public_key_path.to_str().unwrap().contains(".ssh/id_ed25519.pub"));
+        assert!(manager.private_key_path.to_str().unwrap().contains(".ssh/hainet-mesh"));
+        assert!(manager.public_key_path.to_str().unwrap().contains(".ssh/hainet-mesh.pub"));
     }
     
     #[test]
@@ -205,12 +311,12 @@ mod tests {
         
         assert_eq!(
             manager.private_key_path().file_name().unwrap(),
-            "id_ed25519"
+            "hainet-mesh"
         );
         
         assert_eq!(
             manager.public_key_path().file_name().unwrap(),
-            "id_ed25519.pub"
+            "hainet-mesh.pub"
         );
     }
 }
