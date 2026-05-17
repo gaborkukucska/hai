@@ -6,7 +6,7 @@
 //! 2. **System mode**: Logs to a configured directory (default `/var/log/hainet/`)
 //!    when running as a deployed systemd service.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::env;
 use std::fs;
 use std::path::PathBuf;

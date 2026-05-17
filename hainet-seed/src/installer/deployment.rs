@@ -6,6 +6,7 @@ use anyhow::{Result, bail, Context};
 use crate::installer::ssh_client::{DeviceCapabilities, SSHCredentials, SSHClientTrait};
 use std::collections::HashMap;
 use std::path::PathBuf;
+#[allow(unused_imports)]
 use tracing::{info, debug, warn};
 
 /// Device role in the HAI-Net mesh
@@ -363,9 +364,18 @@ impl DeploymentOrchestrator {
         // Step 0: Stop any existing services for clean re-deployment
         println!("🔄 Checking for existing deployment...");
         for svc in &["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"] {
-            let _ = Command::new("sudo")
-                .args(&["systemctl", "stop", &format!("{}.service", svc)])
-                .status();
+            let svc_name = format!("{}.service", svc);
+            // Only try to stop if the service unit file exists
+            let exists = Command::new("systemctl")
+                .args(["list-unit-files", &svc_name])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).contains(&svc_name))
+                .unwrap_or(false);
+            if exists {
+                let _ = Command::new("sudo")
+                    .args(&["systemctl", "stop", &svc_name])
+                    .status();
+            }
         }
 
         // Step 1: Create system user (skip if exists)
@@ -449,8 +459,6 @@ After=network.target
 
 [Service]
 Type=simple
-User=hainet
-Group=hainet
 ExecStart=/usr/local/bin/{}
 Restart=always
 RestartSec=10
@@ -966,8 +974,6 @@ WantedBy=multi-user.target
                  After=network.target\n\n\
                  [Service]\n\
                  Type=simple\n\
-                 User=hainet\n\
-                 Group=hainet\n\
                  ExecStart=/usr/local/bin/{}\n\
                  Restart=always\n\
                  RestartSec=10\n\

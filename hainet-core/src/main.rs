@@ -7,7 +7,6 @@
 
 use tracing::{info, debug, warn};
 use anyhow::Result;
-use std::convert::Infallible;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -38,7 +37,7 @@ async fn main() -> Result<()> {
         warn!("⚠  Port {} in use, health endpoint on port {}", config.network.port, health_port);
     }
 
-    // Step 4: Start minimal HTTP health endpoint
+    // Step 4: Start minimal TCP-based health endpoint (no hyper dependency issues)
     let role_for_health = config.network.role.clone();
     let health_handle = tokio::spawn(async move {
         if let Err(e) = run_health_server(health_port, &role_for_health).await {
@@ -69,53 +68,36 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Run a minimal HTTP server that serves /health for mesh health checks.
+/// Run a minimal TCP-based HTTP server for health checks.
+/// Uses raw TCP to avoid hyper version compatibility issues.
 async fn run_health_server(port: u16, role: &str) -> Result<()> {
-    use hyper::service::{make_service_fn, service_fn};
-    use hyper::{Body, Request, Response, Server, StatusCode};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let role = role.to_string();
-
-    let make_svc = make_service_fn(move |_conn| {
-        let role = role.clone();
-        async move {
-            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                let role = role.clone();
-                async move {
-                    match req.uri().path() {
-                        "/health" => {
-                            let body = format!(
-                                r#"{{"status":"ok","service":"hainet-core","role":"{}","version":"{}"}}"#,
-                                role,
-                                env!("CARGO_PKG_VERSION")
-                            );
-                            Ok::<_, Infallible>(
-                                Response::builder()
-                                    .status(StatusCode::OK)
-                                    .header("Content-Type", "application/json")
-                                    .body(Body::from(body))
-                                    .unwrap()
-                            )
-                        }
-                        _ => {
-                            Ok(Response::builder()
-                                .status(StatusCode::NOT_FOUND)
-                                .body(Body::from("Not Found"))
-                                .unwrap())
-                        }
-                    }
-                }
-            }))
-        }
-    });
-
-    let addr = ([0, 0, 0, 0], port).into();
-    debug!("Health server binding to {}", addr);
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await
+        .map_err(|e| anyhow::anyhow!("Failed to bind health endpoint on port {}: {}", port, e))?;
     
-    Server::bind(&addr)
-        .serve(make_svc)
-        .await
-        .map_err(|e| anyhow::anyhow!("Health server error: {}", e))?;
+    debug!("Health server listening on port {}", port);
 
-    Ok(())
+    loop {
+        let (mut stream, _addr) = listener.accept().await?;
+        let role = role.to_string();
+        
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            // Read the HTTP request (we don't parse it fully, any request gets health response)
+            let _ = stream.read(&mut buf).await;
+            
+            let body = format!(
+                r#"{{"status":"ok","service":"hainet-core","role":"{}","version":"{}"}}"#,
+                role,
+                env!("CARGO_PKG_VERSION")
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+    }
 }
