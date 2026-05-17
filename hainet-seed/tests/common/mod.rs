@@ -46,6 +46,7 @@ impl SSHClientTrait for MockSSHClient {
             disk_gb: 100.0,
             os: "Linux".to_string(),
             arch: "x86_64".to_string(),
+            services: vec![],
             score: 100.0,
         })
     }

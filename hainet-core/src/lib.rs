@@ -3,6 +3,7 @@
 //! Core functionality for the HAI-Net daemon including networking, storage,
 //! and service coordination.
 
+pub mod config;
 pub mod logging;
 pub mod multimodal;
 pub mod networking;

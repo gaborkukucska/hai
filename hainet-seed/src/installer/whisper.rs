@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 
 use crate::installer::platform::Platform;
 
@@ -108,16 +108,44 @@ impl WhisperInstaller {
             }
         }
         
-        // Build whisper.cpp
+        // Install build dependencies (cmake, make, gcc)
+        info!("Installing build dependencies for whisper.cpp...");
+        self.install_build_deps()?;
+        
+        // Build whisper.cpp using cmake (the project migrated from make to cmake)
         info!("Building whisper.cpp (this may take a few minutes)...");
         
-        let status = Command::new("make")
+        let cmake_config = Command::new("cmake")
             .current_dir(&install_dir)
-            .status()
-            .context("Failed to build whisper.cpp. Make sure 'make' and build tools are installed.")?;
+            .args(["-B", "build"])
+            .output()
+            .context("Failed to run cmake. Ensure cmake is installed.")?;
         
-        if !status.success() {
-            anyhow::bail!("Build failed. Check that you have gcc/clang and make installed.");
+        if !cmake_config.status.success() {
+            let stderr = String::from_utf8_lossy(&cmake_config.stderr);
+            warn!("cmake configure stderr: {}", stderr);
+            // Fall back to plain make if cmake fails (older whisper.cpp versions)
+            info!("Falling back to plain make build...");
+            let status = Command::new("make")
+                .current_dir(&install_dir)
+                .status()
+                .context("Failed to build whisper.cpp with make fallback.")?;
+            if !status.success() {
+                anyhow::bail!("Build failed with both cmake and make. Check that gcc/clang, cmake, and make are installed.");
+            }
+        } else {
+            debug!("cmake configure succeeded, building...");
+            let cmake_build = Command::new("cmake")
+                .current_dir(&install_dir)
+                .args(["--build", "build", "--config", "Release"])
+                .output()
+                .context("Failed to build whisper.cpp with cmake")?;
+            
+            if !cmake_build.status.success() {
+                let stderr = String::from_utf8_lossy(&cmake_build.stderr);
+                warn!("cmake build stderr: {}", stderr);
+                anyhow::bail!("cmake --build failed. Check build output above.");
+            }
         }
         
         // Create symlink in ~/.local/bin
@@ -143,6 +171,46 @@ impl WhisperInstaller {
         Ok(())
     }
     
+    /// Install build dependencies (cmake, gcc, make) for compiling whisper.cpp
+    fn install_build_deps(&self) -> Result<()> {
+        // Check if cmake is already available
+        if Command::new("cmake").arg("--version").output().map_or(false, |o| o.status.success()) {
+            debug!("cmake already installed");
+            return Ok(());
+        }
+
+        info!("📦 cmake not found — installing build tools...");
+
+        // Detect package manager and install
+        if Command::new("which").arg("apt-get").output().map_or(false, |o| o.status.success()) {
+            let status = Command::new("sudo")
+                .args(&["-n", "apt-get", "install", "-y", "build-essential", "cmake", "gcc", "g++", "make"])
+                .status()
+                .context("Failed to install build dependencies via apt-get")?;
+            if !status.success() {
+                warn!("⚠  apt-get install may have partially failed (sudo -n). Trying without sudo...");
+            }
+        } else if Command::new("which").arg("dnf").output().map_or(false, |o| o.status.success()) {
+            let _ = Command::new("sudo")
+                .args(&["-n", "dnf", "install", "-y", "cmake", "gcc", "gcc-c++", "make"])
+                .status();
+        } else if Command::new("which").arg("pacman").output().map_or(false, |o| o.status.success()) {
+            let _ = Command::new("sudo")
+                .args(&["-n", "pacman", "-S", "--noconfirm", "--needed", "cmake", "gcc", "make"])
+                .status();
+        } else {
+            warn!("⚠  No supported package manager found. Please install cmake, gcc, and make manually.");
+        }
+
+        // Verify cmake is now available
+        if !Command::new("cmake").arg("--version").output().map_or(false, |o| o.status.success()) {
+            anyhow::bail!("cmake is still not available after installation attempt. Please install cmake manually.");
+        }
+
+        info!("✅ Build dependencies installed");
+        Ok(())
+    }
+
     /// Install on macOS
     async fn install_macos(&self) -> Result<()> {
         info!("Installing whisper.cpp on macOS...");

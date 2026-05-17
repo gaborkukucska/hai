@@ -7,7 +7,7 @@
 //! Does NOT touch ollama, comfyui, searxng, or any other software.
 
 use anyhow::Result;
-use tracing::info;
+use tracing::{info, debug};
 use crate::installer::ssh_client::{SSHClient, SSHCredentials, SSHClientTrait};
 use crate::installer::ssh_keys::SSHKeyManager;
 
@@ -211,12 +211,21 @@ impl Uninstaller {
             }
         };
         
-        // 1. Stop and disable services
+        // 1. Stop and disable services (only those that are actually installed)
         for service in HAINET_SERVICES {
             let svc = format!("{}.service", service);
-            info!("  Stopping {}...", svc);
-            let _ = client.execute_command(&sudo_cmd(&format!("systemctl stop {}", svc)));
-            let _ = client.execute_command(&sudo_cmd(&format!("systemctl disable {}", svc)));
+            // Check if the service unit file exists before attempting stop
+            let check_cmd = format!("systemctl list-unit-files {svc} 2>/dev/null | grep -q {svc} && echo exists || echo missing");
+            let exists = client.execute_command(&check_cmd)
+                .map(|o| o.trim() == "exists")
+                .unwrap_or(false);
+            if exists {
+                info!("  Stopping {}...", svc);
+                let _ = client.execute_command(&sudo_cmd(&format!("systemctl stop {}", svc)));
+                let _ = client.execute_command(&sudo_cmd(&format!("systemctl disable {}", svc)));
+            } else {
+                debug!("  {} not installed, skipping", svc);
+            }
             let _ = client.execute_command(&sudo_cmd(&format!("rm -f /etc/systemd/system/{}", svc)));
         }
         
@@ -265,12 +274,22 @@ impl Uninstaller {
     async fn uninstall_localhost(&self) -> Result<()> {
         use std::process::Command;
 
-        // 1. Stop and disable services (ONLY hainet-*)
+        // 1. Stop and disable services (only those that are actually installed)
         for service in HAINET_SERVICES {
             let svc = format!("{}.service", service);
-            info!("  Stopping {}...", svc);
-            let _ = Command::new("sudo").args(["systemctl", "stop", &svc]).status();
-            let _ = Command::new("sudo").args(["systemctl", "disable", &svc]).status();
+            // Check if service exists before trying to stop it
+            let exists = Command::new("systemctl")
+                .args(["list-unit-files", &svc])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).contains(&svc))
+                .unwrap_or(false);
+            if exists {
+                info!("  Stopping {}...", svc);
+                let _ = Command::new("sudo").args(["systemctl", "stop", &svc]).status();
+                let _ = Command::new("sudo").args(["systemctl", "disable", &svc]).status();
+            } else {
+                debug!("  {} not installed, skipping", svc);
+            }
             let _ = Command::new("sudo").args(["rm", "-f", &format!("/etc/systemd/system/{}", svc)]).status();
         }
         let _ = Command::new("sudo").args(["systemctl", "daemon-reload"]).status();

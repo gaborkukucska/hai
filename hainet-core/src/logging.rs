@@ -1,7 +1,12 @@
 //! <!-- # START OF FILE hainet-core/src/logging.rs -->
 //! Centralized logging for the HAI-Net framework.
+//!
+//! Supports two modes:
+//! 1. **Development mode**: Logs to `<workspace_root>/logs/` when running from source.
+//! 2. **System mode**: Logs to a configured directory (default `/var/log/hainet/`)
+//!    when running as a deployed systemd service.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -11,38 +16,37 @@ use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// Finds the workspace root or falls back to a sensible default.
-fn find_workspace_root() -> Result<PathBuf> {
-    // First try to find workspace root from executable location
-    let exe_path = env::current_exe()?;
-    let mut current_dir = exe_path
-        .parent()
-        .expect("Executable must be in a directory.")
-        .to_path_buf();
+/// Finds the workspace root by traversing up from the executable path
+/// looking for a Cargo.toml with a [workspace] members section.
+/// Returns None if not found (i.e. running from a system install).
+fn find_workspace_root() -> Option<PathBuf> {
+    // First try from executable location
+    if let Ok(exe_path) = env::current_exe() {
+        let mut current_dir = exe_path
+            .parent()
+            .expect("Executable must be in a directory.")
+            .to_path_buf();
 
-    // Try traversing up from executable path
-    let original_dir = current_dir.clone();
-    loop {
-        let cargo_toml_path = current_dir.join("Cargo.toml");
-        if cargo_toml_path.exists() {
-            let toml_content =
-                fs::read_to_string(&cargo_toml_path).context("Failed to read Cargo.toml")?;
-            if let Ok(toml) = toml::from_str::<Value>(&toml_content) {
-                // Check if this is a real workspace with members (not just an empty workspace table)
-                if let Some(workspace) = toml.get("workspace") {
-                    if workspace.get("members").is_some() {
-                        return Ok(current_dir);
+        loop {
+            let cargo_toml_path = current_dir.join("Cargo.toml");
+            if cargo_toml_path.exists() {
+                if let Ok(toml_content) = fs::read_to_string(&cargo_toml_path) {
+                    if let Ok(toml) = toml::from_str::<Value>(&toml_content) {
+                        if let Some(workspace) = toml.get("workspace") {
+                            if workspace.get("members").is_some() {
+                                return Some(current_dir);
+                            }
+                        }
                     }
                 }
             }
-        }
-        if !current_dir.pop() {
-            break;
+            if !current_dir.pop() {
+                break;
+            }
         }
     }
 
-    // If we couldn't find a workspace (e.g., running from /usr/local/bin/),
-    // fall back to current working directory if it looks like a workspace
+    // Then try from current working directory
     if let Ok(cwd) = env::current_dir() {
         let cargo_toml_path = cwd.join("Cargo.toml");
         if cargo_toml_path.exists() {
@@ -50,7 +54,7 @@ fn find_workspace_root() -> Result<PathBuf> {
                 if let Ok(toml) = toml::from_str::<Value>(&toml_content) {
                     if let Some(workspace) = toml.get("workspace") {
                         if workspace.get("members").is_some() {
-                            return Ok(cwd);
+                            return Some(cwd);
                         }
                     }
                 }
@@ -58,34 +62,61 @@ fn find_workspace_root() -> Result<PathBuf> {
         }
     }
 
-    // Last resort: use /var/log/hainet/ for system-wide installations
-    // This handles cases where binaries are installed in /usr/local/bin/ or similar
-    let system_log_dir = PathBuf::from("/var/log/hainet");
-    if original_dir.starts_with("/usr") || original_dir.starts_with("/opt") {
-        return Ok(system_log_dir);
+    None
+}
+
+/// Determines the log directory for a HAI-Net application.
+///
+/// Priority:
+/// 1. Explicit `log_dir_override` (from loaded config)
+/// 2. Workspace `logs/` directory (development mode)
+/// 3. `/var/log/hainet/` (system installation)
+/// 4. `/tmp/hainet-logs/` (last resort fallback)
+fn resolve_log_dir(log_dir_override: Option<&str>) -> PathBuf {
+    // Priority 1: Explicit override from config
+    if let Some(override_dir) = log_dir_override {
+        let dir = PathBuf::from(override_dir);
+        if fs::create_dir_all(&dir).is_ok() {
+            return dir;
+        }
     }
 
-    bail!("Could not find workspace root. Not in a workspace directory, and not a system installation.");
+    // Priority 2: Workspace logs directory (dev mode)
+    if let Some(workspace_root) = find_workspace_root() {
+        let logs_dir = workspace_root.join("logs");
+        if fs::create_dir_all(&logs_dir).is_ok() {
+            return logs_dir;
+        }
+    }
+
+    // Priority 3: System log directory
+    let system_dir = PathBuf::from("/var/log/hainet");
+    if fs::create_dir_all(&system_dir).is_ok() {
+        return system_dir;
+    }
+
+    // Priority 4: Last resort — temp directory
+    let fallback = env::temp_dir().join("hainet-logs");
+    let _ = fs::create_dir_all(&fallback);
+    fallback
 }
 
 /// Initializes the logging system for a HAI-Net application.
 ///
 /// This sets up a tracing subscriber that logs to both stderr and a
-/// timestamped file in a central `logs` directory at the project root.
+/// timestamped file in the resolved log directory.
 ///
-/// The returned `WorkerGuard` must be held by the application in a manner
-/// that ensures it is not dropped until all logging is complete. Typically,
-/// this means binding it to a variable in the `main` function.
+/// The returned `WorkerGuard` must be held by the application to ensure
+/// all log output is flushed. Bind it to a variable in `main`.
 ///
 /// # Arguments
 ///
 /// * `app_name` - The name of the application, used in the log file name.
-/// * `default_level` - The default log level for this application (e.g., "debug", "info").
+/// * `default_level` - The default log level (e.g., "debug", "info").
 ///
 /// # Example
 ///
 /// ```no_run
-/// // In main.rs
 /// fn main() -> anyhow::Result<()> {
 ///     let _guard = hainet_core::logging::initialize_logging("my-app", "debug")?;
 ///     // ... application code ...
@@ -96,10 +127,19 @@ pub fn initialize_logging(
     app_name: &str,
     default_level: &str,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard> {
-    let workspace_root =
-        find_workspace_root().context("Failed to find workspace root for logging")?;
-    let logs_dir = workspace_root.join("logs");
-    std::fs::create_dir_all(&logs_dir).context("Failed to create central logs directory")?;
+    initialize_logging_with_dir(app_name, default_level, None)
+}
+
+/// Initializes logging with an optional explicit log directory override.
+///
+/// This is the primary entrypoint for deployed daemons that read their
+/// log directory from `/etc/hainet/hainet.toml`.
+pub fn initialize_logging_with_dir(
+    app_name: &str,
+    default_level: &str,
+    log_dir_override: Option<&str>,
+) -> Result<tracing_appender::non_blocking::WorkerGuard> {
+    let logs_dir = resolve_log_dir(log_dir_override);
 
     let log_file_name = format!(
         "{}-{}.log",
@@ -108,7 +148,7 @@ pub fn initialize_logging(
     );
     let log_file_path = logs_dir.join(&log_file_name);
 
-    let file_appender = tracing_appender::rolling::never(logs_dir, &log_file_name);
+    let file_appender = tracing_appender::rolling::never(&logs_dir, &log_file_name);
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
     let app_crate_name = app_name.replace('-', "_");

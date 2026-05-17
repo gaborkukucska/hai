@@ -6,6 +6,7 @@ use anyhow::{Result, bail, Context};
 use crate::installer::ssh_client::{DeviceCapabilities, SSHCredentials, SSHClientTrait};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tracing::{info, debug, warn};
 
 /// Device role in the HAI-Net mesh
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,6 +56,16 @@ pub struct DeviceAssignment {
 /// Remote deployment orchestrator
 pub struct DeploymentOrchestrator {
     assignments: Vec<DeviceAssignment>,
+}
+
+/// Returns the systemd service names that should be deployed for a given role.
+pub fn services_for_role(role: &DeviceRole) -> Vec<&'static str> {
+    match role {
+        DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"],
+        DeviceRole::Slave => vec!["hainet-core", "hainet-chain"],
+        DeviceRole::Standalone => vec!["hainet-core", "hainet-portal"],
+        DeviceRole::UIOnly => vec!["hainet-portal"],
+    }
 }
 
 impl DeploymentOrchestrator {
@@ -429,10 +440,7 @@ impl DeploymentOrchestrator {
 
         // Step 5: Create and enable systemd system services
         println!("🔧 Setting up system services...");
-        let services = match assignment.role {
-            DeviceRole::Master | DeviceRole::Slave | DeviceRole::Standalone => vec!["hainet-core", "hainet-chain"],
-            DeviceRole::UIOnly => vec!["hainet-portal"],
-        };
+        let services: Vec<&str> = services_for_role(&assignment.role);
         for service_name in &services {
             let service_content = format!(
                 "[Unit]
@@ -584,14 +592,7 @@ WantedBy=multi-user.target
         client.authenticate_pubkey(&key_path, None)?;
         
         // Determine which services to start based on role
-        let services = match role {
-            DeviceRole::Master | DeviceRole::Slave | DeviceRole::Standalone => {
-                vec!["hainet-core", "hainet-chain"]
-            },
-            DeviceRole::UIOnly => {
-                vec!["hainet-portal"]
-            },
-        };
+        let services: Vec<&str> = services_for_role(role);
         
         for service in services {
             println!("   Starting {} on {}...", service, ip);
@@ -796,7 +797,7 @@ WantedBy=multi-user.target
             
             println!("  Using webkit package: {}", webkit_pkg);
             
-            let base_deps = ["libsoup2.4-dev", "pkg-config", "libssl-dev", "libgtk-3-dev"];
+            let base_deps = ["build-essential", "cmake", "gcc", "g++", "make", "pkg-config", "libssl-dev", "libgtk-3-dev", "libsoup2.4-dev"];
             let mut install_cmd = Command::new("sudo");
             install_cmd.args(&["apt-get", "install", "-y"]).args(&base_deps).arg(webkit_pkg);
             
@@ -812,7 +813,7 @@ WantedBy=multi-user.target
         if Command::new("which").arg("dnf").output().map_or(false, |o| o.status.success()) {
             println!("📦 Detected Fedora/RHEL-based system. Installing dependencies via dnf...");
             println!("⚠️  You may be prompted for your sudo password.");
-            let deps = ["libsoup-devel", "webkit2gtk3-devel", "gtk3-devel", "openssl-devel", "pkgconf-pkg-config"];
+            let deps = ["cmake", "gcc", "gcc-c++", "make", "libsoup-devel", "webkit2gtk3-devel", "gtk3-devel", "openssl-devel", "pkgconf-pkg-config"];
             let mut install_cmd = Command::new("sudo");
             install_cmd.args(&["dnf", "install", "-y"]).args(&deps);
             
@@ -828,7 +829,7 @@ WantedBy=multi-user.target
         if Command::new("which").arg("pacman").output().map_or(false, |o| o.status.success()) {
             println!("📦 Detected Arch-based system. Installing dependencies via pacman...");
             println!("⚠️  You may be prompted for your sudo password.");
-            let deps = ["libsoup", "webkit2gtk", "gtk3", "openssl", "pkgconf"];
+            let deps = ["cmake", "gcc", "make", "libsoup", "webkit2gtk", "gtk3", "openssl", "pkgconf"];
             let mut install_cmd = Command::new("sudo");
             install_cmd.args(&["pacman", "-S", "--noconfirm", "--needed"]).args(&deps);
             
@@ -955,14 +956,7 @@ WantedBy=multi-user.target
     
     /// Set up systemd system services for the device role
     fn setup_services<C: SSHClientTrait>(&self, client: &C, role: &DeviceRole) -> Result<()> {
-        let services = match role {
-            DeviceRole::Master | DeviceRole::Slave | DeviceRole::Standalone => {
-                vec!["hainet-core", "hainet-chain"]
-            },
-            DeviceRole::UIOnly => {
-                vec!["hainet-portal"]
-            },
-        };
+        let services: Vec<&str> = services_for_role(role);
         
         for service_name in services {
             // Create systemd system service file
@@ -1082,6 +1076,7 @@ mod tests {
                 disk_gb: 100.0 + (i as f64 * 50.0),
                 os: "Linux".to_string(),
                 arch: "x86_64".to_string(),
+                services: vec![],
                 score: 0.0,
             };
             caps.calculate_score();
@@ -1178,6 +1173,7 @@ mod tests {
             disk_gb: 64.0,
             os: "Linux".to_string(),
             arch: "aarch64".to_string(),
+            services: vec![],
             score: 0.0,
         };
         mobile.calculate_score();
@@ -1192,6 +1188,7 @@ mod tests {
             disk_gb: 500.0,
             os: "Linux".to_string(),
             arch: "x86_64".to_string(),
+            services: vec![],
             score: 0.0,
         };
         desktop.calculate_score();
@@ -1221,6 +1218,7 @@ mod tests {
             disk_gb: 64.0,
             os: "Linux".to_string(),
             arch: "aarch64".to_string(),
+            services: vec![],
             score: 0.0,
         };
         mobile.calculate_score();
@@ -1245,6 +1243,7 @@ mod tests {
             disk_gb: 64.0,
             os: "Linux".to_string(),
             arch: "aarch64".to_string(),
+            services: vec![],
             score: 0.0,
         };
         phone1.calculate_score();
@@ -1258,6 +1257,7 @@ mod tests {
             disk_gb: 32.0,
             os: "Linux".to_string(),
             arch: "aarch64".to_string(),
+            services: vec![],
             score: 0.0,
         };
         phone2.calculate_score();
