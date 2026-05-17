@@ -334,8 +334,9 @@ impl WorkerAgent {
         self.update_status(&format!("Working on task {}", task_id)).await;
         
         // Execute with discovery-based approach
+        // Execute with TE Bridge delegation
         let _start_time = SystemTime::now();
-        let result = self.execute_with_discovery(&task).await;
+        let result = self.execute_with_bridge(&task).await;
         
         match result {
             Ok(deliverables) => {
@@ -414,6 +415,69 @@ impl WorkerAgent {
                 Err(e)
             }
         }
+    }
+    
+    /// Delegate task execution to the Python gRPC Bridge
+    async fn execute_with_bridge(&mut self, task: &crate::projects::Task) -> Result<Vec<String>> {
+        tracing::info!("Worker {} delegating task execution to Python TE Bridge...", self.id.name);
+        
+        let bridge_url = std::env::var("AGENT_BRIDGE_URL").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+        let mut bridge = crate::bridge::client::BridgeClient::connect(bridge_url)
+            .await
+            .context("Failed to connect to Python TE Bridge")?;
+            
+        let model = if let Some(prefs) = &self.user_settings {
+            let prefs = prefs.read().await;
+            prefs.get_model_preference("worker")
+                .await
+                .unwrap_or(None)
+                .unwrap_or_else(|| "gpt-4o".to_string())
+        } else {
+            "gpt-4o".to_string()
+        };
+            
+        bridge.initialize_agent(
+            self.id.name.clone(),
+            format!("{:?}", self.worker_type),
+            self.template.name.clone(),
+            "local".to_string(), // fallback provider 
+            model,
+            0.7,
+            self.template.system_prompt.clone(),
+            false
+        ).await?;
+        
+        let prompt = format!(
+            "Task Title: {}\nTask Description: {}\n\nPlease execute this task using your tools.", 
+            task.title, 
+            task.description
+        );
+        
+        let mut stream = bridge.send_message(
+            self.id.name.clone(),
+            "user".to_string(),
+            prompt
+        ).await?;
+        
+        let mut response = String::new();
+        while let Some(msg) = stream.message().await? {
+            match msg.r#type {
+                0 => response.push_str(&msg.content), // TextChunk
+                1 => tracing::info!("Agent {} starting tool: {} ({})", self.id.name, msg.content, msg.tool_call_id),
+                2 => {}, // ToolCallChunk
+                3 => tracing::info!("Agent {} completed tool: {}", self.id.name, msg.tool_call_id),
+                4 => break, // Complete
+                5 => return Err(anyhow::anyhow!("Bridge error: {}", msg.content)), // Error
+                _ => {}
+            }
+        }
+        
+        if response.is_empty() {
+            tracing::warn!("Agent {} returned empty response from bridge", self.id.name);
+            response = "Task executed but no response returned from bridge.".to_string();
+        }
+        
+        Ok(vec![response])
     }
     
     /// Execute assigned task with LLM-powered planning and learning (LEGACY)
