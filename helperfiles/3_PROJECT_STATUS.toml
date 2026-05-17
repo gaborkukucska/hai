@@ -94,7 +94,7 @@ decision = "Fully absorbed — no standalone build, gossip replaces Matrix for a
 
 [integration.phases.phase_1]
 name = "Agentic Core (TrippleEffect → HAI-Net)"
-status = "not_started"
+status = "completed"
 estimated_weeks = "1-6"
 tasks = [
     "Create services/agent-svc/ Python gRPC bridge",
