@@ -138,12 +138,48 @@ impl NetworkScanner {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut devices = Self::parse_nmap_output(&stdout)?;
         
+        // Try to resolve hostnames for devices that nmap missed
+        for device in &mut devices {
+            if device.hostname.is_none() {
+                device.hostname = Self::try_resolve_hostname(&device.ip);
+            }
+        }
+        
         // Step 5: Filter out the local machine
         devices.retain(|device| device.ip != local_ip_str);
         
         println!("Discovered {} devices with SSH enabled", devices.len());
         
         Ok(devices)
+    }
+    
+    /// Try to resolve hostname using getent or avahi
+    fn try_resolve_hostname(ip: &str) -> Option<String> {
+        // Try getent first (Linux standard)
+        if let Ok(output) = Command::new("getent").arg("hosts").arg(ip).output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(parts) = stdout.split_whitespace().nth(1) {
+                    if !parts.is_empty() && parts != ip {
+                        return Some(parts.to_string());
+                    }
+                }
+            }
+        }
+        
+        // Try avahi-resolve (mDNS)
+        if let Ok(output) = Command::new("avahi-resolve").arg("-a").arg(ip).output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(parts) = stdout.split_whitespace().nth(1) {
+                    if !parts.is_empty() {
+                        return Some(parts.to_string());
+                    }
+                }
+            }
+        }
+        
+        None
     }
     
     /// Parse nmap greppable output format.

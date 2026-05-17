@@ -87,10 +87,11 @@
 
 - **Multi-Device Seed Deployer (Most Mature)**: NoSlop's seed is the gold standard for multi-device deployment. Key patterns:
   - Network scanning with SSH credential caching
-  - Service discovery for existing Ollama/ComfyUI/PostgreSQL instances
-  - Weighted capability scoring (RAM 40%, GPU 30%, CPU 20%, Disk 10%) for master election
-  - Role assignment: Master (coordinator), Compute (GPU), Storage (disk), Client (UI-only)
-  - SSH-based remote deployment with proper permission management
+  - Service discovery for existing Ollama/ComfyUI/vLLM instances (✅ **PORTED TO HAINET-SEED**)
+  - Deep process inspection and custom port detection (✅ **PORTED TO HAINET-SEED**)
+  - Weighted capability scoring (RAM 40%, GPU 30%, CPU 20%, Disk 10%) for master election (✅ **PORTED TO HAINET-SEED**)
+  - Role assignment: Master (coordinator), Compute (GPU), Storage (disk), Client (UI-only) (✅ **PORTED TO HAINET-SEED**)
+  - SSH-based remote deployment with proper permission management (✅ **PORTED TO HAINET-SEED**)
   - NFS shared storage for model files across nodes
   - Apt lock detection and retry for package installations
   - SSH command timeout enforcement (paramiko limitation workaround)

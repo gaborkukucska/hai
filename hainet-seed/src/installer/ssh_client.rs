@@ -23,6 +23,13 @@ pub trait SSHClientTrait {
     fn set_permissions(&self, path: &str, mode: u32) -> Result<()>;
 }
 
+/// A discovered service running on a device
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscoveredService {
+    pub name: String,
+    pub port: u16,
+    pub details: std::collections::HashMap<String, String>,
+}
 
 /// Device capabilities assessment result
 #[derive(Debug, Clone)]
@@ -43,6 +50,8 @@ pub struct DeviceCapabilities {
     pub os: String,
     /// CPU architecture (x86_64, aarch64, armv7l)
     pub arch: String,
+    /// Discovered services running on this device
+    pub services: Vec<DiscoveredService>,
     /// Capability score (for master election)
     pub score: f64,
 }
@@ -257,6 +266,102 @@ impl SSHClient {
         let output = self.execute_command("hostname")?;
         Ok(output)
     }
+
+    /// Discover running services via process inspection
+    fn discover_services(&self) -> Result<Vec<DiscoveredService>> {
+        let mut services = Vec::new();
+        
+        // Comprehensive shell script to find processes and their ports
+        // We use ss or netstat to find listening ports, then map to processes
+        let script = r#"
+        # Check for Ollama
+        if pgrep -x ollama >/dev/null || pgrep -f "ollama serve" >/dev/null; then
+            PORT=$(ss -tulnp 2>/dev/null | grep ollama | awk '{print $5}' | cut -d':' -f2 | head -n 1)
+            if [ -z "$PORT" ]; then PORT=11434; fi
+            echo "ollama:$PORT"
+        fi
+        
+        # Check for ComfyUI
+        if pgrep -f "main.py.*comfyui" >/dev/null || pgrep -f "ComfyUI/main.py" >/dev/null; then
+            PORT=$(pgrep -f "ComfyUI/main.py" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8188; fi
+            echo "comfyui:$PORT"
+        fi
+        
+        # Check for vLLM
+        if pgrep -f "vllm.entrypoints.openai.api_server" >/dev/null; then
+            PORT=$(pgrep -f "vllm.entrypoints" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8000; fi
+            echo "vllm:$PORT"
+        fi
+
+        # Check for LiteLLM
+        if pgrep -f "litellm" >/dev/null; then
+            PORT=$(pgrep -f "litellm" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=4000; fi
+            echo "litellm:$PORT"
+        fi
+
+        # Check for SearXNG
+        if pgrep -f "searxng" >/dev/null || pgrep -f "searx" >/dev/null; then
+            PORT=$(ss -tulnp 2>/dev/null | grep -i 'searx' | awk '{print $5}' | cut -d':' -f2 | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8080; fi
+            echo "searxng:$PORT"
+        fi
+        "#;
+        
+        if let Ok(output) = self.execute_command(&format!("sh -c '{}'", script)) {
+            for line in output.lines() {
+                if let Some((name, port_str)) = line.split_once(':') {
+                    if let Ok(port) = port_str.parse::<u16>() {
+                        services.push(DiscoveredService {
+                            name: name.to_string(),
+                            port,
+                            details: std::collections::HashMap::new(),
+                        });
+                    }
+                }
+            }
+        }
+        
+        // For each LLM provider, try to query its models if possible
+        for s in &mut services {
+            if s.name == "ollama" || s.name == "vllm" {
+                // Determine API endpoint
+                let endpoint = if s.name == "ollama" {
+                    format!("http://localhost:{}/api/tags", s.port)
+                } else {
+                    format!("http://localhost:{}/v1/models", s.port)
+                };
+                
+                // Use curl on the remote machine to query models
+                let curl_cmd = format!("curl -s --max-time 3 {}", endpoint);
+                if let Ok(resp) = self.execute_command(&curl_cmd) {
+                    if s.name == "ollama" {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&resp) {
+                            if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+                                let model_names: Vec<String> = models.iter()
+                                    .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from))
+                                    .collect();
+                                s.details.insert("models".to_string(), model_names.join(","));
+                            }
+                        }
+                    } else if s.name == "vllm" {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&resp) {
+                            if let Some(data) = json.get("data").and_then(|m| m.as_array()) {
+                                let model_names: Vec<String> = data.iter()
+                                    .filter_map(|m| m.get("id").and_then(|n| n.as_str()).map(String::from))
+                                    .collect();
+                                s.details.insert("models".to_string(), model_names.join(","));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(services)
+    }
 }
 
 impl SSHClientTrait for SSHClient {
@@ -393,6 +498,9 @@ impl SSHClientTrait for SSHClient {
         // Get hostname
         let hostname = self.get_hostname()?;
         
+        // Discover services
+        let services = self.discover_services().unwrap_or_default();
+        
         let mut capabilities = DeviceCapabilities {
             ip: self.ip.clone(),
             hostname,
@@ -402,6 +510,7 @@ impl SSHClientTrait for SSHClient {
             disk_gb,
             os,
             arch,
+            services,
             score: 0.0,
         };
         
@@ -558,6 +667,7 @@ mod tests {
             disk_gb: 500.0,
             os: "Linux".to_string(),
             arch: "x86_64".to_string(),
+            services: vec![],
             score: 0.0,
         };
         
@@ -584,6 +694,7 @@ mod tests {
             disk_gb: 250.0,
             os: "Linux".to_string(),
             arch: "x86_64".to_string(),
+            services: vec![],
             score: 0.0,
         };
         
@@ -740,6 +851,7 @@ mod tests {
             disk_gb: 100.0,
             os: "Linux".to_string(),
             arch: "x86_64".to_string(),
+            services: vec![],
             score: 61.0,
         };
         mock_client.set_capabilities(caps.clone());

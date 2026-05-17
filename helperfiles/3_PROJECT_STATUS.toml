@@ -113,7 +113,7 @@ tasks = [
 
 [integration.phases.phase_2]
 name = "Compute Sharing (PPLPWR → hainet-collab)"
-status = "not_started"
+status = "in_progress"
 estimated_weeks = "4-8"
 depends_on = ["phase_1"]
 tasks = [
@@ -124,9 +124,9 @@ tasks = [
     "Port adapter pattern (Petals, Prime Intellect)",
     "Port policy system to Rust",
     "Replace Matrix with gossip (ComputeAnnouncement packet type)",
-    "Merge NoSlop Seed service discovery into hainet-seed",
-    "Port NoSlop role assignment logic",
-    "Port NoSlop SSH deployment"
+    "[DONE] Merge NoSlop Seed service discovery into hainet-seed",
+    "[DONE] Port NoSlop role assignment logic",
+    "[DONE] Port NoSlop SSH deployment"
 ]
 
 [integration.phases.phase_3]

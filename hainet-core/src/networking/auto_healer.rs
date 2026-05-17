@@ -140,7 +140,6 @@ impl AutoHealer {
                         registry.update_status(&device.peer_id, PeerStatus::Online).await?;
                     }
                 }
-                _ => {}
             }
         }
 

@@ -88,6 +88,7 @@ impl ElectionResult {
 /// Mesh topology coordinator
 pub struct MeshCoordinator {
     local_peer_id: PeerId,
+    #[allow(dead_code)]
     local_capabilities: DeviceCapabilities,
     state: Arc<RwLock<MeshState>>,
     current_master: Arc<RwLock<Option<PeerId>>>,

@@ -11,6 +11,7 @@ use uuid::Uuid;
 /// Pending request state
 struct PendingRequest {
     message: MeshMessage,
+    #[allow(dead_code)]
     started_at: SystemTime,
     response_tx: oneshot::Sender<Result<MeshResponse, String>>,
 }

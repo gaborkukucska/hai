@@ -62,8 +62,10 @@ pub struct ServiceDetector {
     /// Service registry for registration
     service_registry: Arc<ServiceRegistry>,
     /// Detection configuration
+    #[allow(dead_code)]
     config: DetectorConfig,
     /// HTTP client for probing services
+    #[allow(dead_code)]
     http_client: reqwest::Client,
     /// Discovered services cache
     discovered_services: Arc<RwLock<Vec<DiscoveredService>>>,
@@ -132,6 +134,7 @@ impl ServiceDetector {
     }
 
     /// Probe for Ollama LLM service
+    #[allow(dead_code)]
     async fn probe_ollama(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
         let endpoint = format!("http://{}:{}", ip, self.config.ollama_port);
         debug!("Probing Ollama at {}", endpoint);
@@ -185,6 +188,7 @@ impl ServiceDetector {
     }
 
     /// Probe for Whisper STT service
+    #[allow(dead_code)]
     async fn probe_whisper(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
         let endpoint = format!("http://{}:{}", ip, self.config.whisper_port);
         debug!("Probing Whisper at {}", endpoint);
@@ -221,6 +225,7 @@ impl ServiceDetector {
     }
 
     /// Probe for Piper TTS service
+    #[allow(dead_code)]
     async fn probe_piper(&self, peer_id: PeerId, ip: &str) -> Option<DiscoveredService> {
         let endpoint = format!("http://{}:{}", ip, self.config.piper_port);
         debug!("Probing Piper at {}", endpoint);
@@ -257,6 +262,7 @@ impl ServiceDetector {
     }
 
     /// Probe for MCP servers
+    #[allow(dead_code)]
     async fn probe_mcp_servers(&self, peer_id: PeerId, ip: &str) -> Vec<DiscoveredService> {
         debug!("Probing MCP servers at {}", ip);
 

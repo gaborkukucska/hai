@@ -62,35 +62,116 @@ impl Installer {
         })
     }
     
-    /// Run complete installation workflow
+    /// Run complete intelligent installation workflow
     pub async fn install(&mut self) -> Result<()> {
-        info!("🚀 Starting HAI-Net installation workflow...");
+        info!("🚀 Starting HAI-Net Mesh-First installation workflow...");
         
-        // Step 1: Check and install Ollama
-        self.install_ollama().await?;
+        // Step 1: Immediately begin by discovering devices on the network
+        // This will find localhost and remote devices, establish SSH connections,
+        // and deeply inspect what AI services are already running.
+        let _devices = self.discover_mesh_devices().await?;
         
-        // Step 2: Download default Ollama model based on tier
-        self.download_default_model().await?;
+        // Step 2: The actual deployment is now handled inside setup_and_deploy_mesh
+        // which is called by discover_mesh_devices if the user approves the plan.
         
-        // Step 3: Check and install whisper.cpp
-        self.install_whisper().await?;
+        // Step 3: Handle local dependencies intelligently based on discovery
+        // To do this, we re-assess localhost to check the services list
+        // (Since discover_mesh_devices consumes the capabilities locally inside its flow)
+        let localhost_caps = self.assess_localhost_capabilities_with_services().await.unwrap_or_else(|_| {
+            crate::installer::ssh_client::DeviceCapabilities {
+                ip: "127.0.0.1".to_string(),
+                hostname: "localhost".to_string(),
+                cpu_cores: 1,
+                ram_gb: 1.0,
+                gpu: None,
+                disk_gb: 10.0,
+                os: "Linux".to_string(),
+                arch: "x86_64".to_string(),
+                services: vec![],
+                score: 0.0,
+            }
+        });
+
+        let has_ollama = localhost_caps.services.iter().any(|s| s.name == "ollama");
         
-        // Step 4: Download default Whisper model based on tier
-        self.download_whisper_model().await?;
-        
-        // Step 5: Check and install Piper TTS
-        self.install_piper().await?;
-        
-        // Step 6: Download default Piper voice model based on tier
-        self.download_piper_model().await?;
-        
-        // Step 7: Optionally set up multi-device mesh
-        if self.prompt_mesh_setup()? {
-            self.discover_mesh_devices().await?;
+        if has_ollama {
+            info!("✅ Intelligent skip: Ollama is already running locally. Skipping installation.");
+        } else {
+            self.install_ollama().await?;
         }
         
-        info!("✅ Installation complete!");
+        self.download_default_model().await?;
+        self.install_whisper().await?;
+        self.download_whisper_model().await?;
+        self.install_piper().await?;
+        self.download_piper_model().await?;
+        
+        info!("✅ Installation workflow complete!");
         Ok(())
+    }
+    
+    /// Assess localhost capabilities with deep service discovery
+    async fn assess_localhost_capabilities_with_services(&self) -> Result<crate::installer::ssh_client::DeviceCapabilities> {
+        let mut caps = self.assess_localhost_capabilities().await?;
+        
+        // Use a dummy SSHClient connected to 127.0.0.1 just to run local commands
+        // Actually, since we're local, we can just run the commands via std::process::Command
+        let script = r#"
+        # Check for Ollama
+        if pgrep -x ollama >/dev/null || pgrep -f "ollama serve" >/dev/null; then
+            PORT=$(ss -tulnp 2>/dev/null | grep ollama | awk '{print $5}' | cut -d':' -f2 | head -n 1)
+            if [ -z "$PORT" ]; then PORT=11434; fi
+            echo "ollama:$PORT"
+        fi
+        
+        # Check for ComfyUI
+        if pgrep -f "main.py.*comfyui" >/dev/null || pgrep -f "ComfyUI/main.py" >/dev/null; then
+            PORT=$(pgrep -f "ComfyUI/main.py" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8188; fi
+            echo "comfyui:$PORT"
+        fi
+        
+        # Check for vLLM
+        if pgrep -f "vllm.entrypoints.openai.api_server" >/dev/null; then
+            PORT=$(pgrep -f "vllm.entrypoints" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8000; fi
+            echo "vllm:$PORT"
+        fi
+
+        # Check for LiteLLM
+        if pgrep -f "litellm" >/dev/null; then
+            PORT=$(pgrep -f "litellm" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=4000; fi
+            echo "litellm:$PORT"
+        fi
+
+        # Check for SearXNG
+        if pgrep -f "searxng" >/dev/null || pgrep -f "searx" >/dev/null; then
+            PORT=$(ss -tulnp 2>/dev/null | grep -i 'searx' | awk '{print $5}' | cut -d':' -f2 | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8080; fi
+            echo "searxng:$PORT"
+        fi
+        "#;
+        
+        if let Ok(output) = std::process::Command::new("sh").arg("-c").arg(script).output() {
+            let out_str = String::from_utf8_lossy(&output.stdout);
+            for line in out_str.lines() {
+                if let Some((name, port_str)) = line.split_once(':') {
+                    if let Ok(port) = port_str.parse::<u16>() {
+                        caps.services.push(crate::installer::ssh_client::DiscoveredService {
+                            name: name.to_string(),
+                            port,
+                            details: std::collections::HashMap::new(),
+                        });
+                    }
+                }
+            }
+        }
+        
+        // We can skip the curl queries for models here since download_default_model 
+        // does its own self.ollama.list_models() check.
+        
+        Ok(caps)
     }
     
     /// Install Ollama if not present
@@ -119,18 +200,26 @@ impl Installer {
     
     /// Download default model based on system tier
     async fn download_default_model(&mut self) -> Result<()> {
+        // First check if the user already has models downloaded
+        let existing_models = self.ollama.list_models().await.unwrap_or_default();
+        if !existing_models.is_empty() {
+            info!("✅ Found existing models: {}", existing_models.join(", "));
+            info!("Skipping default model download.");
+            return Ok(());
+        }
+
         let model_name = match self.tier {
             SystemTier::Tier1 => {
-                info!("📦 Tier 1 system detected - downloading gemma2:2b");
-                "gemma2:2b"
+                info!("📦 Tier 1 system detected - downloading qwen2.5:0.5b");
+                "qwen2.5:0.5b"
             }
             SystemTier::Tier2 => {
-                info!("📦 Tier 2 system detected - downloading gemma2:4b");
-                "gemma2:4b"
+                info!("📦 Tier 2 system detected - downloading gemma2:2b");
+                "gemma2:2b"
             }
             SystemTier::Tier3 | SystemTier::Tier4 => {
-                info!("📦 Tier 3/4 system detected - downloading gemma3:12b-it");
-                "gemma3:12b-it"
+                info!("📦 Tier 3/4 system detected - downloading gemma2:9b");
+                "gemma2:9b"
             }
         };
         
@@ -238,6 +327,7 @@ impl Installer {
     }
     
     /// Prompt user if they want to set up multi-device mesh
+    #[allow(dead_code)]
     fn prompt_mesh_setup(&self) -> Result<bool> {
         use std::io::{self, Write};
         
@@ -260,7 +350,24 @@ impl Installer {
         
         // Step 2: Scan local network
         let scanner = NetworkScanner::new()?;
-        let devices = scanner.scan_local_network()?;
+        let mut devices = scanner.scan_local_network()?;
+        
+        // Always ensure localhost is in the device list
+        let local_ip = local_ip_address::local_ip().map(|ip| ip.to_string()).unwrap_or_else(|_| "127.0.0.1".to_string());
+        if !devices.iter().any(|d| d.ip == local_ip || d.ip == "127.0.0.1") {
+            let actual_hostname = std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| "localhost".to_string());
+                
+            devices.push(DeviceCandidate {
+                ip: local_ip.clone(),
+                hostname: Some(actual_hostname),
+                mac_address: None,
+            });
+        }
         
         // Step 3: Display discovered devices
         if devices.is_empty() {
@@ -274,11 +381,15 @@ impl Installer {
             info!("  [{}] {} ({})", i + 1, device.ip, hostname_display);
         }
         
-        // Step 4: Assess device capabilities (if user wants to proceed)
         if self.prompt_assess_devices()? {
-            let local_ip = local_ip_address::local_ip().ok();
+            let local_ips: Vec<String> = local_ip_address::list_afinet_netifas()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, ip)| ip.to_string())
+                .collect();
+                
             let (local_devices, remote_devices): (Vec<_>, Vec<_>) = devices.clone().into_iter().partition(|d| {
-                local_ip.map_or(false, |ip| d.ip == ip.to_string())
+                d.ip == "127.0.0.1" || d.ip == "localhost" || local_ips.contains(&d.ip)
             });
 
             let (mut capabilities, credentials_map) = self.assess_device_capabilities(&remote_devices).await?;
@@ -597,6 +708,94 @@ impl Installer {
             .and_then(|o| String::from_utf8(o.stdout).ok())
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|| "Unknown".to_string());
+            
+        // Use our new comprehensive discovery script for local services too
+        let mut services = Vec::new();
+        let script = r#"
+        # Check for Ollama
+        if pgrep -x ollama >/dev/null || pgrep -f "ollama serve" >/dev/null; then
+            PORT=$(ss -tulnp 2>/dev/null | grep ollama | awk '{print $5}' | cut -d':' -f2 | head -n 1)
+            if [ -z "$PORT" ]; then PORT=11434; fi
+            echo "ollama:$PORT"
+        fi
+        
+        # Check for ComfyUI
+        if pgrep -f "main.py.*comfyui" >/dev/null || pgrep -f "ComfyUI/main.py" >/dev/null; then
+            PORT=$(pgrep -f "ComfyUI/main.py" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8188; fi
+            echo "comfyui:$PORT"
+        fi
+        
+        # Check for vLLM
+        if pgrep -f "vllm.entrypoints.openai.api_server" >/dev/null; then
+            PORT=$(pgrep -f "vllm.entrypoints" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8000; fi
+            echo "vllm:$PORT"
+        fi
+
+        # Check for LiteLLM
+        if pgrep -f "litellm" >/dev/null; then
+            PORT=$(pgrep -f "litellm" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+            if [ -z "$PORT" ]; then PORT=4000; fi
+            echo "litellm:$PORT"
+        fi
+
+        # Check for SearXNG
+        if pgrep -f "searxng" >/dev/null || pgrep -f "searx" >/dev/null; then
+            PORT=$(ss -tulnp 2>/dev/null | grep -i 'searx' | awk '{print $5}' | cut -d':' -f2 | head -n 1)
+            if [ -z "$PORT" ]; then PORT=8080; fi
+            echo "searxng:$PORT"
+        fi
+        "#;
+        
+        if let Ok(output) = Command::new("sh").arg("-c").arg(script).output() {
+            let out_str = String::from_utf8_lossy(&output.stdout);
+            for line in out_str.lines() {
+                if let Some((name, port_str)) = line.split_once(':') {
+                    if let Ok(port) = port_str.parse::<u16>() {
+                        services.push(crate::installer::ssh_client::DiscoveredService {
+                            name: name.to_string(),
+                            port,
+                            details: std::collections::HashMap::new(),
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Models querying for local services
+        for s in &mut services {
+            if s.name == "ollama" || s.name == "vllm" {
+                let endpoint = if s.name == "ollama" {
+                    format!("http://localhost:{}/api/tags", s.port)
+                } else {
+                    format!("http://localhost:{}/v1/models", s.port)
+                };
+                let curl_cmd = format!("curl -s --max-time 3 {}", endpoint);
+                if let Ok(output) = Command::new("sh").arg("-c").arg(&curl_cmd).output() {
+                    let resp = String::from_utf8_lossy(&output.stdout);
+                    if s.name == "ollama" {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&resp) {
+                            if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+                                let model_names: Vec<String> = models.iter()
+                                    .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from))
+                                    .collect();
+                                s.details.insert("models".to_string(), model_names.join(","));
+                            }
+                        }
+                    } else if s.name == "vllm" {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&resp) {
+                            if let Some(data) = json.get("data").and_then(|m| m.as_array()) {
+                                let model_names: Vec<String> = data.iter()
+                                    .filter_map(|m| m.get("id").and_then(|n| n.as_str()).map(String::from))
+                                    .collect();
+                                s.details.insert("models".to_string(), model_names.join(","));
+                            }
+                        }
+                    }
+                }
+            }
+        }
         
         let mut capabilities = DeviceCapabilities {
             ip: local_ip,
@@ -607,6 +806,7 @@ impl Installer {
             disk_gb,
             os,
             arch,
+            services,
             score: 0.0,
         };
         
@@ -622,7 +822,7 @@ impl Installer {
             return;
         }
         
-        info!("\n📊 Device Capabilities Summary:");
+        info!("\n📊 Device Capabilities & Discovered Services Summary:");
         info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         
         for caps in capabilities {
@@ -633,6 +833,19 @@ impl Installer {
             info!("  Disk: {:.1} GB available", caps.disk_gb);
             info!("  OS: {} ({})", caps.os, caps.arch);
             info!("  Score: {:.1}", caps.score);
+            
+            if caps.services.is_empty() {
+                info!("  Services: None detected");
+            } else {
+                info!("  Services:");
+                for service in &caps.services {
+                    let mut details_str = String::new();
+                    if let Some(models) = service.details.get("models") {
+                        details_str = format!(" [Models: {}]", models);
+                    }
+                    info!("    - {} (Port: {}){}", service.name, service.port, details_str);
+                }
+            }
             info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         }
         
@@ -642,8 +855,8 @@ impl Installer {
             info!("   Score: {:.1} (Best hardware for coordination)", master.score);
         }
         
-        info!("\n⚠️  Remote deployment will be available in Module 3");
-        info!("📋 Next: SSH key setup and automated deployment");
+        info!("\n📋 Review the deployment plan above. The orchestrator will intelligently");
+        info!("   skip installing services that are already running.");
     }
 }
 
