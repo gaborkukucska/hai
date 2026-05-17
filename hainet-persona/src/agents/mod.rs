@@ -24,6 +24,12 @@ pub mod llm_config;
 pub mod metrics;
 pub mod session_tasks;
 
+// --- TrippleEffect ported modules ---
+pub mod cycle_engine;
+pub mod loop_detector;
+pub mod failover;
+pub mod context_manager;
+
 // Re-export core agent types
 pub use admin::AdminAgent;
 pub use guardian::{

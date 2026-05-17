@@ -236,7 +236,7 @@ mod tests {
         
         // Verify version updated
         let version = runner.current_version().await.unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
         
         // Verify new columns exist
         let result = sqlx::query("SELECT pm_feedback, revision_count, max_revisions FROM tasks")
@@ -275,9 +275,9 @@ mod tests {
         // Should not error
         assert!(result.is_ok());
         
-        // Version should still be 1
+        // Version should still be 2
         let version = runner.current_version().await.unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 
     #[tokio::test]
@@ -305,7 +305,7 @@ mod tests {
         runner.run_migrations().await.unwrap();
         
         let applied = runner.applied_migrations().await.unwrap();
-        assert_eq!(applied.len(), 1);
+        assert_eq!(applied.len(), 2);
         assert_eq!(applied[0].0, 1);
         assert_eq!(applied[0].1, "add_task_revision_fields");
     }

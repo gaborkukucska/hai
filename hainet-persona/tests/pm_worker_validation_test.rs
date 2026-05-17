@@ -36,7 +36,7 @@ async fn create_test_environment() -> Result<(
         ProjectManager::new("sqlite::memory:").await?
     ));
     let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
-    let ai_provider_manager = Arc::new(AIProviderManager::new().await?);
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await?);
     
     Ok((message_bus, prompt_manager, project_manager, mcp_client, ai_provider_manager))
 }

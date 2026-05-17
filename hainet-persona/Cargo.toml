@@ -60,6 +60,8 @@ flate2 = "1.0"
 tempfile = "3.8"
 
 hainet-core = { path = "../hainet-core" }
+tonic = "0.12.3"
+prost = "0.13.3"
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -71,3 +73,6 @@ path = "src/main.rs"
 [lib]
 name = "hainet_persona"
 path = "src/lib.rs"
+
+[build-dependencies]
+tonic-build = "0.12.3"

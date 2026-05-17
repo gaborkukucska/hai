@@ -8,7 +8,7 @@
 
 [framework]
 version = "0.13"
-log_level = "info"
+log_level = "debug"
 data_dir = "~/.hainet"
 
 # Global AI defaults (can be overridden per agent type)
@@ -17,7 +17,7 @@ data_dir = "~/.hainet"
 provider_preference = "local_first"
 
 # Model size: 1b | 4b | 7b | 14b+
-model_size = "4b"
+model_size = "9b"
 
 # Quantization: q4_0 | q5_0 | q8_0 | f16
 quantization = "q4_0"

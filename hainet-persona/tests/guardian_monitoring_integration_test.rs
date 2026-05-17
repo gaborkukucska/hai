@@ -19,7 +19,7 @@ async fn test_guardian_monitoring_integration() {
     // Initialize components
     let message_bus = Arc::new(MessageBus::new().await.unwrap());
     let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
-    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
     
     // Create Guardian agent
     let config = GuardianConfig::default();
@@ -99,7 +99,7 @@ async fn test_guardian_detects_pii_violation() {
     // Initialize components
     let message_bus = Arc::new(MessageBus::new().await.unwrap());
     let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
-    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
     
     // Create Guardian agent
     let config = GuardianConfig::default();
@@ -158,7 +158,7 @@ async fn test_guardian_detects_harm_keywords() {
     // Initialize components
     let message_bus = Arc::new(MessageBus::new().await.unwrap());
     let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
-    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
     
     // Create Guardian agent
     let config = GuardianConfig::default();
@@ -217,7 +217,7 @@ async fn test_guardian_allows_safe_messages() {
     // Initialize components
     let message_bus = Arc::new(MessageBus::new().await.unwrap());
     let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
-    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
     
     // Create Guardian agent
     let config = GuardianConfig::default();

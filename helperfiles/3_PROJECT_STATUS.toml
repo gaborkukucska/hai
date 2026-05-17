@@ -1,11 +1,11 @@
 # HAI-Net Project Status Tracker
 # AI-optimized single source of truth for project planning and progress
-# Last Updated: 2025-10-25T09:40:20+08:00
+# Last Updated: 2026-05-17T03:00:00+08:00
 
 [meta]
-last_updated = "2025-11-26T05:17:00.000000+00:00"
-project_name = "HAI-Net Seed"
-version = "0.54"
+last_updated = "2026-05-17T03:00:00.000000+08:00"
+project_name = "HAI-Net"
+version = "0.55"
 [[completed_cycles]]
 id = "10.1"
 date = "2025-11-20"
@@ -20,8 +20,8 @@ changes = [
 ]
 status = "success"
 next_session = "Runtime Testing & Validation"
-current_phase = "Agent Intelligence Enhancement"
-current_cycle = "Session 58 - Admin Tool Execution with Minimal Context - COMPLETE"
+current_phase = "Grand Integration — Merging TrippleEffect, PPLPWR, NoSlop, TropoMesh, gChat"
+current_cycle = "Integration Phase 1 — Agentic Core (TrippleEffect absorption)"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -32,6 +32,162 @@ implementation_language = "Rust-based with TypeScript UI"
 architecture = "Modular architecture supporting MCP protocol"
 design_philosophy = "Privacy-first, decentralized design"
 testing_approach = "Comprehensive unit and integration tests for all components"
+integration_strategy = "Hybrid Progressive (Option C) — Python/JS sidecars first, progressive Rust port"
+integration_plan_doc = "docs/INTEGRATION_PLAN.md"
+subproject_learnings_doc = "docs/SUBPROJECT_LEARNINGS.md"
+
+# Sub-projects being integrated
+[integration]
+description = "Grand Integration of 5 research projects into unified HAI-Net framework"
+plan_approved = "2026-05-17"
+strategy = "Option C: Hybrid Progressive"
+
+[integration.subprojects.tripple_effect]
+path = "_workspace/TrippleEffect"
+language = "Python (FastAPI)"
+loc = 29000
+version = "v2.50"
+status = "Stable, battle-tested"
+role = "Agentic core — Admin/PM/Worker hierarchy, state machines, failover, context management"
+integration_target = "hainet-persona (Rust port) + services/agent-svc (Python sidecar)"
+
+[integration.subprojects.pplpwr]
+path = "_workspace/pplpwr"
+language = "Node.js/TypeScript"
+loc = 50000
+status = "Beta — core architecture complete"
+role = "Compute sharing — GPU profiling, idle detection, network adapters, scheduling"
+integration_target = "hainet-collab (new Rust crate)"
+decision = "Fully absorbed — Matrix replaced by gChat gossip"
+
+[integration.subprojects.noslop]
+path = "_workspace/NoSlop"
+language = "Python (FastAPI) + Next.js"
+loc = 24000
+version = "0.04"
+status = "In development"
+role = "Media creation (ComfyUI, FFmpeg) + most mature multi-device installer"
+integration_target = "mcp-servers/hainet-media-mcp + hainet-seed enhancements"
+decision = "Selective absorption — media pipeline kept, social features retired (gChat superior)"
+
+[integration.subprojects.tropomesh]
+path = "_workspace/TropoMesh"
+language = "Documentation only"
+loc = 0
+status = "Specification phase"
+role = "Hardware backbone — community-owned tropospheric network"
+integration_target = "HAI-Net IS the Phase Zero ground node software"
+decision = "Last phase — ARM64 cross-compilation and resource-constrained mode"
+
+[integration.subprojects.gchat]
+path = "_workspace/gChat"
+language = "Node.js + React/TypeScript"
+loc = 45000
+version = "1.5.0"
+status = "Stable/Feature Rich"
+role = "Privacy-first social — Tor, daisy-chain gossip, E2E crypto, media relay"
+integration_target = "hainet-social (new Rust crate)"
+decision = "Fully absorbed — no standalone build, gossip replaces Matrix for all coordination"
+
+# Integration phase tracking
+[integration.phases]
+
+[integration.phases.phase_1]
+name = "Agentic Core (TrippleEffect → HAI-Net)"
+status = "not_started"
+estimated_weeks = "1-6"
+tasks = [
+    "Create services/agent-svc/ Python gRPC bridge",
+    "Define Protobuf IPC contract",
+    "Create hainet-persona/src/bridge/ Rust gRPC client",
+    "Port TE state machine patterns to Rust",
+    "Port TE cycle handler to Rust async tasks",
+    "Port TE failover handler",
+    "Port TE context management",
+    "Map TE's 21 tools to MCP servers",
+    "Merge TE Constitutional Guardian with HAI-Net Guardian",
+    "Unify prompt systems",
+    "Port JWT+bcrypt auth to hainet-portal",
+    "Define unified database schema"
+]
+
+[integration.phases.phase_2]
+name = "Compute Sharing (PPLPWR → hainet-collab)"
+status = "not_started"
+estimated_weeks = "4-8"
+depends_on = ["phase_1"]
+tasks = [
+    "Create hainet-collab crate",
+    "Port HardwareProfiler to Rust (sysinfo + nvidia-ml-sys)",
+    "Port IdleDetector to Rust",
+    "Port Scheduler (weighted, thermal) to Rust",
+    "Port adapter pattern (Petals, Prime Intellect)",
+    "Port policy system to Rust",
+    "Replace Matrix with gossip (ComputeAnnouncement packet type)",
+    "Merge NoSlop Seed service discovery into hainet-seed",
+    "Port NoSlop role assignment logic",
+    "Port NoSlop SSH deployment"
+]
+
+[integration.phases.phase_3]
+name = "Media Creation (NoSlop → MCP servers)"
+status = "not_started"
+estimated_weeks = "6-10"
+depends_on = ["phase_1"]
+tasks = [
+    "Create hainet-media-mcp server",
+    "Port ComfyUI WorkflowGenerator",
+    "Port FFmpeg/OpenCV processing tools",
+    "Port worker specialization templates",
+    "Retire NoSlop standalone backend/frontend/social"
+]
+
+[integration.phases.phase_4]
+name = "Privacy & Social Mesh (gChat → hainet-social)"
+status = "not_started"
+estimated_weeks = "8-12"
+depends_on = ["phase_1"]
+tasks = [
+    "Create hainet-social crate",
+    "Port 32 packet types to Rust enum (serde)",
+    "Port daisy-chain gossip to libp2p gossipsub + TTL",
+    "Port E2E encryption (Ed25519, X25519, ChaCha20)",
+    "Port Handle.Tripcode identity system",
+    "Port adaptive download manager (AIMD congestion control)",
+    "Port pure streaming proxy (relay)",
+    "Port mesh recovery protocol",
+    "Port social features (feed, DMs, groups, follows)",
+    "Implement Tor as optional transport (arti crate)",
+    "Implement AI-to-AI social networking"
+]
+
+[integration.phases.phase_5]
+name = "Unified Portal"
+status = "not_started"
+estimated_weeks = "10-14"
+depends_on = ["phase_3", "phase_4"]
+tasks = [
+    "Agent Workspace module (from TrippleEffect)",
+    "Compute Dashboard module (from PPLPWR)",
+    "Media Studio module (from NoSlop)",
+    "Social Hub module (from gChat)",
+    "System Admin module (HAI-Net native)",
+    "Congress module (governance voting)",
+    "Unified design system"
+]
+
+[integration.phases.phase_6]
+name = "TropoMesh Hardware Compatibility"
+status = "not_started"
+estimated_weeks = "12-16+"
+depends_on = ["phase_5"]
+tasks = [
+    "ARM64 cross-compilation",
+    "RPi 5 / Jetson Orin Nano testing",
+    "LoRa mesh integration (Meshtastic)",
+    "Resource-constrained mode",
+    "Power management (battery/solar awareness)"
+]
 
 # Multi-device hub configuration
 [multi_device_hub]
@@ -105,9 +261,18 @@ phase_9a_progress = 1.00  # 5/5 sessions complete - PHASE 9A COMPLETE! 🎉
 phase_10_progress = 0.20  # 1/5 sessions complete (10.1 Auto-Healing)
 phase_8b_progress = 1.00  # 5/5 sessions complete - PHASE 8B COMPLETE! 🎉
 phase_session_40_progress = 1.00  # Phase 2 COMPLETE (100%), Phase 3 COMPLETE (100%) - Phase 1 deferred
+# Grand Integration Progress
+integration_phase_1_progress = 0.00  # Agentic Core (TrippleEffect → HAI-Net)
+integration_phase_2_progress = 0.00  # Compute Sharing (PPLPWR → hainet-collab)
+integration_phase_3_progress = 0.00  # Media Creation (NoSlop → MCP servers)
+integration_phase_4_progress = 0.00  # Privacy & Social (gChat → hainet-social)
+integration_phase_5_progress = 0.00  # Unified Portal
+integration_phase_6_progress = 0.00  # TropoMesh Hardware Compatibility
+total_subproject_loc_audited = 189000  # HAI-Net(40K) + TE(29K) + PPLPWR(50K) + NoSlop(24K) + gChat(45K) + TropoMesh(81K README)
 total_loc_produced = 40537  # +120 LOC (Session 42: selection.rs +120 net changes)
 total_tests_passing = 577  # No new tests - optimization of existing code
 total_crates = 10
+total_crates_planned = 13  # +hainet-collab, +hainet-social, +hainet-media-mcp
 mcp_integration_complete = true
 worker_mcp_integration_complete = true
 e2e_integration_tests_complete = true
@@ -116,9 +281,6 @@ multi_device_deployment_complete = true
 mobile_deployment_complete = true
 system_management_mcp_complete = true
 development_tools_mcp_complete = true
-total_loc_produced = 29934  # Phase 6B Session 6: +335 LOC (MetricsDashboard.tsx, useMetrics.ts, etc.)
-total_tests_passing = 336  # No new tests
-total_crates = 10  # hainet-portal
 
 # Phase breakdown
 [phases.phase_0]

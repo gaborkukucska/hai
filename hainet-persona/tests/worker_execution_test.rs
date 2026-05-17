@@ -32,7 +32,7 @@ async fn create_test_worker() -> WorkerAgent {
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));
     let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
-    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
     
     WorkerAgent::new(
         WorkerType::Files,
@@ -320,7 +320,7 @@ async fn test_worker_network_worker_creation() {
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));
     let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
-    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
     
     let worker = WorkerAgent::new(
         WorkerType::Network,
@@ -344,7 +344,7 @@ async fn test_worker_research_worker_creation() {
         ProjectManager::new("sqlite::memory:").await.unwrap()
     ));
     let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
-    let ai_provider_manager = Arc::new(AIProviderManager::new().await.unwrap());
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
     
     let worker = WorkerAgent::new(
         WorkerType::Research,

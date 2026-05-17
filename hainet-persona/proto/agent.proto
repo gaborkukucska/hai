@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package agent;
+
+// Service definition for the Python TrippleEffect agent sidecar
+service AgentService {
+  // Initialize a new agent or resume an existing one
+  rpc InitializeAgent(InitializeRequest) returns (InitializeResponse);
+  
+  // Send a message to an agent and get its response stream
+  rpc SendMessage(MessageRequest) returns (stream MessageResponse);
+  
+  // Get the current state of an agent
+  rpc GetAgentState(StateRequest) returns (StateResponse);
+  
+  // Force a state transition for an agent
+  rpc TransitionState(TransitionRequest) returns (TransitionResponse);
+  
+  // Terminate an agent
+  rpc TerminateAgent(TerminateRequest) returns (TerminateResponse);
+}
+
+// Data structures
+message AgentConfig {
+  string agent_id = 1;
+  string agent_type = 2;
+  string persona = 3;
+  string provider = 4;
+  string model = 5;
+  float temperature = 6;
+  string system_prompt = 7;
+}
+
+message InitializeRequest {
+  AgentConfig config = 1;
+  // If true, attempt to restore previous state from database
+  bool resume_existing = 2;
+}
+
+message InitializeResponse {
+  bool success = 1;
+  string current_state = 2;
+  string error_message = 3;
+}
+
+message MessageRequest {
+  string agent_id = 1;
+  string role = 2;
+  string content = 3;
+}
+
+message MessageResponse {
+  enum ResponseType {
+    TEXT_CHUNK = 0;
+    TOOL_CALL_START = 1;
+    TOOL_CALL_CHUNK = 2;
+    TOOL_CALL_END = 3;
+    STATE_TRANSITION = 4;
+    ERROR = 5;
+    COMPLETE = 6;
+  }
+  
+  ResponseType type = 1;
+  string content = 2;       // Text chunk, or tool name
+  string tool_call_id = 3;  // ID if it's a tool call
+  string new_state = 4;     // For STATE_TRANSITION
+}
+
+message StateRequest {
+  string agent_id = 1;
+}
+
+message StateResponse {
+  string current_state = 1;
+  string current_status = 2;
+  int32 cycles_without_transition = 3;
+}
+
+message TransitionRequest {
+  string agent_id = 1;
+  string new_state = 2;
+  string reason = 3;
+}
+
+message TransitionResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message TerminateRequest {
+  string agent_id = 1;
+}
+
+message TerminateResponse {
+  bool success = 1;
+}

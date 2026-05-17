@@ -1,0 +1,31 @@
+[package]
+name = "hainet-collab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HAI-Net Collab — Decentralized compute sharing and resource coordination (ported from PPLPWR)"
+
+[dependencies]
+# Core async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Networking (announcements via gossip)
+libp2p = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+
+# System information (replaces PPLPWR's systeminformation + nvidia-smi)
+sysinfo = "0.30"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

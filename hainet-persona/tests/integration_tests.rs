@@ -47,7 +47,7 @@ async fn test_prompt_system_initialization() {
 #[tokio::test]
 async fn test_ai_provider_discovery() {
     // Test AI provider discovery system
-    let manager = AIProviderManager::new().await;
+    let manager = AIProviderManager::new(None).await;
     assert!(manager.is_ok(), "AI Provider Manager should initialize");
     
     let manager = manager.unwrap();
@@ -205,7 +205,7 @@ async fn test_constitutional_compliance_integration() {
     }
     
     // 2. Initialize AI provider manager
-    let ai_mgr = AIProviderManager::new().await;
+    let ai_mgr = AIProviderManager::new(None).await;
     assert!(ai_mgr.is_ok(), "Should initialize AI provider manager");
     
     // 3. Test Guardian on message content

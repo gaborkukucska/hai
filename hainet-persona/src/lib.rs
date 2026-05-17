@@ -12,6 +12,7 @@ pub mod guardian;
 pub mod tools;
 pub mod agents;
 pub mod projects;
+pub mod bridge;
 pub mod test_utils;
 pub mod user_settings;
 
