@@ -275,42 +275,51 @@ impl SSHClient {
         // We use ss or netstat to find listening ports, then map to processes
         let script = r#"
         # Check for Ollama
-        if pgrep -x ollama >/dev/null || pgrep -f "ollama serve" >/dev/null; then
+        OLLAMA_PATTERN="ollama ""serve"
+        if pgrep -x ollama >/dev/null || pgrep -f "$OLLAMA_PATTERN" >/dev/null; then
             PORT=$(ss -tulnp 2>/dev/null | grep ollama | awk '{print $5}' | cut -d':' -f2 | head -n 1)
             if [ -z "$PORT" ]; then PORT=11434; fi
             echo "ollama:$PORT"
         fi
         
         # Check for ComfyUI
-        if pgrep -f "main.py.*comfyui" >/dev/null || pgrep -f "ComfyUI/main.py" >/dev/null; then
-            PORT=$(pgrep -f "ComfyUI/main.py" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        COMFY_PATTERN1="main.py.*""comfyui"
+        COMFY_PATTERN2="ComfyUI/""main.py"
+        if pgrep -f "$COMFY_PATTERN1" >/dev/null || pgrep -f "$COMFY_PATTERN2" >/dev/null; then
+            PORT=$(pgrep -f "$COMFY_PATTERN2" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=8188; fi
             echo "comfyui:$PORT"
         fi
         
         # Check for vLLM
-        if pgrep -f "vllm.entrypoints.openai.api_server" >/dev/null; then
-            PORT=$(pgrep -f "vllm.entrypoints" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        VLLM_PATTERN="vllm.entrypoints.openai.api""_server"
+        VLLM_PATTERN2="vllm.entry""points"
+        if pgrep -f "$VLLM_PATTERN" >/dev/null; then
+            PORT=$(pgrep -f "$VLLM_PATTERN2" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=8000; fi
             echo "vllm:$PORT"
         fi
 
         # Check for LiteLLM
-        if pgrep -f "litellm" >/dev/null; then
-            PORT=$(pgrep -f "litellm" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        LITELLM_PATTERN="lite""llm"
+        if pgrep -f "$LITELLM_PATTERN" >/dev/null; then
+            PORT=$(pgrep -f "$LITELLM_PATTERN" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=4000; fi
             echo "litellm:$PORT"
         fi
 
         # Check for SearXNG
-        if pgrep -f "searxng" >/dev/null || pgrep -f "searx" >/dev/null; then
+        SEARX_PATTERN1="searx""ng"
+        SEARX_PATTERN2="sea""rx"
+        if pgrep -f "$SEARX_PATTERN1" >/dev/null || pgrep -f "$SEARX_PATTERN2" >/dev/null; then
             PORT=$(ss -tulnp 2>/dev/null | grep -i 'searx' | awk '{print $5}' | cut -d':' -f2 | head -n 1)
             if [ -z "$PORT" ]; then PORT=8080; fi
             echo "searxng:$PORT"
         fi
         "#;
         
-        if let Ok(output) = self.execute_command(&format!("sh -c '{}'", script)) {
+        let command = format!("sh << 'EOF'\n{}\nEOF", script);
+        if let Ok(output) = self.execute_command(&command) {
             for line in output.lines() {
                 if let Some((name, port_str)) = line.split_once(':') {
                     if let Ok(port) = port_str.parse::<u16>() {

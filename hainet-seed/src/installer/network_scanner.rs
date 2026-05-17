@@ -122,7 +122,9 @@ impl NetworkScanner {
             .arg("-p")
             .arg("22")
             .arg("--open")      // Only show hosts with port 22 open
-            .arg("-T4")         // Aggressive timing (faster scan)
+            .arg("-T3")         // Normal timing (more reliable on Wi-Fi)
+            .arg("--max-retries")
+            .arg("2")           // Retry dropped packets
             .arg("-oG")         // Greppable output
             .arg("-")           // Output to stdout
             .arg(&subnet)
@@ -138,10 +140,16 @@ impl NetworkScanner {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut devices = Self::parse_nmap_output(&stdout)?;
         
-        // Try to resolve hostnames for devices that nmap missed
+        // Fetch MAC addresses using ip neigh cache
+        let mac_map = Self::get_arp_cache();
+        
+        // Try to resolve hostnames for devices that nmap missed, and set MACs
         for device in &mut devices {
             if device.hostname.is_none() {
                 device.hostname = Self::try_resolve_hostname(&device.ip);
+            }
+            if let Some(mac) = mac_map.get(&device.ip) {
+                device.mac_address = Some(mac.clone());
             }
         }
         
@@ -179,7 +187,41 @@ impl NetworkScanner {
             }
         }
         
+        // Try nmblookup (Windows/Samba NetBIOS)
+        if let Ok(output) = Command::new("nmblookup").arg("-A").arg(ip).output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    // Typical output: LENOVO          <00> -         B <ACTIVE>
+                    if line.contains("<00> -") && line.contains("<ACTIVE>") && !line.contains("GROUP") {
+                        let name = line.split('<').next().unwrap_or("").trim();
+                        if !name.is_empty() {
+                            return Some(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        
         None
+    }
+    
+    /// Retrieve ARP cache using `ip neigh` to get MAC addresses
+    fn get_arp_cache() -> std::collections::HashMap<String, String> {
+        let mut mac_map = std::collections::HashMap::new();
+        if let Ok(output) = Command::new("ip").arg("neigh").output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    // Example: 192.168.1.10 dev eth0 lladdr 1c:bf:c0:37:04:3f REACHABLE
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 5 && parts[3] == "lladdr" {
+                        mac_map.insert(parts[0].to_string(), parts[4].to_string());
+                    }
+                }
+            }
+        }
+        mac_map
     }
     
     /// Parse nmap greppable output format.

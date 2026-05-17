@@ -118,35 +118,43 @@ impl Installer {
         // Actually, since we're local, we can just run the commands via std::process::Command
         let script = r#"
         # Check for Ollama
-        if pgrep -x ollama >/dev/null || pgrep -f "ollama serve" >/dev/null; then
+        OLLAMA_PATTERN="ollama ""serve"
+        if pgrep -x ollama >/dev/null || pgrep -f "$OLLAMA_PATTERN" >/dev/null; then
             PORT=$(ss -tulnp 2>/dev/null | grep ollama | awk '{print $5}' | cut -d':' -f2 | head -n 1)
             if [ -z "$PORT" ]; then PORT=11434; fi
             echo "ollama:$PORT"
         fi
         
         # Check for ComfyUI
-        if pgrep -f "main.py.*comfyui" >/dev/null || pgrep -f "ComfyUI/main.py" >/dev/null; then
-            PORT=$(pgrep -f "ComfyUI/main.py" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        COMFY_PATTERN1="main.py.*""comfyui"
+        COMFY_PATTERN2="ComfyUI/""main.py"
+        if pgrep -f "$COMFY_PATTERN1" >/dev/null || pgrep -f "$COMFY_PATTERN2" >/dev/null; then
+            PORT=$(pgrep -f "$COMFY_PATTERN2" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=8188; fi
             echo "comfyui:$PORT"
         fi
         
         # Check for vLLM
-        if pgrep -f "vllm.entrypoints.openai.api_server" >/dev/null; then
-            PORT=$(pgrep -f "vllm.entrypoints" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        VLLM_PATTERN="vllm.entrypoints.openai.api""_server"
+        VLLM_PATTERN2="vllm.entry""points"
+        if pgrep -f "$VLLM_PATTERN" >/dev/null; then
+            PORT=$(pgrep -f "$VLLM_PATTERN2" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=8000; fi
             echo "vllm:$PORT"
         fi
 
         # Check for LiteLLM
-        if pgrep -f "litellm" >/dev/null; then
-            PORT=$(pgrep -f "litellm" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        LITELLM_PATTERN="lite""llm"
+        if pgrep -f "$LITELLM_PATTERN" >/dev/null; then
+            PORT=$(pgrep -f "$LITELLM_PATTERN" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=4000; fi
             echo "litellm:$PORT"
         fi
 
         # Check for SearXNG
-        if pgrep -f "searxng" >/dev/null || pgrep -f "searx" >/dev/null; then
+        SEARX_PATTERN1="searx""ng"
+        SEARX_PATTERN2="sea""rx"
+        if pgrep -f "$SEARX_PATTERN1" >/dev/null || pgrep -f "$SEARX_PATTERN2" >/dev/null; then
             PORT=$(ss -tulnp 2>/dev/null | grep -i 'searx' | awk '{print $5}' | cut -d':' -f2 | head -n 1)
             if [ -z "$PORT" ]; then PORT=8080; fi
             echo "searxng:$PORT"
@@ -377,7 +385,11 @@ impl Installer {
         
         info!("✅ Discovered {} devices with SSH enabled:", devices.len());
         for (i, device) in devices.iter().enumerate() {
-            let hostname_display = device.hostname.as_deref().unwrap_or("unknown");
+            let hostname_display = match (&device.hostname, &device.mac_address) {
+                (Some(h), _) => h.clone(),
+                (None, Some(m)) => format!("unknown - MAC: {}", m),
+                (None, None) => "unknown".to_string(),
+            };
             info!("  [{}] {} ({})", i + 1, device.ip, hostname_display);
         }
         
@@ -395,8 +407,16 @@ impl Installer {
             let (mut capabilities, credentials_map) = self.assess_device_capabilities(&remote_devices).await?;
 
             if !local_devices.is_empty() {
-                if let Ok(localhost_caps) = self.assess_localhost_capabilities().await {
-                    capabilities.push(localhost_caps);
+                info!("\n💻 Assessing localhost capabilities...");
+                match self.assess_localhost_capabilities().await {
+                    Ok(localhost_caps) => {
+                        info!("✓ Localhost assessed: {} cores, {:.1}GB RAM, score: {:.1}", 
+                              localhost_caps.cpu_cores, localhost_caps.ram_gb, localhost_caps.score);
+                        capabilities.push(localhost_caps);
+                    }
+                    Err(e) => {
+                        info!("⚠️  Failed to assess localhost: {}", e);
+                    }
                 }
             }
 
@@ -513,19 +533,6 @@ impl Installer {
         let mut capabilities = Vec::new();
         let mut credentials_map = HashMap::new();
         
-        // First, assess localhost capabilities (no SSH needed)
-        info!("\n💻 Assessing localhost capabilities...");
-        match self.assess_localhost_capabilities().await {
-            Ok(localhost_caps) => {
-                info!("✓ Localhost assessed: {} cores, {:.1}GB RAM, score: {:.1}", 
-                      localhost_caps.cpu_cores, localhost_caps.ram_gb, localhost_caps.score);
-                capabilities.push(localhost_caps);
-            }
-            Err(e) => {
-                info!("⚠️  Failed to assess localhost: {}", e);
-            }
-        }
-        
         // Then assess remote devices
         for device in devices {
             info!("\n🔍 Assessing device: {}", device.ip);
@@ -544,11 +551,9 @@ impl Installer {
                     username.to_string()
                 };
                 
-                print!("Password for {}@{}: ", username, device.ip);
-                io::stdout().flush()?;
-                let mut password = String::new();
-                io::stdin().read_line(&mut password)?;
-                let password = password.trim().to_string();
+                let password = dialoguer::Password::new()
+                    .with_prompt(format!("Password for {}@{}", username, device.ip))
+                    .interact()?;
                 
                 let credentials = SSHCredentials { 
                     username: username.clone(), 
@@ -713,35 +718,43 @@ impl Installer {
         let mut services = Vec::new();
         let script = r#"
         # Check for Ollama
-        if pgrep -x ollama >/dev/null || pgrep -f "ollama serve" >/dev/null; then
+        OLLAMA_PATTERN="ollama ""serve"
+        if pgrep -x ollama >/dev/null || pgrep -f "$OLLAMA_PATTERN" >/dev/null; then
             PORT=$(ss -tulnp 2>/dev/null | grep ollama | awk '{print $5}' | cut -d':' -f2 | head -n 1)
             if [ -z "$PORT" ]; then PORT=11434; fi
             echo "ollama:$PORT"
         fi
         
         # Check for ComfyUI
-        if pgrep -f "main.py.*comfyui" >/dev/null || pgrep -f "ComfyUI/main.py" >/dev/null; then
-            PORT=$(pgrep -f "ComfyUI/main.py" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        COMFY_PATTERN1="main.py.*""comfyui"
+        COMFY_PATTERN2="ComfyUI/""main.py"
+        if pgrep -f "$COMFY_PATTERN1" >/dev/null || pgrep -f "$COMFY_PATTERN2" >/dev/null; then
+            PORT=$(pgrep -f "$COMFY_PATTERN2" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=8188; fi
             echo "comfyui:$PORT"
         fi
         
         # Check for vLLM
-        if pgrep -f "vllm.entrypoints.openai.api_server" >/dev/null; then
-            PORT=$(pgrep -f "vllm.entrypoints" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        VLLM_PATTERN="vllm.entrypoints.openai.api""_server"
+        VLLM_PATTERN2="vllm.entry""points"
+        if pgrep -f "$VLLM_PATTERN" >/dev/null; then
+            PORT=$(pgrep -f "$VLLM_PATTERN2" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=8000; fi
             echo "vllm:$PORT"
         fi
 
         # Check for LiteLLM
-        if pgrep -f "litellm" >/dev/null; then
-            PORT=$(pgrep -f "litellm" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
+        LITELLM_PATTERN="lite""llm"
+        if pgrep -f "$LITELLM_PATTERN" >/dev/null; then
+            PORT=$(pgrep -f "$LITELLM_PATTERN" -a | grep -oP -- '--port\s+\K\d+' | head -n 1)
             if [ -z "$PORT" ]; then PORT=4000; fi
             echo "litellm:$PORT"
         fi
 
         # Check for SearXNG
-        if pgrep -f "searxng" >/dev/null || pgrep -f "searx" >/dev/null; then
+        SEARX_PATTERN1="searx""ng"
+        SEARX_PATTERN2="sea""rx"
+        if pgrep -f "$SEARX_PATTERN1" >/dev/null || pgrep -f "$SEARX_PATTERN2" >/dev/null; then
             PORT=$(ss -tulnp 2>/dev/null | grep -i 'searx' | awk '{print $5}' | cut -d':' -f2 | head -n 1)
             if [ -z "$PORT" ]; then PORT=8080; fi
             echo "searxng:$PORT"

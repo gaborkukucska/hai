@@ -317,7 +317,7 @@ impl DeploymentOrchestrator {
         client.authenticate_pubkey(&key_path, None)?;
         
         // Step 2: Create system user and directories
-        println!("� Creating hainet system user...");
+        println!("🔧 Creating hainet system user...");
         self.create_system_user(&client)?;
         
         println!("📁 Creating system directories...");
@@ -343,20 +343,33 @@ impl DeploymentOrchestrator {
         Ok(())
     }
 
-    /// Deploy HAI-Net to the local machine
+    /// Deploy HAI-Net to the local machine (idempotent - safe for re-deployments)
     async fn deploy_to_localhost(&self, assignment: &DeviceAssignment) -> Result<()> {
         println!("\n📦 Deploying to localhost ({})...", assignment.hostname);
 
         use std::process::Command;
 
-        // Step 1: Create system user
-        println!("� Creating hainet system user...");
-        let status = Command::new("sudo")
-            .args(&["useradd", "-r", "-s", "/bin/false", "-d", "/var/lib/hainet", "-m", "hainet"])
-            .status()?;
-        if !status.success() {
-            // User might already exist, continue
-            println!("⚠️  User 'hainet' might already exist (continuing)");
+        // Step 0: Stop any existing services for clean re-deployment
+        println!("🔄 Checking for existing deployment...");
+        for svc in &["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"] {
+            let _ = Command::new("sudo")
+                .args(&["systemctl", "stop", &format!("{}.service", svc)])
+                .status();
+        }
+
+        // Step 1: Create system user (skip if exists)
+        println!("🔧 Creating hainet system user...");
+        let user_exists = Command::new("id").arg("hainet").output()
+            .map_or(false, |o| o.status.success());
+        if !user_exists {
+            let status = Command::new("sudo")
+                .args(&["useradd", "-r", "-s", "/bin/false", "-d", "/var/lib/hainet", "-m", "hainet"])
+                .status()?;
+            if status.success() {
+                println!("✓ User 'hainet' created.");
+            }
+        } else {
+            println!("✓ User 'hainet' already exists (re-deployment).");
         }
 
         // Step 2: Create system directories
@@ -696,6 +709,9 @@ WantedBy=multi-user.target
             return Ok(());
         }
 
+        // Install required dependencies before building
+        self.install_build_dependencies()?;
+
         use std::process::Command;
         
         // Map architecture to Rust target triple
@@ -724,6 +740,81 @@ WantedBy=multi-user.target
         }
         
         println!("✓ Build complete for {}", target);
+        Ok(())
+    }
+
+    /// Automatically install UI build dependencies based on the host OS
+    fn install_build_dependencies(&self) -> Result<()> {
+        use std::process::Command;
+
+        println!("🔍 Checking and installing system dependencies for compiling HAI-Net (UI components)...");
+
+        // Try apt-get (Debian/Ubuntu/Lubuntu/Mint)
+        if Command::new("which").arg("apt-get").output().map_or(false, |o| o.status.success()) {
+            println!("📦 Detected Debian/Ubuntu-based system. Installing dependencies via apt-get...");
+            println!("⚠️  You may be prompted for your sudo password.");
+            let _ = Command::new("sudo")
+                .args(&["apt-get", "update"])
+                .status()?;
+            
+            // Detect the correct webkit2gtk package (4.1 for newer Ubuntu, 4.0 for older)
+            let webkit_pkg = if Command::new("apt-cache")
+                .args(&["show", "libwebkit2gtk-4.1-dev"])
+                .output()
+                .map_or(false, |o| o.status.success())
+            {
+                "libwebkit2gtk-4.1-dev"
+            } else {
+                "libwebkit2gtk-4.0-dev"
+            };
+            
+            println!("  Using webkit package: {}", webkit_pkg);
+            
+            let base_deps = ["libsoup2.4-dev", "pkg-config", "libssl-dev", "libgtk-3-dev"];
+            let mut install_cmd = Command::new("sudo");
+            install_cmd.args(&["apt-get", "install", "-y"]).args(&base_deps).arg(webkit_pkg);
+            
+            if install_cmd.status()?.success() {
+                println!("✓ Dependencies installed successfully.");
+                return Ok(());
+            } else {
+                bail!("Failed to install dependencies via apt-get.");
+            }
+        }
+        
+        // Try dnf (Fedora/RHEL)
+        if Command::new("which").arg("dnf").output().map_or(false, |o| o.status.success()) {
+            println!("📦 Detected Fedora/RHEL-based system. Installing dependencies via dnf...");
+            println!("⚠️  You may be prompted for your sudo password.");
+            let deps = ["libsoup-devel", "webkit2gtk3-devel", "gtk3-devel", "openssl-devel", "pkgconf-pkg-config"];
+            let mut install_cmd = Command::new("sudo");
+            install_cmd.args(&["dnf", "install", "-y"]).args(&deps);
+            
+            if install_cmd.status()?.success() {
+                println!("✓ Dependencies installed successfully.");
+                return Ok(());
+            } else {
+                bail!("Failed to install dependencies via dnf.");
+            }
+        }
+        
+        // Try pacman (Arch/Manjaro)
+        if Command::new("which").arg("pacman").output().map_or(false, |o| o.status.success()) {
+            println!("📦 Detected Arch-based system. Installing dependencies via pacman...");
+            println!("⚠️  You may be prompted for your sudo password.");
+            let deps = ["libsoup", "webkit2gtk", "gtk3", "openssl", "pkgconf"];
+            let mut install_cmd = Command::new("sudo");
+            install_cmd.args(&["pacman", "-S", "--noconfirm", "--needed"]).args(&deps);
+            
+            if install_cmd.status()?.success() {
+                println!("✓ Dependencies installed successfully.");
+                return Ok(());
+            } else {
+                bail!("Failed to install dependencies via pacman.");
+            }
+        }
+
+        println!("⚠️  Could not detect package manager. Please ensure libsoup, webkit2gtk, and gtk3 development headers are installed.");
         Ok(())
     }
 
