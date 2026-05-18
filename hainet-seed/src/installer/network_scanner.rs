@@ -156,9 +156,52 @@ impl NetworkScanner {
         // Step 5: Filter out the local machine
         devices.retain(|device| device.ip != local_ip_str);
         
+        // Step 6: Deduplicate devices (e.g. Wi-Fi and Ethernet interfaces on the same machine)
+        devices = Self::deduplicate_devices(devices);
+        
         println!("Discovered {} devices with SSH enabled", devices.len());
         
         Ok(devices)
+    }
+    
+    /// Deduplicate devices based on MAC address and Hostname
+    fn deduplicate_devices(devices: Vec<DeviceCandidate>) -> Vec<DeviceCandidate> {
+        let mut unique_devices: Vec<DeviceCandidate> = Vec::new();
+        
+        for device in devices {
+            let mut is_duplicate = false;
+            
+            for unique in &mut unique_devices {
+                // 1. Match by MAC address
+                if let (Some(mac1), Some(mac2)) = (&device.mac_address, &unique.mac_address) {
+                    if mac1.to_lowercase() == mac2.to_lowercase() {
+                        is_duplicate = true;
+                        break;
+                    }
+                }
+                
+                // 2. Match by Hostname
+                if let (Some(host1), Some(host2)) = (&device.hostname, &unique.hostname) {
+                    let h1 = host1.to_lowercase().replace(".lan", "").replace(".local", "");
+                    let h2 = host2.to_lowercase().replace(".lan", "").replace(".local", "");
+                    
+                    if !h1.is_empty() && h1 == h2 {
+                        // Keep the MAC address if the new one has it but the existing one doesn't
+                        if unique.mac_address.is_none() && device.mac_address.is_some() {
+                            unique.mac_address = device.mac_address.clone();
+                        }
+                        is_duplicate = true;
+                        break;
+                    }
+                }
+            }
+            
+            if !is_duplicate {
+                unique_devices.push(device);
+            }
+        }
+        
+        unique_devices
     }
     
     /// Try to resolve hostname using getent or avahi

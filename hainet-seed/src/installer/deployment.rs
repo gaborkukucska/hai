@@ -486,7 +486,7 @@ WantedBy=multi-user.target
         
         for service_name in &services {
             Command::new("sudo")
-                .args(&["systemctl", "enable", &format!("{}.service", service_name)])
+                .args(&["systemctl", "restart", &format!("{}.service", service_name)])
                 .status()?;
         }
 
@@ -554,6 +554,11 @@ WantedBy=multi-user.target
         if let Some((username, _)) = credentials_map.get(&master.ip) {
             self.verify_mesh_health(master, username, &mut client_factory).await?;
         }
+        for slave in self.slave_nodes() {
+            if let Some((username, _)) = credentials_map.get(&slave.ip) {
+                self.verify_mesh_health(slave, username, &mut client_factory).await?;
+            }
+        }
         
         println!("\n✅ Mesh network initialized successfully!");
         println!("   Master: {} (services running)", master.hostname);
@@ -563,7 +568,9 @@ WantedBy=multi-user.target
         println!("\n📋 Next Steps:");
         println!("   • Check logs: sudo journalctl -u hainet-core -f");
         println!("   • View status: sudo systemctl status hainet-core");
-        println!("\n💡 Note: Web UI will be available once hainet-portal is implemented (Phase 8)");
+        println!("\n💡 Web UI is now available!");
+        println!("   Access the portal at: http://127.0.0.1:3000");
+        println!("   (If running locally, execute: 'cd hainet-portal && npm run dev')");
         
         Ok(())
     }
@@ -605,8 +612,8 @@ WantedBy=multi-user.target
         for service in services {
             println!("   Starting {} on {}...", service, ip);
             
-            // Start system service with sudo -n (non-interactive)
-            let start_cmd = format!("sudo -n systemctl start {}.service 2>/dev/null", service);
+            // Restart the service so new binaries are picked up during redeployment
+            let start_cmd = format!("sudo -n systemctl restart {}.service 2>/dev/null", service);
             match client.execute_command(&start_cmd) {
                 Ok(_) => {},
                 Err(e) => {
@@ -660,7 +667,14 @@ WantedBy=multi-user.target
         
         client.authenticate_pubkey(&key_path, None)?;
         
-        println!("\n📊 Master Node Health Check:");
+        let role_str = match master.role {
+            DeviceRole::Master => "Master",
+            DeviceRole::Slave => "Slave",
+            DeviceRole::Standalone => "Standalone",
+            DeviceRole::UIOnly => "UI Node",
+        };
+        
+        println!("\n📊 {} Node Health Check ({}):", role_str, master.ip);
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         
         // Check hainet-core system service status

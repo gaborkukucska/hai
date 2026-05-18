@@ -1,57 +1,81 @@
 //! HAI-Net Portal Main Binary
 //! 
-//! Chat interface for natural language interaction with your AI persona.
+//! Secure Web Interface serving the React UI.
 
+mod api;
+mod assets;
+mod auth;
+
+use axum::{
+    routing::get,
+    Router,
+    response::{Response, IntoResponse},
+    http::{StatusCode, Uri, header},
+    body::Body,
+};
 use tracing::info;
 use anyhow::Result;
 use std::path::PathBuf;
+use std::net::SocketAddr;
+
+use assets::Assets;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Create logs directory
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hainet-portal");
-    let logs_dir = data_dir.join("logs");
-    std::fs::create_dir_all(&logs_dir)?;
-    
-    // Create log file with timestamp
-    let log_file = logs_dir.join(format!(
-        "hainet-portal-{}.log",
-        chrono::Local::now().format("%Y%m%d-%H%M%S")
-    ));
-    
-    // Initialize tracing with file appender
-    use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{fmt, EnvFilter};
-    
-    let file_appender = tracing_appender::rolling::never(&logs_dir, log_file.file_name().unwrap());
-    let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
-    
-    tracing_subscriber::registry()
-        .with(fmt::layer().with_writer(std::io::stdout))
-        .with(fmt::layer().with_writer(file_writer).with_ansi(false))
-        .with(EnvFilter::new("hainet_portal=debug,info"))
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("hainet_portal=info".parse()?))
         .init();
 
     info!("🖥️  HAI-Net Portal starting up...");
     info!("📋 Version: {}", env!("CARGO_PKG_VERSION"));
-    info!("📝 Logs being written to: {}", log_file.display());
-    info!("💬 Chat interface initializing...");
-
-    // TODO: Initialize portal components
-    // - Tauri app
-    // - WebSocket connection to persona
-    // - Chat interface
-    // - Settings UI
-    // - Agent state visualization
-    // - Real-time updates
-
-    info!("✅ HAI-Net Portal initialized successfully");
     
-    // Keep running until shutdown signal
-    tokio::signal::ctrl_c().await?;
-    info!("🛑 HAI-Net Portal shutting down gracefully");
+    // Generate a random JWT secret for the session (regenerated on restart)
+    let jwt_secret = uuid::Uuid::new_v4().to_string();
+    let state = api::AppState { jwt_secret };
+
+    // Build the Axum router
+    let app = Router::new()
+        .nest("/api/auth", api::api_routes(state.clone()))
+        // Serve embedded static files
+        .fallback(static_handler);
+
+    // Run the server
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    info!("✅ Server running on http://{}", addr);
+    
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    axum::serve(listener, app).await?;
     
     Ok(())
 }
+
+async fn static_handler(uri: Uri) -> impl IntoResponse {
+    let mut path = uri.path().trim_start_matches('/').to_string();
+
+    if path.is_empty() {
+        path = "index.html".to_string();
+    }
+
+    match Assets::get(&path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            (
+                [(header::CONTENT_TYPE, mime.as_ref())],
+                content.data.into_owned(),
+            ).into_response()
+        }
+        None => {
+            // Support React Router: return index.html for unknown routes
+            if let Some(index) = Assets::get("index.html") {
+                (
+                    [(header::CONTENT_TYPE, "text/html")],
+                    index.data.into_owned(),
+                ).into_response()
+            } else {
+                (StatusCode::NOT_FOUND, "404 Not Found").into_response()
+            }
+        }
+    }
+}
+

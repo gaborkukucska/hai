@@ -668,11 +668,17 @@ impl Installer {
             // Try 2: Fall back to password-based authentication
             loop {
                 // Prompt for credentials per device (they might differ)
-                print!("Username for {} (default: current user): ", device.ip);
+                print!("Username for {} (default: current user, type 'skip' to ignore): ", device.ip);
                 io::stdout().flush()?;
                 let mut username = String::new();
                 io::stdin().read_line(&mut username)?;
                 let username = username.trim();
+                
+                if username.eq_ignore_ascii_case("skip") {
+                    info!("⏭️ Skipping device {}", device.ip);
+                    break;
+                }
+                
                 let username = if username.is_empty() {
                     std::env::var("USER").unwrap_or_else(|_| "root".to_string())
                 } else {

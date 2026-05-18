@@ -1,6 +1,54 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+
+interface NodeStatus {
+  status: string;
+  service: string;
+  role: string;
+  version: string;
+}
 
 export default function NetworkSettings() {
+  const [nodeStatus, setNodeStatus] = useState<NodeStatus | null>(null);
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    const checkStatus = async () => {
+      setIsChecking(true);
+      const host = window.location.hostname || '127.0.0.1';
+      const portsToTry = [8080, 8081, 8082, 8083];
+      
+      let found = false;
+      for (const port of portsToTry) {
+        try {
+          // Use AbortController for faster timeout on dead ports
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1500);
+          
+          const res = await fetch(`http://${host}:${port}/health`, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (res.ok) {
+            const data = await res.json();
+            setNodeStatus(data);
+            found = true;
+            break;
+          }
+        } catch (e) {
+          // Ignore and try next port
+        }
+      }
+      
+      if (!found) {
+        setNodeStatus(null);
+      }
+      setIsChecking(false);
+    };
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="flex-1 h-full overflow-y-auto bg-theme-bg-primary text-theme-text-primary p-6">
       <div className="max-w-4xl mx-auto space-y-8">
@@ -9,6 +57,45 @@ export default function NetworkSettings() {
           <h1 className="text-2xl font-bold">Mesh Network & Settings</h1>
           <p className="text-theme-text-muted text-sm mt-1">Configure your HAI-Net node, UI theme, and mesh peers.</p>
         </div>
+
+        {/* Local Node Status */}
+        <section className="bg-theme-bg-secondary border border-theme-border rounded-xl p-5">
+          <div className="flex justify-between items-center mb-4 border-b border-theme-border pb-2">
+            <h2 className="text-lg font-semibold">Local Node Status (hainet-core)</h2>
+            <div className="flex items-center gap-2">
+              {isChecking ? (
+                <span className="text-xs text-theme-text-muted">Checking...</span>
+              ) : nodeStatus ? (
+                <span className="flex items-center gap-1 text-xs px-2 py-1 bg-theme-accent-success/20 text-theme-accent-success rounded-full border border-theme-accent-success/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-theme-accent-success animate-pulse"></span>
+                  Online
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-xs px-2 py-1 bg-theme-accent-danger/20 text-theme-accent-danger rounded-full border border-theme-accent-danger/30">
+                  Offline
+                </span>
+              )}
+            </div>
+          </div>
+          {nodeStatus ? (
+            <div className="grid grid-cols-3 gap-4">
+               <div className="p-3 bg-theme-bg-tertiary rounded-md border border-theme-border/50">
+                 <p className="text-xs text-theme-text-muted uppercase tracking-wider">Service</p>
+                 <p className="font-medium mt-1">{nodeStatus.service}</p>
+               </div>
+               <div className="p-3 bg-theme-bg-tertiary rounded-md border border-theme-border/50">
+                 <p className="text-xs text-theme-text-muted uppercase tracking-wider">Role</p>
+                 <p className="font-medium mt-1 capitalize">{nodeStatus.role}</p>
+               </div>
+               <div className="p-3 bg-theme-bg-tertiary rounded-md border border-theme-border/50">
+                 <p className="text-xs text-theme-text-muted uppercase tracking-wider">Version</p>
+                 <p className="font-medium mt-1">{nodeStatus.version}</p>
+               </div>
+            </div>
+          ) : (
+            <p className="text-sm text-theme-text-muted">Local core daemon is not reachable on port 8080.</p>
+          )}
+        </section>
 
         {/* Theme Settings */}
         <section className="bg-theme-bg-secondary border border-theme-border rounded-xl p-5">

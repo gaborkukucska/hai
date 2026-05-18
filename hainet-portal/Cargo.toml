@@ -25,6 +25,19 @@ uuid = { workspace = true }
 config = { workspace = true }
 futures = { workspace = true }
 
+# Web Server & Assets
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace", "auth"] }
+rust-embed = { version = "8.0", features = ["include-exclude"] }
+mime_guess = "2.0"
+
+# Crypto & Auth
+argon2 = "0.5"
+jsonwebtoken = "9.2"
+rand = "0.8"
+bip39 = { version = "2.0", features = ["rand"] }
+aes-gcm = "0.10"
+
 # Tauri for desktop app (will be added when UI is implemented)
 # tauri = { version = "2.0", features = [] }
 

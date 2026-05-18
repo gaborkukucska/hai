@@ -59,7 +59,8 @@ impl Uninstaller {
         // Separate remote nodes from localhost
         let remote_nodes: Vec<_> = manifest.as_ref()
             .map(|m| m.nodes.iter()
-                .filter(|n| !local_ips.contains(&n.ip) && n.ip != "127.0.0.1")
+                .filter(|n| !local_ips.contains(&n.ip) && n.ip != "127.0.0.1" && n.hostname.to_lowercase() != hostname.to_lowercase())
+                .cloned() // Clone the nodes so we can mutate them
                 .collect::<Vec<_>>())
             .unwrap_or_default();
 
@@ -92,9 +93,67 @@ impl Uninstaller {
 
         // Step 4: Uninstall from REMOTE devices first (while we still have the key)
         if !remote_nodes.is_empty() {
-            info!("\n🌐 Uninstalling from {} remote device(s)...", remote_nodes.len());
+            // --- DYNAMIC IP HEALING ---
+            // If the mesh moved to a new network, the IPs might have changed.
+            // Check if nodes are reachable. If not, scan network and heal.
+            let mut healed_nodes = remote_nodes.clone();
+            let mut needs_healing = false;
+            
+            for node in &mut healed_nodes {
+                use std::net::{TcpStream, SocketAddr};
+                use std::time::Duration;
+                if let Ok(addr) = format!("{}:22", node.ip).parse::<SocketAddr>() {
+                    if TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_err() {
+                        needs_healing = true;
+                    }
+                } else {
+                    needs_healing = true;
+                }
+            }
+            
+            if needs_healing {
+                info!("⚠️  Some nodes are unreachable at their saved IPs. Scanning network for IP changes...");
+                if let Ok(scanner) = crate::installer::network_scanner::NetworkScanner::new() {
+                    if let Ok(devices) = scanner.scan_local_network() {
+                        for node in &mut healed_nodes {
+                            use std::net::{TcpStream, SocketAddr};
+                            use std::time::Duration;
+                            
+                            let is_reachable = format!("{}:22", node.ip).parse::<SocketAddr>()
+                                .map(|addr| TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_ok())
+                                .unwrap_or(false);
+                                
+                            if !is_reachable {
+                                // Try to find by MAC or Hostname
+                                let new_ip = devices.iter().find(|d| {
+                                    if let (Some(ref manifest_mac), Some(ref scan_mac)) = (&node.mac_address, &d.mac_address) {
+                                        if manifest_mac.to_lowercase() == scan_mac.to_lowercase() {
+                                            return true;
+                                        }
+                                    }
+                                    if let Some(ref scan_host) = d.hostname {
+                                        let h1 = node.hostname.to_lowercase().replace(".lan", "").replace(".local", "");
+                                        let h2 = scan_host.to_lowercase().replace(".lan", "").replace(".local", "");
+                                        if !h1.is_empty() && h1 == h2 {
+                                            return true;
+                                        }
+                                    }
+                                    false
+                                });
+                                
+                                if let Some(found) = new_ip {
+                                    info!("🔄 IP change detected and healed for {}: {} → {}", node.hostname, node.ip, found.ip);
+                                    node.ip = found.ip.clone();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            info!("\n🌐 Uninstalling from {} remote device(s)...", healed_nodes.len());
 
-            for node in &remote_nodes {
+            for node in &healed_nodes {
                 info!("\n━━ {} ({}) ━━", node.hostname, node.ip);
                 
                 // Try to connect and clean up
