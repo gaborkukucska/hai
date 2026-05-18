@@ -126,7 +126,8 @@ tasks = [
     "Replace Matrix with gossip (ComputeAnnouncement packet type)",
     "[DONE] Merge NoSlop Seed service discovery into hainet-seed",
     "[DONE] Port NoSlop role assignment logic",
-    "[DONE] Port NoSlop SSH deployment"
+    "[DONE] Port NoSlop SSH deployment",
+    "[DONE] Dynamic DHCP Network Healing & SSH Deduplication"
 ]
 
 [integration.phases.phase_3]

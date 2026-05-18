@@ -239,11 +239,14 @@ When prompted:
 
 Answer **`Y`** to assess hardware.
 
-**Provide SSH credentials:**
+**Provide SSH credentials (or skip devices):**
 ```
-Username (default: current user): tom
+Username (default: current user, type 'skip' to ignore): tom
 Password: ********
 ```
+
+> [!TIP]
+> If `nmap` discovers devices that are not part of your mesh (e.g., smart TVs, routers, or random IoT devices with port 22 open), you can explicitly ignore them by typing `skip` for the username. The installer will instantly bypass them without attempting an SSH connection.
 
 The installer will SSH into each device and detect:
 - CPU cores
