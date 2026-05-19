@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 use std::sync::Arc;
 use anyhow::Result;
-use tauri::{AppHandle, Emitter, State};
+
 use tokio::sync::RwLock;
 use hainet_persona::agents::{AgentType, metrics::MetricsCollector};
 use crate::metrics_storage::{MetricsStorage, TimeRange, TrendInterval, TrendDataPoint, MetricsSnapshot};
@@ -39,9 +39,8 @@ pub struct MetricsSummaryResponse {
 }
 
 /// Get metrics for all agent types
-#[tauri::command]
 pub async fn get_agent_metrics(
-    metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
+    metrics_collector: &Arc<RwLock<MetricsCollector>>,
 ) -> Result<Vec<AgentMetricsResponse>, String> {
     tracing::info!("Fetching agent metrics from database...");
     
@@ -85,10 +84,9 @@ pub async fn get_agent_metrics(
 }
 
 /// Get metrics for specific agent type
-#[tauri::command]
 pub async fn get_agent_metrics_by_type(
     agent_type_str: String,
-    metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
+    metrics_collector: &Arc<RwLock<MetricsCollector>>,
 ) -> Result<AgentMetricsResponse, String> {
     tracing::info!("Fetching metrics for agent type: {}", agent_type_str);
     
@@ -135,9 +133,8 @@ pub async fn get_agent_metrics_by_type(
 }
 
 /// Get high-level metrics summary
-#[tauri::command]
 pub async fn get_metrics_summary(
-    metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
+    metrics_collector: &Arc<RwLock<MetricsCollector>>,
 ) -> Result<MetricsSummaryResponse, String> {
     tracing::info!("Fetching metrics summary from database...");
     
@@ -214,10 +211,9 @@ pub async fn get_metrics_summary(
 }
 
 /// Export full metrics report as JSON string with optional time range
-#[tauri::command]
 pub async fn export_metrics_json(
     _time_range: Option<TimeRange>,
-    metrics_collector: State<'_, Arc<RwLock<MetricsCollector>>>,
+    metrics_collector: &Arc<RwLock<MetricsCollector>>,
 ) -> Result<String, String> {
     tracing::info!("Exporting metrics as JSON from database...");
     
@@ -230,10 +226,9 @@ pub async fn export_metrics_json(
 }
 
 /// Export metrics as CSV format
-#[tauri::command]
 pub async fn export_metrics_csv(
     time_range: Option<TimeRange>,
-    metrics_storage: State<'_, Arc<RwLock<MetricsStorage>>>,
+    metrics_storage: &Arc<RwLock<MetricsStorage>>,
 ) -> Result<String, String> {
     tracing::info!("Exporting metrics as CSV...");
     
@@ -268,11 +263,10 @@ pub async fn export_metrics_csv(
 }
 
 /// Get historical metrics snapshots within a time range
-#[tauri::command]
 pub async fn get_historical_metrics(
     agent_type: Option<String>,
     time_range: Option<TimeRange>,
-    metrics_storage: State<'_, Arc<RwLock<MetricsStorage>>>,
+    metrics_storage: &Arc<RwLock<MetricsStorage>>,
 ) -> Result<Vec<MetricsSnapshot>, String> {
     tracing::info!("Fetching historical metrics...");
     
@@ -283,12 +277,11 @@ pub async fn get_historical_metrics(
 }
 
 /// Get trend analysis for a specific agent type
-#[tauri::command]
 pub async fn get_metrics_trend(
     agent_type: String,
     interval: String,
     time_range: Option<TimeRange>,
-    metrics_storage: State<'_, Arc<RwLock<MetricsStorage>>>,
+    metrics_storage: &Arc<RwLock<MetricsStorage>>,
 ) -> Result<Vec<TrendDataPoint>, String> {
     tracing::info!("Computing metrics trend for agent_type={}, interval={}", agent_type, interval);
     
@@ -313,7 +306,7 @@ pub fn start_metrics_snapshot_task(
 ) {
     tracing::info!("Starting metrics snapshot recording task...");
     
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         loop {
             // Record snapshots every 5 minutes
             tokio::time::sleep(Duration::from_secs(300)).await;
@@ -356,85 +349,7 @@ pub fn start_metrics_snapshot_task(
     });
 }
 
-/// Start background task to broadcast metrics updates via Tauri events
-pub fn start_metrics_broadcast(app_handle: AppHandle, metrics_collector: Arc<RwLock<MetricsCollector>>) {
-    tracing::info!("Starting metrics broadcast service...");
-    
-    tauri::async_runtime::spawn(async move {
-        loop {
-            // Wait 5 seconds between updates
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            
-            // Fetch latest metrics summary
-            let collector = metrics_collector.read().await;
-            let mut all_metrics = Vec::new();
-            
-            // Fetch metrics for each agent type
-            for agent_type in [AgentType::Admin, AgentType::PM, AgentType::Worker, AgentType::Guardian] {
-                if let Ok(count) = collector.count_operations(agent_type).await {
-                    if count > 0 {
-                        if let Ok(metrics) = collector.get_aggregate(agent_type).await {
-                            all_metrics.push(AgentMetricsResponse {
-                                agent_type: agent_type.to_string(),
-                                total_operations: metrics.total_operations,
-                                success_rate: metrics.success_rate,
-                                avg_response_time_ms: metrics.avg_response_time_ms,
-                                avg_tokens_used: metrics.avg_tokens_used,
-                                json_parse_success_rate: metrics.json_parse_success_rate,
-                                validation_pass_rate: metrics.validation_pass_rate,
-                                syntax_error_rate: metrics.syntax_error_rate,
-                                first_operation_unix: metrics.first_operation
-                                    .duration_since(SystemTime::UNIX_EPOCH)
-                                    .unwrap_or(Duration::ZERO)
-                                    .as_secs(),
-                                last_operation_unix: metrics.last_operation
-                                    .duration_since(SystemTime::UNIX_EPOCH)
-                                    .unwrap_or(Duration::ZERO)
-                                    .as_secs(),
-                            });
-                        }
-                    }
-                }
-            }
-            
-            drop(collector); // Release read lock
-            
-            // Calculate summary
-            let total_tasks: u64 = all_metrics.iter().map(|a| a.total_operations).sum();
-            let total_tokens: u64 = all_metrics.iter()
-                .map(|a| (a.avg_tokens_used * a.total_operations as f32) as u64)
-                .sum();
-            let weighted_success: f32 = all_metrics.iter()
-                .map(|a| a.success_rate * a.total_operations as f32)
-                .sum();
-            let overall_success_rate = if total_tasks > 0 {
-                weighted_success / total_tasks as f32
-            } else {
-                0.0
-            };
-            let total_cost_usd = (total_tokens as f32 / 1000.0) * 0.002;
-            
-            let summary = MetricsSummaryResponse {
-                total_tasks,
-                overall_success_rate,
-                total_tokens,
-                total_cost_usd,
-                agents: all_metrics,
-                timestamp_unix: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            };
-            
-            // Emit event to all frontend listeners
-            if let Err(e) = app_handle.emit("metrics-updated", summary) {
-                tracing::warn!("Failed to emit metrics-updated event: {}", e);
-            } else {
-                tracing::debug!("Metrics update broadcast successful");
-            }
-        }
-    });
-}
+
 
 #[cfg(test)]
 mod tests {

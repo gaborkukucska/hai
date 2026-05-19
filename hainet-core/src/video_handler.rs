@@ -1,13 +1,15 @@
 //! # START OF FILE hainet-portal-tauri/src/video_handler.rs
 
-use crate::VideoStreamingState;
 use std::fs::File;
 use std::net::TcpListener;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use std::thread;
-use tauri::State;
+
 use tiny_http::{Request, Response, Server};
+
+pub struct VideoStreamingState(pub Arc<Mutex<HashMap<u16, Arc<tiny_http::Server>>>>);
 
 fn find_open_port() -> Result<u16, String> {
     TcpListener::bind("127.0.0.1:0")
@@ -28,10 +30,9 @@ fn handle_request(request: Request, video_path: &Path) {
     let _ = request.respond(response);
 }
 
-#[tauri::command]
 pub async fn stream_video(
     path: String,
-    state: State<'_, VideoStreamingState>,
+    state: &VideoStreamingState,
 ) -> Result<String, String> {
     let video_path = Path::new(&path);
     if !video_path.exists() {
@@ -54,10 +55,9 @@ pub async fn stream_video(
     Ok(format!("http://{}", addr))
 }
 
-#[tauri::command]
 pub async fn stop_video_stream(
     port: u16,
-    state: State<'_, VideoStreamingState>,
+    state: &VideoStreamingState,
 ) -> Result<(), String> {
     if let Some(server) = state.0.lock().unwrap().remove(&port) {
         server.unblock();

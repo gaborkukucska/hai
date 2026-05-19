@@ -415,16 +415,34 @@ impl DeploymentOrchestrator {
             DeviceRole::Standalone => vec!["hainet-core", "hainet-portal"],
             DeviceRole::UIOnly => vec!["hainet-portal"],
         };
-        let target_dir = find_workspace_root()?.join("target/release");
+        // Use target-triple-aware path to match where build_binaries() puts output
+        let workspace_root = find_workspace_root()?;
+        let host_arch = std::env::consts::ARCH;
+        let target_triple = get_target_triple(host_arch);
+        let target_dir = match target_triple {
+            Some(triple) => {
+                let triple_path = workspace_root.join("target").join(triple).join("release");
+                let plain_path = workspace_root.join("target/release");
+                // Prefer the triple path (build_binaries uses --target), fall back to plain
+                if triple_path.exists() { triple_path } else { plain_path }
+            }
+            None => workspace_root.join("target/release"),
+        };
+        info!("📂 Looking for compiled binaries in: {}", target_dir.display());
         for binary_name in binaries {
             let source_path = target_dir.join(binary_name);
             if source_path.exists() {
+                info!("✓ Found binary: {}", source_path.display());
                 Command::new("sudo")
                     .args(&["cp", source_path.to_str().unwrap(), "/usr/local/bin/"])
                     .status()?;
                 Command::new("sudo")
                     .args(&["chmod", "+x", &format!("/usr/local/bin/{}", binary_name)])
                     .status()?;
+                println!("✓ Installed {} to /usr/local/bin/", binary_name);
+            } else {
+                warn!("⚠️  Binary not found at {}. Service will fail to start!", source_path.display());
+                println!("⚠️  Binary {} not found at {} — skipping", binary_name, source_path.display());
             }
         }
 
@@ -773,6 +791,32 @@ WantedBy=multi-user.target
         // Find workspace root
         let workspace_root = find_workspace_root().context("Failed to find workspace root")?;
         
+        // Build Vite frontend if portal is included
+        if packages.contains(&"hainet-portal") {
+            println!("📦 Building Vite frontend for hainet-portal...");
+            let portal_dir = workspace_root.join("hainet-portal");
+            let npm_install = Command::new("npm")
+                .current_dir(&portal_dir)
+                .args(&["install"])
+                .status()
+                .context("Failed to execute npm install for hainet-portal")?;
+                
+            if !npm_install.success() {
+                anyhow::bail!("npm install failed for hainet-portal");
+            }
+            
+            let npm_build = Command::new("npm")
+                .current_dir(&portal_dir)
+                .args(&["run", "build"])
+                .status()
+                .context("Failed to execute npm run build for hainet-portal")?;
+                
+            if !npm_build.success() {
+                anyhow::bail!("npm run build failed for hainet-portal");
+            }
+            println!("✓ Vite frontend built successfully");
+        }
+        
         // Build each required package individually in release mode
         for package in &packages {
             println!("📦 Building {} for target: {}", package, target);
@@ -783,7 +827,7 @@ WantedBy=multi-user.target
                 .context(format!("Failed to execute cargo build for {}", package))?;
             
             if !status.success() {
-                println!("⚠️  Build failed for {} — skipping (it may not exist yet)", package);
+                anyhow::bail!("Build failed for {}. Aborting deployment to prevent using stale binaries.", package);
             } else {
                 println!("✓ {} built successfully", package);
             }
@@ -806,22 +850,9 @@ WantedBy=multi-user.target
                 .args(&["apt-get", "update"])
                 .status()?;
             
-            // Detect the correct webkit2gtk package (4.1 for newer Ubuntu, 4.0 for older)
-            let webkit_pkg = if Command::new("apt-cache")
-                .args(&["show", "libwebkit2gtk-4.1-dev"])
-                .output()
-                .map_or(false, |o| o.status.success())
-            {
-                "libwebkit2gtk-4.1-dev"
-            } else {
-                "libwebkit2gtk-4.0-dev"
-            };
-            
-            println!("  Using webkit package: {}", webkit_pkg);
-            
-            let base_deps = ["build-essential", "cmake", "gcc", "g++", "make", "pkg-config", "libssl-dev", "libgtk-3-dev", "libsoup2.4-dev"];
+            let base_deps = ["build-essential", "cmake", "gcc", "g++", "make", "pkg-config", "libssl-dev", "protobuf-compiler"];
             let mut install_cmd = Command::new("sudo");
-            install_cmd.args(&["apt-get", "install", "-y"]).args(&base_deps).arg(webkit_pkg);
+            install_cmd.args(&["apt-get", "install", "-y"]).args(&base_deps);
             
             if install_cmd.status()?.success() {
                 println!("✓ Dependencies installed successfully.");

@@ -17,6 +17,12 @@ export default defineConfig({
       // Tell vite to ignore watching `src-tauri`
       ignored: ['**/src-tauri/**'],
     },
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+      }
+    }
   },
   
   // Build configuration for Tauri

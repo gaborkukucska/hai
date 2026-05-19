@@ -5,6 +5,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use tracing::{debug, error, info, warn};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Device preference for audio/video devices
@@ -291,7 +292,7 @@ impl SettingsStorage {
         family: &str,
         allow_fallback: bool,
     ) -> Result<()> {
-        log::debug!("[DB] Saving model preference: {} -> {} (fallback: {})", agent_type, family, allow_fallback);
+        debug!("[DB] Saving model preference: {} -> {} (fallback: {})", agent_type, family, allow_fallback);
         let timestamp = Self::now();
         
         let result = sqlx::query(
@@ -311,7 +312,7 @@ impl SettingsStorage {
         .execute(&self.pool)
         .await?;
         
-        log::debug!("[DB] Save result: rows_affected={}", result.rows_affected());
+        debug!("[DB] Save result: rows_affected={}", result.rows_affected());
         Ok(())
     }
     
@@ -335,7 +336,7 @@ impl SettingsStorage {
     
     /// Get all model preferences
     pub async fn get_all_model_preferences(&self) -> Result<Vec<ModelPreference>> {
-        log::debug!("[DB] Fetching all model preferences...");
+        debug!("[DB] Fetching all model preferences...");
         let results = sqlx::query_as::<_, (String, String, i32)>(
             "SELECT agent_type, preferred_family, allow_fallback 
              FROM model_preferences 
@@ -344,9 +345,9 @@ impl SettingsStorage {
         .fetch_all(&self.pool)
         .await?;
         
-        log::debug!("[DB] Found {} model preferences in database", results.len());
+        debug!("[DB] Found {} model preferences in database", results.len());
         for (agent_type, family, fallback) in &results {
-            log::debug!("[DB]   - {}: {} (fallback: {})", agent_type, family, fallback);
+            debug!("[DB]   - {}: {} (fallback: {})", agent_type, family, fallback);
         }
         
         Ok(results

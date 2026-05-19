@@ -2,7 +2,7 @@
 //! Tauri command handlers for vision capabilities.
 
 use std::sync::Mutex;
-use tauri::{command, State};
+
 use image::ImageFormat;
 use hainet_core::multimodal::{VisionSystem, VisionConfig, PrivacyMode, FrameAnalysisResult};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -17,13 +17,13 @@ pub struct FrameCaptureResult {
     analysis: FrameAnalysisResult,
 }
 
-#[command]
+
 pub async fn list_webcam_devices() -> Result<Vec<String>, String> {
     VisionSystem::list_devices().map_err(|e| e.to_string())
 }
 
-#[command]
-pub async fn start_webcam(state: State<'_, VisionState>, config: VisionConfig) -> Result<(), String> {
+
+pub async fn start_webcam(state: &VisionState, config: VisionConfig) -> Result<(), String> {
     let mut vision_system = state.0.lock().unwrap();
     let new_system = VisionSystem::new(config);
     new_system.start_capture().map_err(|e| format!("{:?}", e))?;
@@ -31,8 +31,8 @@ pub async fn start_webcam(state: State<'_, VisionState>, config: VisionConfig) -
     Ok(())
 }
 
-#[command]
-pub async fn stop_webcam(state: State<'_, VisionState>) -> Result<(), String> {
+
+pub async fn stop_webcam(state: &VisionState) -> Result<(), String> {
     let mut vision_system = state.0.lock().unwrap();
     if let Some(system) = vision_system.take() {
         system.stop_capture();
@@ -40,8 +40,8 @@ pub async fn stop_webcam(state: State<'_, VisionState>) -> Result<(), String> {
     Ok(())
 }
 
-#[command]
-pub async fn capture_frame(state: State<'_, VisionState>) -> Result<FrameCaptureResult, String> {
+
+pub async fn capture_frame(state: &VisionState) -> Result<FrameCaptureResult, String> {
     let vision_system = state.0.lock().unwrap();
     if let Some(system) = &*vision_system {
         let frame = system.capture_frame().map_err(|e| format!("{:?}", e))?;
@@ -62,8 +62,8 @@ pub async fn capture_frame(state: State<'_, VisionState>) -> Result<FrameCapture
     }
 }
 
-#[command]
-pub async fn set_privacy_mode(state: State<'_, VisionState>, mode: PrivacyMode) -> Result<(), String> {
+
+pub async fn set_privacy_mode(state: &VisionState, mode: PrivacyMode) -> Result<(), String> {
     let mut vision_system = state.0.lock().unwrap();
     if let Some(_system) = &mut *vision_system {
         // This requires modifying VisionSystem to allow config changes,

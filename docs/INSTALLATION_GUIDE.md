@@ -124,15 +124,16 @@ which whisper
 which piper
 ```
 
-### Step 4: Start HAI-Net Portal (UI)
+### Step 4: Access the HAI-Net Portal (UI)
 
-```bash
-cd hainet-portal
-npm install
-npm run tauri dev
+The smart installer will automatically build and start the HAI-Net services (including the Web Portal) for you. 
+
+Simply open your web browser and navigate to:
+```
+http://127.0.0.1:3000
 ```
 
-The HAI-Net Portal will open, and you can start interacting with your AI assistant.
+*(Note: If you are doing UI development, you can still run `cd hainet-portal && npm run dev` to start the Vite development server).*
 
 ---
 
@@ -425,10 +426,9 @@ export HAINET_ROLE=master
 ./target/release/hainet-chain &
 ./target/release/hainet-bridge &
 
-# Start Portal UI
-cd hainet-portal
-npm install
-npm run tauri dev
+# The Portal UI is automatically served by the hainet-portal binary on port 3000.
+# Open your browser to http://127.0.0.1:3000
+./target/release/hainet-portal &
 ```
 
 ### On Slave Nodes:
@@ -459,10 +459,8 @@ pkg install rust git nodejs
 git clone https://github.com/gaborkucska/hai.git
 cd hai
 
-# Build Portal only
-cd hainet-portal
-npm install
-npm run dev
+# Run the Portal binary (which embeds the UI)
+./target/release/hainet-portal
 ```
 
 Access via browser: `http://192.168.1.10:3000` (master IP)
@@ -685,8 +683,8 @@ sync_interval_secs = 300  # 5 minutes
 
 ---
 
-**Last Updated**: 2025-10-31  
-**Version**: 0.16-alpha  
-**Phase**: 6A Complete - Installer Framework Ready
+**Last Updated**: 2026-05-19  
+**Version**: 0.26-alpha  
+**Phase**: 7B Complete - Headless Web Portal and Mesh Deployment
 
 <!-- # END OF FILE docs/INSTALLATION_GUIDE.md -->

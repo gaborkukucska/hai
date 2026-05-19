@@ -6,11 +6,11 @@ HAI-Net consists of several interconnected Rust crates:
 
 ```
 hainet/
-├── hainet-core/          # Multimodal features, networking, and orchestration
+├── hainet-core/          # Core daemon, orchestration, and backend API provider for the UI
 ├── hainet-persona/       # 🤖 Multi-agent AI system
 ├── hainet-chain/         # Blockchain & governance
 ├── hainet-seed/          # 🚀 Smart installer & mesh deployer
-├── hainet-portal/        # Web UI (stub — Tauri integration planned)
+├── hainet-portal/        # Headless Web UI (React/Vite app served by hainet-core or Axum)
 └── hainet-bridge/        # External API gateway
 ```
 
@@ -27,8 +27,9 @@ hainet/
 - SSH2 (secure mesh deployment)
 
 **UI:**
-- Tauri (desktop app framework — planned)
-- React (frontend library — planned)
+- React & Vite (Headless Web Portal)
+- Standard HTTP/REST APIs (decoupled from Tauri for network accessibility)
+- Axum (static asset serving)
 
 **AI Integration:**
 - Ollama (local LLM hosting)

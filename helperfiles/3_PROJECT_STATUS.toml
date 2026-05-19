@@ -164,10 +164,11 @@ tasks = [
 
 [integration.phases.phase_5]
 name = "Unified Portal"
-status = "not_started"
+status = "in_progress"
 estimated_weeks = "10-14"
 depends_on = ["phase_3", "phase_4"]
 tasks = [
+    "[DONE] Decouple Portal from Tauri to Headless Axum Daemon",
     "Agent Workspace module (from TrippleEffect)",
     "Compute Dashboard module (from PPLPWR)",
     "Media Studio module (from NoSlop)",
@@ -263,11 +264,11 @@ phase_10_progress = 0.20  # 1/5 sessions complete (10.1 Auto-Healing)
 phase_8b_progress = 1.00  # 5/5 sessions complete - PHASE 8B COMPLETE! 🎉
 phase_session_40_progress = 1.00  # Phase 2 COMPLETE (100%), Phase 3 COMPLETE (100%) - Phase 1 deferred
 # Grand Integration Progress
-integration_phase_1_progress = 0.00  # Agentic Core (TrippleEffect → HAI-Net)
+integration_phase_1_progress = 0.50  # Agentic Core Bridge and Protobufs Complete
 integration_phase_2_progress = 0.00  # Compute Sharing (PPLPWR → hainet-collab)
 integration_phase_3_progress = 0.00  # Media Creation (NoSlop → MCP servers)
 integration_phase_4_progress = 0.00  # Privacy & Social (gChat → hainet-social)
-integration_phase_5_progress = 0.00  # Unified Portal
+integration_phase_5_progress = 0.30  # Unified Portal scaffolded and unblocked
 integration_phase_6_progress = 0.00  # TropoMesh Hardware Compatibility
 total_subproject_loc_audited = 189000  # HAI-Net(40K) + TE(29K) + PPLPWR(50K) + NoSlop(24K) + gChat(45K) + TropoMesh(81K README)
 total_loc_produced = 40537  # +120 LOC (Session 42: selection.rs +120 net changes)
@@ -492,5 +493,5 @@ key_features = [
     "Dark Earthy Theming System",
     "Integrated Chat, Feed, Studio, Compute, and Network modules"
 ]
-compilation_status = "Pending"
-test_status = "Pending"
+compilation_status = "Success (API Proxy functioning)"
+test_status = "UI Scaffolding Verified"

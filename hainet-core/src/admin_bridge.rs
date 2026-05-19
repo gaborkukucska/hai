@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::{info, warn, error, debug};
 
 use hainet_persona::agents::{AdminAgent, Agent, AgentContext, MetricsCollector};
 use hainet_persona::messaging::MessageBus;
@@ -79,7 +80,7 @@ pub struct AdminBridge {
 impl AdminBridge {
     /// Create new Admin AI bridge
     pub async fn new() -> Result<Self> {
-        log::info!("Initializing Admin AI Bridge...");
+        info!("Initializing Admin AI Bridge...");
         
         // Determine prompts path - try multiple strategies
         let prompts_path = if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
@@ -98,7 +99,7 @@ impl AdminBridge {
                 .join("prompts")
         };
         
-        log::info!("Prompts path: {:?}", prompts_path);
+        info!("Prompts path: {:?}", prompts_path);
         
         // Create project manager with SQLite database
         // Use a more reliable path in the user's home directory
@@ -133,32 +134,32 @@ impl AdminBridge {
             let client = mcp_client.write().await;
             match client.start_default_servers().await {
                 Ok(results) => {
-                    log::info!("MCP servers initialized successfully");
+                    info!("MCP servers initialized successfully");
                     // Log server initialization results
                     for (server_name, result) in &results {
                         match result {
-                            Ok(_) => log::info!("MCP server '{}' started", server_name),
-                            Err(e) => log::warn!("MCP server '{}' failed to start: {:?}", server_name, e),
+                            Ok(_) => info!("MCP server '{}' started", server_name),
+                            Err(e) => warn!("MCP server '{}' failed to start: {:?}", server_name, e),
                         }
                     }
                     // Log available servers for diagnostics
                     let servers = client.list_servers().await;
-                    log::info!("Available MCP servers: {:?}", servers);
+                    info!("Available MCP servers: {:?}", servers);
                 },
                 Err(e) => {
-                    log::warn!("Failed to initialize MCP servers: {:?}", e);
-                    log::warn!("Workers will have no tools available");
+                    warn!("Failed to initialize MCP servers: {:?}", e);
+                    warn!("Workers will have no tools available");
                 }
             }
         }
         
         let db_path = data_dir.join("projects.db");
-        log::info!("Database path: {:?}", db_path);
+        info!("Database path: {:?}", db_path);
         
         // SQLite connection string format: sqlite://path/to/db?mode=rwc
         // mode=rwc means: read-write-create (create if doesn't exist)
         let db_connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
-        log::info!("Database connection string: {}", db_connection_string);
+        info!("Database connection string: {}", db_connection_string);
         
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new(&db_connection_string).await?
@@ -200,7 +201,7 @@ impl AdminBridge {
         // Create STT handler
         let stt_handler = Arc::new(STTHandler::new());
         
-        log::info!("Admin AI Bridge initialized successfully");
+        info!("Admin AI Bridge initialized successfully");
         
         let bridge = Self {
             admin: Arc::new(RwLock::new(admin)),
@@ -218,31 +219,31 @@ impl AdminBridge {
         
         if let Some(mut receiver) = receiver_opt {
             tokio::spawn(async move {
-                log::info!("Admin agent message listener started");
+                info!("Admin agent message listener started");
                 while let Some(msg) = receiver.recv().await {
                     let mut admin = admin_clone.write().await;
                     if let Err(e) = admin.handle_message(msg).await {
-                        log::error!("Error handling message in Admin agent: {:?}", e);
+                        error!("Error handling message in Admin agent: {:?}", e);
                     }
                 }
-                log::warn!("Admin agent message listener ended");
+                warn!("Admin agent message listener ended");
             });
         } else {
-            log::warn!("Could not take receiver from Admin agent - message listening disabled");
+            warn!("Could not take receiver from Admin agent - message listener not started");
         }
 
         // Register User agent to receive notifications
         let user_id = hainet_persona::messaging::AgentId::user("user".to_string());
         let (mut user_rx, _) = context.message_bus.write().await.register_agent(user_id.clone()).await?;
         
-        log::info!("Registered User agent: {:?}", user_id);
+        info!("Registered User agent: {:?}", user_id);
         
         // Spawn listener for User agent messages
         let history_clone = bridge.message_history.clone();
         tokio::spawn(async move {
-            log::info!("User agent listener started");
+            info!("User agent listener started");
             while let Some(msg) = user_rx.recv().await {
-                log::info!("User agent received message from {:?}: {:?}", msg.from, msg.content);
+                info!("User agent received message from {:?}: {:?}", msg.from, msg.content);
                 
                 if let hainet_persona::messaging::MessageContent::Response(text) = msg.content {
                     let chat_msg = ChatMessage {
@@ -258,7 +259,7 @@ impl AdminBridge {
                     history_clone.write().await.push(chat_msg);
                 }
             }
-            log::warn!("User agent listener ended");
+            warn!("User agent listener ended");
         });
         
         Ok(bridge)
@@ -266,7 +267,7 @@ impl AdminBridge {
     
     /// Send message to Admin AI and get response
     pub async fn send_message(&self, content: String, attachments: Vec<FileAttachment>) -> Result<ChatResponse> {
-        log::info!("Processing user message: {}", content);
+        info!("Processing user message: {}", content);
         
         // Create user message
         let user_message = ChatMessage {
@@ -302,8 +303,8 @@ impl AdminBridge {
         let response_text = match admin.process_user_input(input).await {
             Ok(text) => text,
             Err(e) => {
-                log::error!("Admin AI process_user_input failed: {:?}", e);
-                log::error!("Error source chain: {:#}", e);
+                error!("Admin AI process_user_input failed: {:?}", e);
+                error!("Error source chain: {:#}", e);
                 return Err(e);
             }
         };
@@ -383,7 +384,7 @@ impl AdminBridge {
     /// 
     /// Flow: Portal audio → STT Handler → Admin AI (TODO: provider discovery) → Portal
     pub async fn transcribe_audio(&self, audio: AudioData) -> Result<TranscriptionResult> {
-        log::info!("Transcribing audio: {} channels, {} Hz, {} format", 
+        info!("Transcribing audio: {} channels, {} Hz, {} format", 
                    audio.channels, audio.sample_rate, audio.format);
         
         // TODO: This currently returns a placeholder error

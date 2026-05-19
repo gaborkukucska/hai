@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 export default function ComputeNode() {
+  const [isContributing, setIsContributing] = useState(true);
+
   return (
     <div className="flex-1 h-full overflow-y-auto bg-theme-bg-primary text-theme-text-primary p-6">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -12,8 +14,10 @@ export default function ComputeNode() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-theme-text-muted">Contribution:</span>
-            <button className="w-12 h-6 rounded-full bg-theme-accent-success relative cursor-pointer">
-               <div className="w-4 h-4 rounded-full bg-white absolute right-1 top-1"></div>
+            <button 
+              onClick={() => setIsContributing(!isContributing)}
+              className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors ${isContributing ? 'bg-theme-accent-success' : 'bg-theme-bg-tertiary'}`}>
+               <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${isContributing ? 'right-1' : 'left-1'}`}></div>
             </button>
           </div>
         </div>
@@ -30,7 +34,11 @@ export default function ComputeNode() {
              <div className="bg-theme-bg-tertiary rounded-lg p-4 border border-theme-accent-primary/50">
                 <p className="text-xs text-theme-text-muted uppercase tracking-wider">GPU (Primary Compute)</p>
                 <p className="text-lg font-medium mt-1">RTX 3060 (12GB)</p>
-                <p className="text-xs text-theme-accent-success mt-2">Idle (0% Usage)</p>
+                {isContributing ? (
+                  <p className="text-xs text-theme-accent-success mt-2">Active (84% Usage)</p>
+                ) : (
+                  <p className="text-xs text-theme-text-secondary mt-2">Idle (0% Usage)</p>
+                )}
              </div>
              <div className="bg-theme-bg-tertiary rounded-lg p-4">
                 <p className="text-xs text-theme-text-muted uppercase tracking-wider">RAM</p>

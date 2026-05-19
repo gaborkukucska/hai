@@ -127,7 +127,17 @@ export default function NetworkSettings() {
                  <input type="password" placeholder="sk-or-v1-..." className="w-full bg-theme-bg-tertiary border border-theme-border rounded-md px-3 py-2" />
                </div>
              </div>
-             <button className="px-4 py-2 bg-theme-bg-tertiary text-sm rounded-md hover:bg-theme-border transition-colors">Save Providers</button>
+             <button 
+               onClick={() => {
+                 const btn = document.getElementById('save-providers-btn');
+                 if (btn) {
+                   const old = btn.innerText;
+                   btn.innerText = 'Saved!';
+                   setTimeout(() => btn.innerText = old, 2000);
+                 }
+               }}
+               id="save-providers-btn"
+               className="px-4 py-2 bg-theme-bg-tertiary text-sm rounded-md hover:bg-theme-border transition-colors">Save Providers</button>
           </div>
         </section>
 

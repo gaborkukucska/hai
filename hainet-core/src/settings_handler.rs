@@ -3,10 +3,10 @@
 
 use serde::{Serialize, Deserialize};
 use sysinfo::{System, Disks};
-use tauri::State;
-use std::sync::Mutex;
+
+use tracing::{info, error, warn, debug};
 use tokio::sync::RwLock;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use crate::settings_storage::{SettingsStorage, DevicePreference, ModelPreference};
 
 pub struct SystemInfo {
@@ -131,16 +131,14 @@ pub struct SystemStatus {
 }
 
 
-#[tauri::command]
-pub async fn get_settings(storage: State<'_, SettingsState>) -> Result<Settings, String> {
+pub async fn get_settings(storage: &crate::SettingsState) -> Result<Settings, String> {
     let storage = storage.read().await;
     Settings::from_storage(&*storage).await
 }
 
-#[tauri::command]
 pub async fn update_settings(
     settings: Settings,
-    storage: State<'_, SettingsState>
+    storage: &crate::SettingsState
 ) -> Result<(), String> {
     let storage = storage.read().await;
     
@@ -155,14 +153,13 @@ pub async fn update_settings(
         .await
         .map_err(|e| format!("Failed to save settings: {}", e))?;
     
-    log::info!("Settings saved successfully");
+    info!("Settings saved successfully");
     Ok(())
 }
 
-#[tauri::command]
 pub async fn save_device_preference(
     device: DevicePreference,
-    storage: State<'_, SettingsState>
+    storage: &crate::SettingsState
 ) -> Result<(), String> {
     let storage = storage.read().await;
     
@@ -170,14 +167,13 @@ pub async fn save_device_preference(
         .await
         .map_err(|e| format!("Failed to save device preference: {}", e))?;
     
-    log::info!("Device preference saved: {} - {}", device.device_type, device.device_name);
+    info!("Device preference saved: {} - {}", device.device_type, device.device_name);
     Ok(())
 }
 
-#[tauri::command]
 pub async fn get_device_preferences(
     device_type: String,
-    storage: State<'_, SettingsState>
+    storage: &crate::SettingsState
 ) -> Result<Vec<DevicePreference>, String> {
     let storage = storage.read().await;
     
@@ -186,10 +182,9 @@ pub async fn get_device_preferences(
         .map_err(|e| format!("Failed to get device preferences: {}", e))
 }
 
-#[tauri::command]
 pub async fn get_default_device(
     device_type: String,
-    storage: State<'_, SettingsState>
+    storage: &crate::SettingsState
 ) -> Result<Option<DevicePreference>, String> {
     let storage = storage.read().await;
     
@@ -198,50 +193,48 @@ pub async fn get_default_device(
         .map_err(|e| format!("Failed to get default device: {}", e))
 }
 
-#[tauri::command]
 pub async fn get_model_preferences(
-    storage: State<'_, SettingsState>
+    storage: &crate::SettingsState
 ) -> Result<Vec<ModelPreference>, String> {
-    log::info!("[Backend] get_model_preferences called");
+    info!("[Backend] get_model_preferences called");
     let storage = storage.read().await;
     
     let prefs = storage.get_all_model_preferences()
         .await
         .map_err(|e| {
-            log::error!("[Backend] Failed to get model preferences: {}", e);
+            error!("[Backend] Failed to get model preferences: {}", e);
             format!("Failed to get model preferences: {}", e)
         })?;
     
-    log::info!("[Backend] Returning {} model preferences", prefs.len());
+    info!("[Backend] Returning {} model preferences", prefs.len());
     for pref in &prefs {
-        log::debug!("[Backend]   - {}: {} (fallback: {})", pref.agent_type, pref.preferred_family, pref.allow_fallback);
+        debug!("[Backend]   - {}: {} (fallback: {})", pref.agent_type, pref.preferred_family, pref.allow_fallback);
     }
     
     Ok(prefs)
 }
 
-#[tauri::command]
 pub async fn save_model_preference(
     agent_type: String,
     family: String,
     allow_fallback: bool,
-    storage: State<'_, SettingsState>
+    storage: &crate::SettingsState
 ) -> Result<(), String> {
-    log::info!("[Backend] save_model_preference called: {} -> {} (fallback: {})", agent_type, family, allow_fallback);
+    info!("[Backend] save_model_preference called: {} -> {} (fallback: {})", agent_type, family, allow_fallback);
     let storage = storage.read().await;
     
     storage.save_model_preference(&agent_type, &family, allow_fallback)
         .await
         .map_err(|e| {
-            log::error!("[Backend] Failed to save model preference: {}", e);
+            error!("[Backend] Failed to save model preference: {}", e);
             format!("Failed to save model preference: {}", e)
         })?;
     
-    log::info!("[Backend] Model preference saved successfully: {} -> {}", agent_type, family);
+    info!("[Backend] Model preference saved successfully: {} -> {}", agent_type, family);
     
     // Sync preference to hainet-persona database
     if let Err(e) = sync_preference_to_persona(&agent_type, &family).await {
-        log::warn!("Failed to sync preference to hainet-persona: {}", e);
+        warn!("Failed to sync preference to hainet-persona: {}", e);
         // Don't fail the request - Portal settings were saved successfully
     }
     
@@ -271,15 +264,14 @@ async fn sync_preference_to_persona(agent_type: &str, model_family: &str) -> Res
     user_settings.set_model_preference(agent_type, model_family).await
         .map_err(|e| format!("Failed to set preference in hainet-persona: {}", e))?;
     
-    log::info!("Synced preference for {} to {} in hainet-persona database", agent_type, model_family);
+    info!("Synced preference for {} to {} in hainet-persona database", agent_type, model_family);
     
     Ok(())
 }
 
-#[tauri::command]
 pub async fn get_model_preference(
     agent_type: String,
-    storage: State<'_, SettingsState>
+    storage: &crate::SettingsState
 ) -> Result<Option<ModelPreference>, String> {
     let storage = storage.read().await;
     
@@ -288,8 +280,7 @@ pub async fn get_model_preference(
         .map_err(|e| format!("Failed to get model preference: {}", e))
 }
 
-#[tauri::command]
-pub fn get_system_status(system_info: State<SystemInfo>) -> SystemStatus {
+pub fn get_system_status(system_info: &crate::settings_handler::SystemInfo) -> SystemStatus {
     let mut sys = system_info.sys.lock().unwrap();
     sys.refresh_cpu();
     sys.refresh_memory();

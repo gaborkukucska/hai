@@ -20,11 +20,14 @@ use hainet_persona::projects::ProjectManager;
 use hainet_persona::tools::mcp::MCPClientManager;
 use hainet_persona::guardian::GuardianSystem;
 use hainet_persona::ai_providers::AIProviderManager;
+use hainet_persona::bridge::{sidecar::AgentSidecar, client::BridgeClient};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
-    let _guard = hainet_core::logging::initialize_logging("hainet-persona", "debug")?;
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("hainet_persona=debug".parse().unwrap()))
+        .init();
 
     info!("🤖 HAI-Net Persona starting up...");
     info!("📋 Version: {}", env!("CARGO_PKG_VERSION"));
@@ -44,10 +47,31 @@ async fn main() -> Result<()> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .unwrap_or_else(|_| ".".to_string());
     let prompts_path = PathBuf::from(&manifest_dir).join("prompts");
+    let hai_root = PathBuf::from(&manifest_dir).parent().unwrap_or(std::path::Path::new(".")).to_string_lossy().to_string();
+    
     let prompt_manager = Arc::new(RwLock::new(
         PromptManager::new(prompts_path)?
     ));
     info!("✅ Prompt management system initialized");
+
+    // 1.5. TrippleEffect Python Sidecar
+    let mut sidecar = AgentSidecar::new(50051);
+    match sidecar.spawn(&hai_root).await {
+        Ok(_) => info!("✅ TrippleEffect AgentService sidecar initialized"),
+        Err(e) => warn!("⚠️ Failed to spawn TrippleEffect sidecar: {}. The Python bridge may not be available.", e),
+    }
+
+    // Try to connect bridge client
+    let mut bridge_client = match BridgeClient::connect("http://127.0.0.1:50051".to_string()).await {
+        Ok(client) => {
+            info!("✅ Connected to TrippleEffect bridge client");
+            Some(client)
+        },
+        Err(e) => {
+            warn!("⚠️ Failed to connect to TrippleEffect bridge client: {}", e);
+            None
+        }
+    };
 
     // 2. Message Bus
     let message_bus = Arc::new(RwLock::new(
@@ -148,6 +172,12 @@ async fn main() -> Result<()> {
     info!("🛡️  Stopping Guardian Agent...");
     guardian.stop().await?;
     info!("✅ Guardian Agent stopped");
+    
+    // Stop TrippleEffect sidecar
+    info!("🛑 Stopping TrippleEffect sidecar...");
+    if let Err(e) = sidecar.stop().await {
+        warn!("⚠️ Failed to cleanly stop sidecar: {}", e);
+    }
     
     // Export final metrics
     info!("📊 Exporting final metrics...");

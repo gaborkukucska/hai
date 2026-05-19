@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 export default function AgentStudio() {
+  const [isPaused, setIsPaused] = useState(false);
+  const [showOutput, setShowOutput] = useState(false);
+
   return (
     <div className="flex-1 h-full overflow-y-auto bg-theme-bg-primary text-theme-text-primary p-6">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -19,8 +22,8 @@ export default function AgentStudio() {
           {/* Active Agents */}
           <div className="col-span-1 bg-theme-bg-secondary border border-theme-border rounded-xl p-5">
              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-               <span className="w-2 h-2 rounded-full bg-theme-accent-success animate-pulse"></span>
-               Active Swarm
+               <span className={`w-2 h-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-theme-accent-success animate-pulse'}`}></span>
+               Active Swarm {isPaused && "(Paused)"}
              </h2>
              <div className="space-y-3">
                <div className="flex items-center justify-between p-2 rounded-md hover:bg-theme-bg-tertiary transition-colors">
@@ -49,9 +52,27 @@ export default function AgentStudio() {
                 <p><span className="text-theme-accent-success">[Worker: Editor]</span> Received script, generating prompts for ComfyUI...</p>
                 <p><span className="text-theme-text-secondary">[System]</span> Triggering workflow 'vid2vid' via local ComfyUI instance.</p>
              </div>
+             {showOutput && (
+               <div className="mt-4 p-4 border border-theme-accent-primary/30 bg-theme-bg-tertiary rounded-md">
+                 <p className="text-sm font-medium mb-2">Generated Output</p>
+                 <div className="w-full h-32 bg-black rounded flex items-center justify-center border border-theme-border">
+                   <p className="text-theme-text-muted text-xs font-mono">Loading MP4 stream...</p>
+                 </div>
+               </div>
+             )}
              <div className="mt-4 flex gap-2">
-                <button className="flex-1 px-4 py-2 bg-theme-bg-tertiary text-theme-text-primary rounded-md hover:bg-theme-border transition-colors">Pause Project</button>
-                <button className="flex-1 px-4 py-2 bg-theme-bg-tertiary text-theme-text-primary rounded-md hover:bg-theme-border transition-colors">View Outputs</button>
+                <button 
+                  onClick={() => setIsPaused(!isPaused)}
+                  className={`flex-1 px-4 py-2 text-theme-text-primary rounded-md transition-colors ${isPaused ? 'bg-theme-accent-success/20 border border-theme-accent-success' : 'bg-theme-bg-tertiary hover:bg-theme-border'}`}
+                >
+                  {isPaused ? "Resume Project" : "Pause Project"}
+                </button>
+                <button 
+                  onClick={() => setShowOutput(!showOutput)}
+                  className="flex-1 px-4 py-2 bg-theme-bg-tertiary text-theme-text-primary rounded-md hover:bg-theme-border transition-colors"
+                >
+                  {showOutput ? "Hide Outputs" : "View Outputs"}
+                </button>
              </div>
           </div>
         </div>

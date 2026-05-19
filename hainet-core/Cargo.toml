@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 config = { workspace = true }
 futures = { workspace = true }
+rand = { workspace = true }
 
 # Networking
 libp2p = { workspace = true, features = ["mdns", "tcp", "tokio", "ping", "noise", "yamux", "tls"] }
@@ -69,6 +70,19 @@ symphonia = "0.5"
 [dev-dependencies]
 tempfile = "3.0"
 tokio-test = "0.4"
+
+[dependencies.hainet-persona]
+path = "../hainet-persona"
+
+[dependencies.sqlx]
+workspace = true
+features = ["runtime-tokio-rustls", "sqlite"]
+
+[dependencies.tiny_http]
+version = "0.12"
+
+[dependencies.sysinfo]
+workspace = true
 
 [[bin]]
 name = "hainet-core"
