@@ -132,34 +132,34 @@ tasks = [
 
 [integration.phases.phase_3]
 name = "Media Creation (NoSlop → MCP servers)"
-status = "not_started"
+status = "completed"
 estimated_weeks = "6-10"
 depends_on = ["phase_1"]
 tasks = [
-    "Create hainet-media-mcp server",
-    "Port ComfyUI WorkflowGenerator",
-    "Port FFmpeg/OpenCV processing tools",
-    "Port worker specialization templates",
-    "Retire NoSlop standalone backend/frontend/social"
+    "[DONE] Create hainet-media-mcp server",
+    "[DONE] Port ComfyUI WorkflowGenerator",
+    "[DONE] Port FFmpeg/OpenCV processing tools",
+    "[DONE] Port worker specialization templates",
+    "[DONE] Retire NoSlop standalone backend/frontend/social"
 ]
 
 [integration.phases.phase_4]
 name = "Privacy & Social Mesh (gChat → hainet-social)"
-status = "not_started"
+status = "completed"
 estimated_weeks = "8-12"
 depends_on = ["phase_1"]
 tasks = [
-    "Create hainet-social crate",
-    "Port 32 packet types to Rust enum (serde)",
-    "Port daisy-chain gossip to libp2p gossipsub + TTL",
-    "Port E2E encryption (Ed25519, X25519, ChaCha20)",
-    "Port Handle.Tripcode identity system",
-    "Port adaptive download manager (AIMD congestion control)",
-    "Port pure streaming proxy (relay)",
-    "Port mesh recovery protocol",
-    "Port social features (feed, DMs, groups, follows)",
-    "Implement Tor as optional transport (arti crate)",
-    "Implement AI-to-AI social networking"
+    "[DONE] Create hainet-social crate",
+    "[DONE] Port 32 packet types to Rust enum (serde)",
+    "[DONE] Port daisy-chain gossip to libp2p gossipsub + TTL",
+    "[DONE] Port E2E encryption (Ed25519, X25519, ChaCha20)",
+    "[DONE] Port Handle.Tripcode identity system",
+    "[DONE] Port adaptive download manager (AIMD congestion control)",
+    "[DONE] Port pure streaming proxy (relay)",
+    "[DONE] Port mesh recovery protocol",
+    "[DONE] Port social features (feed, DMs, groups, follows)",
+    "[DONE] Implement Tor as optional transport (arti crate)",
+    "[DONE] Implement AI-to-AI social networking"
 ]
 
 [integration.phases.phase_5]
@@ -266,8 +266,8 @@ phase_session_40_progress = 1.00  # Phase 2 COMPLETE (100%), Phase 3 COMPLETE (1
 # Grand Integration Progress
 integration_phase_1_progress = 0.50  # Agentic Core Bridge and Protobufs Complete
 integration_phase_2_progress = 0.00  # Compute Sharing (PPLPWR → hainet-collab)
-integration_phase_3_progress = 0.00  # Media Creation (NoSlop → MCP servers)
-integration_phase_4_progress = 0.00  # Privacy & Social (gChat → hainet-social)
+integration_phase_3_progress = 1.00  # Media Creation Complete (NoSlop → MCP servers)
+integration_phase_4_progress = 1.00  # Privacy & Social Complete (gChat → hainet-social)
 integration_phase_5_progress = 0.30  # Unified Portal scaffolded and unblocked
 integration_phase_6_progress = 0.00  # TropoMesh Hardware Compatibility
 total_subproject_loc_audited = 189000  # HAI-Net(40K) + TE(29K) + PPLPWR(50K) + NoSlop(24K) + gChat(45K) + TropoMesh(81K README)

@@ -11,7 +11,10 @@ hainet/
 ├── hainet-chain/         # Blockchain & governance
 ├── hainet-seed/          # 🚀 Smart installer & mesh deployer
 ├── hainet-portal/        # Headless Web UI (React/Vite app embedded in core via rust-embed)
-└── hainet-bridge/        # External API gateway
+├── hainet-bridge/        # External API gateway
+├── hainet-collab/        # Compute sharing & hardware profiling
+├── hainet-social/        # Privacy-first decentralized social (gossip, E2E encryption)
+└── mcp-servers/          # External tools for AI (e.g., hainet-media-mcp for ComfyUI/FFmpeg)
 ```
 
 ## 🛠️ Technology Stack
@@ -35,6 +38,7 @@ hainet/
 - Ollama (local LLM hosting)
 - Whisper.cpp (speech-to-text)
 - Piper (text-to-speech)
+- ComfyUI & FFmpeg (media generation and processing via MCP)
 - MCP (Model Context Protocol for AI tools)
 
 **Deployment:**
