@@ -11,15 +11,16 @@ pub mod gossip;
 pub mod firewall;
 pub mod dedup;
 
+pub mod downloads;
+pub mod congestion;
+pub mod relay;
+pub mod recovery;
+pub mod feed;
+pub mod interactions;
+pub mod groups;
+pub mod messaging;
+
 // Future modules (Phase 4 full port):
-// pub mod downloads;
-// pub mod congestion;
-// pub mod relay;
-// pub mod recovery;
-// pub mod feed;
-// pub mod interactions;
-// pub mod groups;
-// pub mod messaging;
 // pub mod sync;
 // pub mod presence;
 

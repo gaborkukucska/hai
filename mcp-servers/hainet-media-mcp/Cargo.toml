@@ -1,0 +1,27 @@
+[package]
+name = "hainet-media-mcp"
+version = "0.1.0"
+edition = "2021"
+authors = ["HAI-Net Contributors"]
+description = "MCP server for Media Creation (ComfyUI and FFmpeg)"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# MCP (Model Context Protocol) - Official SDK
+rmcp = { workspace = true, features = ["server", "transport-io"] }
+rmcp-macros = { workspace = true }
+async-trait = "0.1"
+
+# Local dependencies
+hainet-core = { path = "../../hainet-core" }
+
+# Additional dependencies
+clap = { version = "4.0", features = ["derive"] }
+reqwest = { version = "0.11", features = ["json"] }

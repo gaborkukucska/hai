@@ -57,6 +57,7 @@ pub struct DeviceAssignment {
 /// Remote deployment orchestrator
 pub struct DeploymentOrchestrator {
     assignments: Vec<DeviceAssignment>,
+    shared_drive_path: String,
 }
 
 /// Returns the systemd service names that should be deployed for a given role.
@@ -74,7 +75,13 @@ impl DeploymentOrchestrator {
     pub fn new() -> Self {
         Self {
             assignments: Vec::new(),
+            shared_drive_path: "/media/hai-drive".to_string(),
         }
+    }
+    
+    /// Set the shared drive path
+    pub fn set_shared_drive_path(&mut self, path: String) {
+        self.shared_drive_path = path;
     }
     
     /// Assign roles to devices based on capabilities
@@ -963,10 +970,11 @@ WantedBy=multi-user.target
     
     /// Configure device with role-specific settings
     fn configure_device<C: SSHClientTrait>(&self, client: &C, assignment: &DeviceAssignment) -> Result<()> {
+        let log_dir = format!("{}/logs", self.shared_drive_path);
         // Create hainet.toml configuration with system directories
         let config = match assignment.role {
             DeviceRole::Master => {
-                "[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"/var/log/hainet\"\nlog_level = \"info\"\n".to_string()
+                format!("[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", log_dir)
             },
             DeviceRole::Slave => {
                 // Get master IP (first Master in assignments)
@@ -975,12 +983,12 @@ WantedBy=multi-user.target
                     .unwrap_or("10.0.0.10");
                 
                 format!(
-                    "[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"/var/log/hainet\"\nlog_level = \"info\"\n",
-                    master_ip
+                    "[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n",
+                    master_ip, log_dir
                 )
             },
             DeviceRole::Standalone => {
-                "[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"/var/log/hainet\"\nlog_level = \"info\"\n".to_string()
+                format!("[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", log_dir)
             },
             DeviceRole::UIOnly => {
                 let master_ip = self.master_node()
@@ -988,8 +996,8 @@ WantedBy=multi-user.target
                     .unwrap_or("10.0.0.10");
                 
                 format!(
-                    "[network]\nrole = \"ui-only\"\nmaster_ip = \"{}\"\nport = 3000\n\n[logs]\nlog_dir = \"/var/log/hainet\"\nlog_level = \"info\"\n",
-                    master_ip
+                    "[network]\nrole = \"ui-only\"\nmaster_ip = \"{}\"\nport = 3000\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n",
+                    master_ip, log_dir
                 )
             },
         };

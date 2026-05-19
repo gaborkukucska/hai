@@ -7,6 +7,8 @@ pub mod platform;
 pub mod ollama;
 pub mod whisper;
 pub mod piper;
+pub mod comfyui;
+pub mod ffmpeg;
 pub mod dependencies;
 pub mod network_scanner;
 pub mod nmap_installer;
@@ -16,13 +18,15 @@ pub mod deployment;
 pub mod uninstaller;
 
 use anyhow::Result;
-use tracing::info;
+use tracing::{info, warn};
 use std::io::{self, Write};
 
 use crate::installer::platform::{Platform, SystemTier};
 use crate::installer::ollama::OllamaInstaller;
 use crate::installer::whisper::WhisperInstaller;
 use crate::installer::piper::PiperInstaller;
+use crate::installer::comfyui::ComfyUIInstaller;
+use crate::installer::ffmpeg::FFmpegInstaller;
 use crate::installer::network_scanner::{NetworkScanner, DeviceCandidate};
 use crate::installer::nmap_installer::ensure_nmap_installed;
 use crate::installer::ssh_client::{SSHClient, SSHCredentials, DeviceCapabilities, SSHClientTrait};
@@ -36,6 +40,8 @@ pub struct Installer {
     ollama: OllamaInstaller,
     whisper: WhisperInstaller,
     piper: PiperInstaller,
+    comfyui: ComfyUIInstaller,
+    ffmpeg: FFmpegInstaller,
 }
 
 impl Installer {
@@ -52,6 +58,8 @@ impl Installer {
         let ollama = OllamaInstaller::new(platform.clone());
         let whisper = WhisperInstaller::new(platform.clone());
         let piper = PiperInstaller::new(platform.clone());
+        let comfyui = ComfyUIInstaller::new(platform.clone());
+        let ffmpeg = FFmpegInstaller::new(platform.clone());
         
         Ok(Self {
             platform,
@@ -59,6 +67,8 @@ impl Installer {
             ollama,
             whisper,
             piper,
+            comfyui,
+            ffmpeg,
         })
     }
     
@@ -66,15 +76,18 @@ impl Installer {
     pub async fn install(&mut self) -> Result<()> {
         info!("🚀 Starting HAI-Net Mesh-First installation workflow...");
         
-        // Step 1: Immediately begin by discovering devices on the network
+        // Step 1: Set up the shared networked folder for the mesh
+        let shared_drive_path = self.prompt_and_setup_shared_drive()?;
+
+        // Step 2: Immediately begin by discovering devices on the network
         // This will find localhost and remote devices, establish SSH connections,
         // and deeply inspect what AI services are already running.
-        let _devices = self.discover_mesh_devices().await?;
+        let _devices = self.discover_mesh_devices(&shared_drive_path).await?;
         
-        // Step 2: The actual deployment is now handled inside setup_and_deploy_mesh
+        // Step 3: The actual deployment is now handled inside setup_and_deploy_mesh
         // which is called by discover_mesh_devices if the user approves the plan.
         
-        // Step 3: Handle local dependencies intelligently based on discovery
+        // Step 4: Handle local dependencies intelligently based on discovery
         // To do this, we re-assess localhost to check the services list
         // (Since discover_mesh_devices consumes the capabilities locally inside its flow)
         let localhost_caps = self.assess_localhost_capabilities_with_services().await.unwrap_or_else(|_| {
@@ -105,9 +118,75 @@ impl Installer {
         self.download_whisper_model().await?;
         self.install_piper().await?;
         self.download_piper_model().await?;
+
+        // Install ComfyUI if we have a GPU (Tier 3/4)
+        if self.tier == SystemTier::Tier3 || self.tier == SystemTier::Tier4 {
+            self.install_comfyui().await?;
+        } else {
+            info!("⏭️  Skipping ComfyUI installation (requires a more capable GPU / Tier 3+ device).");
+        }
+        
+        // Install FFmpeg (always useful for media tasks)
+        self.install_ffmpeg().await?;
         
         info!("✅ Installation workflow complete!");
         Ok(())
+    }
+
+    /// Prompt user for shared drive path and initialize directory structure non-destructively
+    fn prompt_and_setup_shared_drive(&self) -> Result<String> {
+        use std::io::{self, Write};
+        
+        print!("\n📁 Enter path for HAI-Net Shared Drive (default: /media/hai-drive): ");
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        
+        let mut path = input.trim().to_string();
+        if path.is_empty() {
+            path = "/media/hai-drive".to_string();
+        }
+        
+        info!("Initializing shared drive structure at {}...", path);
+        
+        let base_path = std::path::Path::new(&path);
+        
+        // Define the directory tree
+        let directories = vec![
+            "comfyui/custom_nodes",
+            "comfyui/models/checkpoints",
+            "comfyui/models/clip",
+            "comfyui/models/configs",
+            "comfyui/models/controlnet",
+            "comfyui/models/diffusion_models",
+            "comfyui/models/embeddings",
+            "comfyui/models/loras",
+            "comfyui/models/upscale_models",
+            "comfyui/models/vae",
+            "comfyui/workflows",
+            "logs",
+            "media_cache",
+            "ollama",
+            "projects",
+            "vllm/models",
+            "whisper",
+            "Zimms",
+        ];
+        
+        for dir in directories {
+            let full_path = base_path.join(dir);
+            if !full_path.exists() {
+                if let Err(e) = std::fs::create_dir_all(&full_path) {
+                    tracing::warn!("⚠️  Failed to create directory {}: {}", full_path.display(), e);
+                } else {
+                    tracing::debug!("Created directory: {}", full_path.display());
+                }
+            }
+        }
+        
+        info!("✅ Shared drive initialized successfully.");
+        Ok(path)
     }
     
     /// Assess localhost capabilities with deep service discovery
@@ -333,6 +412,42 @@ impl Installer {
         info!("✅ Voice model {} downloaded successfully", voice_model);
         Ok(())
     }
+
+    /// Install ComfyUI if not present
+    async fn install_comfyui(&mut self) -> Result<()> {
+        info!("🎨 Checking ComfyUI installation...");
+        
+        if self.comfyui.is_installed().await? {
+            info!("✅ ComfyUI already installed");
+        } else {
+            info!("📥 ComfyUI not found, installing...");
+            if let Err(e) = self.comfyui.install().await {
+                warn!("⚠️  ComfyUI installation failed: {}", e);
+            } else {
+                info!("✅ ComfyUI installed successfully");
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Install FFmpeg if not present
+    async fn install_ffmpeg(&mut self) -> Result<()> {
+        info!("🎬 Checking FFmpeg installation...");
+        
+        if self.ffmpeg.is_installed().await? {
+            info!("✅ FFmpeg already installed");
+        } else {
+            info!("📥 FFmpeg not found, installing...");
+            if let Err(e) = self.ffmpeg.install().await {
+                warn!("⚠️  FFmpeg installation failed: {}", e);
+            } else {
+                info!("✅ FFmpeg installed successfully");
+            }
+        }
+        
+        Ok(())
+    }
     
     /// Prompt user if they want to set up multi-device mesh
     #[allow(dead_code)]
@@ -350,7 +465,7 @@ impl Installer {
     }
     
     /// Discover devices on local network with SSH enabled
-    pub async fn discover_mesh_devices(&self) -> Result<Vec<DeviceCandidate>> {
+    pub async fn discover_mesh_devices(&self, shared_drive_path: &str) -> Result<Vec<DeviceCandidate>> {
         info!("🔍 Discovering devices on local network...");
         
         // Step 1: Ensure nmap is installed
@@ -424,7 +539,7 @@ impl Installer {
             
             // Step 5: Set up SSH keys and deploy (if user wants to proceed)
             if self.prompt_deploy_mesh()? {
-                self.setup_and_deploy_mesh(&capabilities, credentials_map, &remote_devices).await?;
+                self.setup_and_deploy_mesh(&capabilities, credentials_map, &remote_devices, shared_drive_path).await?;
             } else {
                 info!("\n⚠️  Skipping mesh deployment");
                 info!("📋 You can deploy later using the hainet-seed CLI");
@@ -452,7 +567,7 @@ impl Installer {
     }
     
     /// Set up SSH keys and deploy to mesh
-    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities], credentials_map: std::collections::HashMap<String, (String, String)>, scanned_devices: &[DeviceCandidate]) -> Result<()> {
+    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities], credentials_map: std::collections::HashMap<String, (String, String)>, scanned_devices: &[DeviceCandidate], shared_drive_path: &str) -> Result<()> {
         info!("\n🔐 Setting up SSH keys and deploying to mesh...");
         
         // Step 1: Generate SSH key pair (idempotent — reuses existing key)
@@ -488,6 +603,7 @@ impl Installer {
         
         // Step 4: Assign roles and deploy
         let mut orchestrator = DeploymentOrchestrator::new();
+        orchestrator.set_shared_drive_path(shared_drive_path.to_string());
         orchestrator.assign_roles(capabilities.to_vec())?;
         
         // Ask for confirmation before deploying
