@@ -1,38 +1,45 @@
-//! # START OF FILE hainet-portal/vite.config.ts
+// <!-- # START OF FILE hainet-portal/vite.config.ts -->
+// Vite configuration for the HAI-Net Portal (headless web UI).
+//
+// In development: Vite runs on port 5173 and proxies /api/* to hainet-core on port 8080.
+// In production: `npm run build` outputs static assets to dist/, which hainet-core
+// embeds via rust-embed and serves directly on port 8080 (single port).
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  
+
   // Prevent vite from obscuring rust errors
   clearScreen: false,
-  
-  // Tauri expects a fixed port, fail if that port is not available
+
+  // Development server settings
   server: {
     port: 5173,
     strictPort: true,
     watch: {
-      // Tell vite to ignore watching `src-tauri`
-      ignored: ['**/src-tauri/**'],
+      // Ignore Rust build artifacts during development
+      ignored: ['**/target/**'],
     },
+    // Proxy API calls to the hainet-core daemon during development
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,
-      }
+      },
+      '/health': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+      },
     }
   },
-  
-  // Build configuration for Tauri
+
+  // Production build — outputs to dist/ for rust-embed
   build: {
-    // Tauri uses Chromium on Windows and WebKit on macOS and Linux
-    target: process.env.TAURI_PLATFORM == 'windows' ? 'chrome105' : 'safari13',
-    // Don't minify for debug builds
-    minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
-    // Produce sourcemaps for debug builds
-    sourcemap: !!process.env.TAURI_DEBUG,
+    target: 'es2020',
+    minify: 'esbuild',
+    sourcemap: false,
     rollupOptions: {
       external: [],
     },

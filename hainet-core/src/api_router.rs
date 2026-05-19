@@ -157,6 +157,162 @@ pub async fn handle_invoke(
             let res = tts.synthesize(req).await?;
             Ok(serde_json::to_value(res).unwrap())
         },
+
+        // ====================================================================
+        // --- Compute Router (from hainet-collab / PPLPWR) ---
+        // ====================================================================
+
+        // Returns the live hardware profile of this node (CPU, RAM, GPU, score).
+        // The frontend ComputeNode page uses this to display real hardware stats.
+        "get_hardware_profile" => {
+            debug!("Fetching hardware profile from hainet-collab");
+            let profile = app_state.hardware_profile.read().await;
+            Ok(json!({
+                "cpu_cores": profile.cpu_cores,
+                "cpu_model": profile.cpu_model,
+                "ram_total_gb": profile.ram_total_gb,
+                "ram_available_gb": profile.ram_available_gb,
+                "gpu": profile.gpu.as_ref().map(|g| json!({
+                    "name": g.name,
+                    "vram_mb": g.vram_mb,
+                    "cuda_version": g.cuda_version,
+                    "driver_version": g.driver_version,
+                    "temperature_c": g.temperature_c,
+                    "utilization_pct": g.utilization_pct,
+                })),
+                "disk_total_gb": profile.disk_total_gb,
+                "disk_available_gb": profile.disk_available_gb,
+                "os": profile.os,
+                "arch": profile.arch,
+                "capability_score": profile.capability_score,
+            }))
+        },
+
+        // Refreshes hardware detection and returns updated profile.
+        // Useful when user wants to re-scan after hardware changes.
+        "refresh_hardware_profile" => {
+            debug!("Refreshing hardware profile");
+            let new_profile = hainet_collab::hardware::HardwareProfile::detect();
+            let mut profile = app_state.hardware_profile.write().await;
+            *profile = new_profile;
+            debug!("Hardware profile refreshed: {} cores, {:.1} GB RAM, score {:.1}",
+                profile.cpu_cores, profile.ram_total_gb, profile.capability_score);
+            Ok(json!({"status": "refreshed"}))
+        },
+
+        // ====================================================================
+        // --- Social Feed (from hainet-social / gChat) ---
+        // ====================================================================
+
+        // Returns the in-memory social feed posts.
+        // In Phase 4 completion, these will come from the gossip engine.
+        "get_social_feed" => {
+            debug!("Fetching social feed");
+            let posts = app_state.social_posts.read().await;
+            Ok(json!({
+                "posts": *posts,
+                "total": posts.len(),
+            }))
+        },
+
+        // Creates a new local post and adds it to the social feed.
+        // In Phase 4, this will also broadcast via the gossip engine.
+        "create_post" => {
+            let content = args.get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let author = args.get("author")
+                .and_then(|v| v.as_str())
+                .unwrap_or("My Node (You)")
+                .to_string();
+
+            debug!("Creating social post from '{}': '{}'", author, &content[..content.len().min(50)]);
+
+            let post = crate::SocialPost {
+                id: uuid::Uuid::new_v4().to_string(),
+                author,
+                content,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+
+            let mut posts = app_state.social_posts.write().await;
+            posts.insert(0, post.clone()); // Newest first
+
+            // TODO Phase 4: Broadcast via gossip engine
+            // let gossip = app_state.gossip_engine.read().await;
+            // gossip.create_packet(PacketPayload::Post { ... });
+
+            debug!("Social feed now has {} posts", posts.len());
+            Ok(json!({"status": "posted", "post": post}))
+        },
+
+        // Returns the number of connected peers from the gossip engine.
+        "get_peer_count" => {
+            let gossip = app_state.gossip_engine.read().await;
+            let count = gossip.peer_count().await;
+            debug!("Peer count: {}", count);
+            Ok(json!({"peer_count": count}))
+        },
+
+        // Returns the list of mesh peers known to the gossip engine.
+        // In Phase 4, this will be populated by actual P2P connections.
+        "get_mesh_peers" => {
+            debug!("Fetching mesh peers from gossip engine");
+            let gossip = app_state.gossip_engine.read().await;
+            let count = gossip.peer_count().await;
+            // For now, return the count. Full peer list will come from
+            // libp2p integration in Phase 4.
+            Ok(json!({
+                "peers": [],
+                "total": count,
+            }))
+        },
+
+        // ====================================================================
+        // --- Provider Configuration (persist to settings.db) ---
+        // ====================================================================
+
+        // Saves AI provider configuration (Ollama URL, OpenRouter key) to the
+        // settings database for persistence across restarts.
+        "save_provider_config" => {
+            let ollama_url = args.get("ollama_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("http://127.0.0.1:11434")
+                .to_string();
+            let openrouter_key = args.get("openrouter_key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            debug!("Saving provider config: ollama_url={}, openrouter_key=***", ollama_url);
+
+            // Persist via the settings storage (using the existing key-value pattern)
+            let storage = settings_state.write().await;
+            storage.save_setting("provider.ollama_url", &ollama_url).await.map_err(|e| e.to_string())?;
+            storage.save_setting("provider.openrouter_key", &openrouter_key).await.map_err(|e| e.to_string())?;
+
+            debug!("Provider config saved successfully");
+            Ok(json!({"status": "saved"}))
+        },
+
+        // Loads the saved AI provider configuration from settings.db.
+        "get_provider_config" => {
+            debug!("Loading provider config from settings.db");
+            let storage = settings_state.read().await;
+            let ollama_url = storage.get_setting("provider.ollama_url").await
+                .ok().flatten()
+                .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+            let openrouter_key = storage.get_setting("provider.openrouter_key").await
+                .ok().flatten()
+                .unwrap_or_else(|| "".to_string());
+
+            debug!("Provider config loaded: ollama_url={}", ollama_url);
+            Ok(json!({
+                "ollama_url": ollama_url,
+                "openrouter_key": openrouter_key,
+            }))
+        },
         
         // Fallback for unimplemented endpoints
         _ => {

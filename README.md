@@ -8,8 +8,8 @@
 
 <p align="center">
   <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen">
-  <img alt="Version" src="https://img.shields.io/badge/Version-0.26--alpha-blue">
-  <img alt="Phase" src="https://img.shields.io/badge/Phase-7B_Mesh_Installer_Hardening-orange">
+  <img alt="Version" src="https://img.shields.io/badge/Version-0.55--alpha-blue">
+  <img alt="Phase" src="https://img.shields.io/badge/Phase-5_Unified_Portal-orange">
 </p>
 
 ---
@@ -52,7 +52,7 @@ We've organized our documentation to help you find exactly what you need quickly
 ---
 
 <p align="center">
-  <strong>Latest Milestone:</strong> Phase 7B - Mesh deployment pipeline hardened with dedicated SSH keys, MAC-based device tracking, sudoers provisioning, and safe uninstallation.
+  <strong>Latest Milestone:</strong> Phase 5 - Grand Integration of the Unified Headless Portal. The daemon now serves the React UI and API endpoints natively on port 8080 without requiring a separate web server.
 </p>
 
 <!-- # END OF FILE README.md -->

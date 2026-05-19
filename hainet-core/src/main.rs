@@ -1,8 +1,11 @@
 //! HAI-Net Core Daemon
-//! 
+//!
 //! The main daemon that coordinates all HAI-Net services including networking,
-//! storage, and communication with other components.
-//! 
+//! storage, communication with other components, and the web portal UI.
+//!
+//! This is the single entry point: it serves both the REST API and the static
+//! React frontend on one port (default 8080), so users only need one URL.
+//!
 //! Works in both development mode (cargo run) and as a deployed systemd service.
 
 use tracing::{info, debug, warn};
@@ -27,9 +30,40 @@ use hainet_persona::agents::metrics::MetricsCollector;
 use metrics_storage::MetricsStorage;
 use settings_storage::SettingsStorage;
 
+// --- Integration imports: Compute sharing (PPLPWR) & Social mesh (gChat) ---
+use hainet_collab::hardware::HardwareProfile;
+use hainet_social::gossip::GossipEngine;
+
+// --- Embedded static UI assets (from hainet-portal/dist/) ---
+use rust_embed::RustEmbed;
+
+/// Embedded React UI built by `npm run build` inside hainet-portal.
+/// The `folder` path is relative to the hainet-core crate root.
+#[derive(RustEmbed)]
+#[folder = "../hainet-portal/dist/"]
+struct PortalAssets;
+
+/// Shared application state passed to every API handler.
 pub struct AppState {
+    /// Bridge to the Admin AI agent system
     pub admin_bridge: Arc<RwLock<AdminBridge>>,
+    /// Text-to-speech handler
     pub tts_handler: Arc<RwLock<TTSHandler>>,
+    /// Live hardware profile from hainet-collab (PPLPWR port)
+    pub hardware_profile: Arc<RwLock<HardwareProfile>>,
+    /// Gossip engine from hainet-social (gChat port)
+    pub gossip_engine: Arc<RwLock<GossipEngine>>,
+    /// In-memory social feed posts (bridged to gossip later)
+    pub social_posts: Arc<RwLock<Vec<SocialPost>>>,
+}
+
+/// A social feed post (temporary in-memory struct until full gossip integration)
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct SocialPost {
+    pub id: String,
+    pub author: String,
+    pub content: String,
+    pub timestamp: String,
 }
 
 pub type MetricsState = Arc<RwLock<MetricsCollector>>;
@@ -99,6 +133,23 @@ async fn main() -> Result<()> {
     .await
     .expect("Failed to initialize SettingsStorage");
     
+    // --- Integration: Detect local hardware (PPLPWR port) ---
+    info!("🖥️  Detecting local hardware profile (hainet-collab)...");
+    let hardware_profile = HardwareProfile::detect();
+    info!(
+        "✅ Hardware: {} cores, {:.1} GB RAM, GPU: {}, Score: {:.1}",
+        hardware_profile.cpu_cores,
+        hardware_profile.ram_total_gb,
+        hardware_profile.gpu.as_ref().map_or("None".to_string(), |g| g.name.clone()),
+        hardware_profile.capability_score
+    );
+
+    // --- Integration: Initialize gossip engine (gChat port) ---
+    let node_id = uuid::Uuid::new_v4().to_string();
+    info!("🗣️  Initializing gossip engine (hainet-social), node_id={}", &node_id[..8]);
+    let gossip_engine = GossipEngine::new(node_id);
+    debug!("Gossip engine created with {} max hops", hainet_social::gossip::DEFAULT_MAX_HOPS);
+    
     // Wrap states in Arc<RwLock<>> for shared state
     let metrics_state: MetricsState = Arc::new(RwLock::new(metrics_collector));
     let metrics_storage_state: MetricsStorageState = Arc::new(RwLock::new(metrics_storage));
@@ -108,6 +159,9 @@ async fn main() -> Result<()> {
     let app_state = Arc::new(AppState {
         admin_bridge: Arc::new(RwLock::new(admin_bridge)),
         tts_handler: Arc::new(RwLock::new(tts_handler)),
+        hardware_profile: Arc::new(RwLock::new(hardware_profile)),
+        gossip_engine: Arc::new(RwLock::new(gossip_engine)),
+        social_posts: Arc::new(RwLock::new(vec![])),
     });
 
     // Step 4: Start minimal TCP-based health/API endpoint
@@ -130,6 +184,7 @@ async fn main() -> Result<()> {
     });
 
     info!("✅ HAI-Net Core initialized successfully");
+    info!("🌐 Portal UI + API: http://0.0.0.0:{}", health_port);
     info!("🩺 Health endpoint: http://0.0.0.0:{}/health", health_port);
 
     // Step 5: Periodic heartbeat + wait for shutdown signal
@@ -367,6 +422,11 @@ async fn run_health_server(
                     // Handle CORS preflight
                     ("204 No Content".to_string(), "".to_string())
                 },
+                // --- Static file serving: Portal UI assets ---
+                // Any GET that doesn't match an API route serves the React app.
+                ("GET", static_path) => {
+                    serve_static_asset(static_path)
+                },
                 _ => {
                     warn!("API: Not Found: {} {}", method, path);
                     (
@@ -378,13 +438,72 @@ async fn run_health_server(
 
             debug!("API Response to {} {}: {}", method, path, status);
 
+            // Determine content type from response — JSON for API, mime type for static
+            let content_type = if body.starts_with('{') || body.starts_with('[') {
+                "application/json"
+            } else if status.contains("STATIC:") {
+                // Extract the mime type from our marker (see serve_static_asset)
+                status.split("STATIC:").nth(1).unwrap_or("application/octet-stream")
+            } else {
+                "application/json"
+            };
+
+            // Clean the status line for the HTTP response
+            let clean_status = if status.contains("STATIC:") {
+                "200 OK"
+            } else {
+                &status
+            };
+
             let response = format!(
-                "HTTP/1.1 {}\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                status,
+                "HTTP/1.1 {}\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                clean_status,
+                content_type,
                 body.len(),
                 body
             );
             let _ = stream.write_all(response.as_bytes()).await;
         });
+    }
+}
+
+/// Serve a static file from the embedded Portal UI assets.
+/// Falls back to index.html for SPA routing (React Router).
+fn serve_static_asset(path: &str) -> (String, String) {
+    let mut asset_path = path.trim_start_matches('/').to_string();
+    
+    // Root path → index.html
+    if asset_path.is_empty() {
+        asset_path = "index.html".to_string();
+    }
+
+    debug!("Static asset request: {}", asset_path);
+
+    match PortalAssets::get(&asset_path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(&asset_path)
+                .first_or_octet_stream()
+                .to_string();
+            let body = String::from_utf8_lossy(content.data.as_ref()).to_string();
+            // Use a "STATIC:" prefix in the status to signal the content type to the writer
+            (format!("STATIC:{}", mime), body)
+        }
+        None => {
+            // SPA fallback: return index.html for unknown routes (React Router)
+            debug!("Asset '{}' not found, serving index.html (SPA fallback)", asset_path);
+            match PortalAssets::get("index.html") {
+                Some(index) => {
+                    let body = String::from_utf8_lossy(index.data.as_ref()).to_string();
+                    ("STATIC:text/html".to_string(), body)
+                }
+                None => {
+                    warn!("Portal UI not built! Run 'cd hainet-portal && npm run build'");
+                    (
+                        "404 Not Found".to_string(),
+                        r#"{"error":"Portal UI not built. Run: cd hainet-portal && npm run build"}"#.to_string()
+                    )
+                }
+            }
+        }
     }
 }

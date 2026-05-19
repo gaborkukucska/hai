@@ -84,15 +84,16 @@ impl AdminBridge {
         
         // Determine prompts path - try multiple strategies
         let prompts_path = if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
-            // Running via cargo run - use project structure
-            let project_root = std::path::PathBuf::from(&manifest_dir)
+            // Running via cargo run — CARGO_MANIFEST_DIR is e.g. /home/tom/hai/hainet-core
+            // We need the workspace root (one parent up), then into hainet-persona/prompts
+            let workspace_root = std::path::PathBuf::from(&manifest_dir)
                 .parent()
-                .and_then(|p| p.parent())
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .to_path_buf();
-            project_root.join("hainet-persona").join("prompts")
+            info!("Workspace root from CARGO_MANIFEST_DIR: {:?}", workspace_root);
+            workspace_root.join("hainet-persona").join("prompts")
         } else {
-            // Running as binary - use current directory
+            // Running as installed binary - use current directory
             std::env::current_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."))
                 .join("hainet-persona")

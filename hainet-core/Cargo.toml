@@ -74,6 +74,22 @@ tokio-test = "0.4"
 [dependencies.hainet-persona]
 path = "../hainet-persona"
 
+# Integration: Compute sharing (from PPLPWR)
+[dependencies.hainet-collab]
+path = "../hainet-collab"
+
+# Integration: Social mesh (from gChat)
+[dependencies.hainet-social]
+path = "../hainet-social"
+
+# Static file serving (portal consolidation — serve UI from core port)
+[dependencies.rust-embed]
+version = "8.0"
+features = ["include-exclude"]
+
+[dependencies.mime_guess]
+version = "2.0"
+
 [dependencies.sqlx]
 workspace = true
 features = ["runtime-tokio-rustls", "sqlite"]

@@ -2,8 +2,7 @@
 // This allows the React app to communicate with hainet-core across the local network
 
 export async function invoke<T>(cmd: string, args: Record<string, any> = {}): Promise<T> {
-  const host = window.location.hostname || '127.0.0.1';
-  const url = `http://${host}:8080/api/invoke`;
+  const url = `/api/invoke`;
   
   const response = await fetch(url, {
     method: 'POST',

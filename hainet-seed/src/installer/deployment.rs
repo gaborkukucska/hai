@@ -587,8 +587,8 @@ WantedBy=multi-user.target
         println!("   • Check logs: sudo journalctl -u hainet-core -f");
         println!("   • View status: sudo systemctl status hainet-core");
         println!("\n💡 Web UI is now available!");
-        println!("   Access the portal at: http://127.0.0.1:3000");
-        println!("   (If running locally, execute: 'cd hainet-portal && npm run dev')");
+        println!("   Access the portal at: http://127.0.0.1:8080");
+        println!("   (In dev mode, run: 'cd hainet-portal && npm run dev' on port 5173)");
         
         Ok(())
     }

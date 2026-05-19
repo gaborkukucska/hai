@@ -73,10 +73,23 @@ fn find_workspace_root() -> Option<PathBuf> {
 /// 3. `/var/log/hainet/` (system installation)
 /// 4. `/tmp/hainet-logs/` (last resort fallback)
 fn resolve_log_dir(log_dir_override: Option<&str>) -> PathBuf {
+    // Helper: verify we can actually write to a directory (not just that it exists)
+    let can_write = |dir: &PathBuf| -> bool {
+        if fs::create_dir_all(dir).is_err() {
+            return false;
+        }
+        // Probe with a temp file to confirm write access
+        let probe = dir.join(".hainet-write-probe");
+        match fs::write(&probe, b"ok") {
+            Ok(_) => { let _ = fs::remove_file(&probe); true },
+            Err(_) => false,
+        }
+    };
+
     // Priority 1: Explicit override from config
     if let Some(override_dir) = log_dir_override {
         let dir = PathBuf::from(override_dir);
-        if fs::create_dir_all(&dir).is_ok() {
+        if can_write(&dir) {
             return dir;
         }
     }
@@ -84,14 +97,14 @@ fn resolve_log_dir(log_dir_override: Option<&str>) -> PathBuf {
     // Priority 2: Workspace logs directory (dev mode)
     if let Some(workspace_root) = find_workspace_root() {
         let logs_dir = workspace_root.join("logs");
-        if fs::create_dir_all(&logs_dir).is_ok() {
+        if can_write(&logs_dir) {
             return logs_dir;
         }
     }
 
     // Priority 3: System log directory
     let system_dir = PathBuf::from("/var/log/hainet");
-    if fs::create_dir_all(&system_dir).is_ok() {
+    if can_write(&system_dir) {
         return system_dir;
     }
 

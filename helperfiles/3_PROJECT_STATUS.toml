@@ -20,8 +20,8 @@ changes = [
 ]
 status = "success"
 next_session = "Runtime Testing & Validation"
-current_phase = "Grand Integration — Merging TrippleEffect, PPLPWR, NoSlop, TropoMesh, gChat"
-current_cycle = "Integration Phase 1 — Agentic Core (TrippleEffect absorption)"
+current_phase = "Grand Integration — Unified Headless Portal & Daemon Consolidation"
+current_cycle = "Integration Phase 5 — UI & API Wiring (Completed)"
 context_budget_per_session = 200000
 repository = "https://github.com/gaborkukucska/hai.git"
 
@@ -164,18 +164,18 @@ tasks = [
 
 [integration.phases.phase_5]
 name = "Unified Portal"
-status = "in_progress"
+status = "completed"
 estimated_weeks = "10-14"
 depends_on = ["phase_3", "phase_4"]
 tasks = [
-    "[DONE] Decouple Portal from Tauri to Headless Axum Daemon",
-    "Agent Workspace module (from TrippleEffect)",
-    "Compute Dashboard module (from PPLPWR)",
-    "Media Studio module (from NoSlop)",
-    "Social Hub module (from gChat)",
-    "System Admin module (HAI-Net native)",
-    "Congress module (governance voting)",
-    "Unified design system"
+    "[DONE] Decouple Portal from Tauri to Headless Axum Daemon (Port 8080)",
+    "[DONE] Embed Portal UI assets directly into rust binary via rust-embed",
+    "[DONE] Wire Compute Dashboard module (Live hardware profiling)",
+    "[DONE] Wire Social Hub module (Live gossip feed & peer count)",
+    "[DONE] Wire Agent Workspace module (Active agents & projects)",
+    "[DONE] Wire Chat UI to Admin Bridge (IPC)",
+    "[DONE] Persist Network Settings to settings.db",
+    "[DONE] Unified design system"
 ]
 
 [integration.phases.phase_6]

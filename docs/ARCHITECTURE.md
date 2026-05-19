@@ -10,7 +10,7 @@ hainet/
 ├── hainet-persona/       # 🤖 Multi-agent AI system
 ├── hainet-chain/         # Blockchain & governance
 ├── hainet-seed/          # 🚀 Smart installer & mesh deployer
-├── hainet-portal/        # Headless Web UI (React/Vite app served by hainet-core or Axum)
+├── hainet-portal/        # Headless Web UI (React/Vite app embedded in core via rust-embed)
 └── hainet-bridge/        # External API gateway
 ```
 
@@ -26,10 +26,10 @@ hainet/
 - mDNS (local device discovery)
 - SSH2 (secure mesh deployment)
 
-**UI:**
+**UI & Frontend:**
 - React & Vite (Headless Web Portal)
-- Standard HTTP/REST APIs (decoupled from Tauri for network accessibility)
-- Axum (static asset serving)
+- Unified Port 8080 (Single binary serves both REST API and React UI)
+- `rust-embed` (UI assets baked directly into the daemon binary)
 
 **AI Integration:**
 - Ollama (local LLM hosting)
