@@ -16,8 +16,7 @@ pub mod ssh_client;
 pub mod ssh_keys;
 pub mod deployment;
 pub mod uninstaller;
-
-use anyhow::Result;
+use anyhow::{Result, Context};
 use tracing::{info, warn};
 use std::io::{self, Write};
 
@@ -76,13 +75,17 @@ impl Installer {
     pub async fn install(&mut self) -> Result<()> {
         info!("🚀 Starting HAI-Net Mesh-First installation workflow...");
         
-        // Step 1: Set up the shared networked folder for the mesh
-        let shared_drive_path = self.prompt_and_setup_shared_drive()?;
-
-        // Step 2: Immediately begin by discovering devices on the network
-        // This will find localhost and remote devices, establish SSH connections,
-        // and deeply inspect what AI services are already running.
-        let _devices = self.discover_mesh_devices(&shared_drive_path).await?;
+        // Step 1: Ask if user already has a networked shared folder
+        let has_existing = self.prompt_has_existing_shared_drive()?;
+        
+        let existing_path = if has_existing {
+            Some(self.prompt_shared_drive_path()?)
+        } else {
+            None
+        };
+        
+        // Step 2: Discover devices and (if needed) set up shared drive during the process
+        let _devices = self.discover_mesh_devices(existing_path.as_deref()).await?;
         
         // Step 3: The actual deployment is now handled inside setup_and_deploy_mesh
         // which is called by discover_mesh_devices if the user approves the plan.
@@ -133,11 +136,28 @@ impl Installer {
         Ok(())
     }
 
-    /// Prompt user for shared drive path and initialize directory structure non-destructively
-    fn prompt_and_setup_shared_drive(&self) -> Result<String> {
+    /// Ask if the user already has a networked and mounted shared folder
+    fn prompt_has_existing_shared_drive(&self) -> Result<bool> {
         use std::io::{self, Write};
         
-        print!("\n📁 Enter path for HAI-Net Shared Drive (default: /media/hai-drive): ");
+        println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("📁 Shared Drive Setup");
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        print!("Do you already have a networked and mounted read/write shared folder? (y/N): ");
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        
+        let response = input.trim().to_lowercase();
+        Ok(response == "y" || response == "yes")
+    }
+    
+    /// Ask user for the path to their existing shared drive
+    fn prompt_shared_drive_path(&self) -> Result<String> {
+        use std::io::{self, Write};
+        
+        print!("Enter the path to your shared folder (default: /media/hai-drive): ");
         io::stdout().flush()?;
         
         let mut input = String::new();
@@ -148,11 +168,14 @@ impl Installer {
             path = "/media/hai-drive".to_string();
         }
         
-        info!("Initializing shared drive structure at {}...", path);
+        info!("✅ Using existing shared folder at {}", path);
+        Ok(path)
+    }
+    
+    /// Create the standard HAI-Net subdirectory tree inside the shared drive
+    fn initialize_shared_drive_structure(&self, path: &str) -> Result<()> {
+        let base_path = std::path::Path::new(path);
         
-        let base_path = std::path::Path::new(&path);
-        
-        // Define the directory tree
         let directories = vec![
             "comfyui/custom_nodes",
             "comfyui/models/checkpoints",
@@ -185,8 +208,389 @@ impl Installer {
             }
         }
         
-        info!("✅ Shared drive initialized successfully.");
-        Ok(path)
+        Ok(())
+    }
+    
+    
+    /// Display device choices and let user pick where to host the shared drive.
+    /// Returns (remote_export_path, host_ip, local_mount_path).
+    fn prompt_shared_drive_device_choice(&self, devices: &[(String, String, f64, bool)]) -> Result<(String, String, String)> {
+        use std::io::{self, Write};
+        
+        println!("\n📊 Available devices to host the shared drive:");
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        for (i, (hostname, ip, disk_gb, is_local)) in devices.iter().enumerate() {
+            let local_tag = if *is_local { " ← this machine" } else { "" };
+            let disk_display = if *disk_gb >= 0.0 {
+                format!("{:.1} GB free", disk_gb)
+            } else {
+                "disk checked after login".to_string()
+            };
+            println!("  [{}] {} ({}) — {}{}", i + 1, hostname, ip, disk_display, local_tag);
+        }
+        
+        println!();
+        print!("Which device should host the shared drive? [1]: ");
+        io::stdout().flush()?;
+        
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let choice_str = input.trim();
+        
+        let choice: usize = if choice_str.is_empty() {
+            0
+        } else {
+            choice_str.parse::<usize>().unwrap_or(1).saturating_sub(1)
+        };
+        
+        let (hostname, ip, _, is_local) = devices.get(choice).unwrap_or(&devices[0]);
+        
+        print!("Enter folder path on {} (default: /media/hai-drive): ", hostname);
+        io::stdout().flush()?;
+        
+        let mut path_input = String::new();
+        io::stdin().read_line(&mut path_input)?;
+        let mut remote_path = path_input.trim().to_string();
+        if remote_path.is_empty() {
+            remote_path = "/media/hai-drive".to_string();
+        }
+        
+        // For remote devices, ask where to mount locally (the remote path may not
+        // make sense on this machine, e.g. /media/fast/NoSlop is BigBOY-specific).
+        let local_mount = if !is_local && remote_path != "/media/hai-drive" {
+            print!("Local mount point on this machine (default: /media/hai-drive): ");
+            io::stdout().flush()?;
+            
+            let mut mount_input = String::new();
+            io::stdin().read_line(&mut mount_input)?;
+            let mount = mount_input.trim().to_string();
+            if mount.is_empty() {
+                "/media/hai-drive".to_string()
+            } else {
+                mount
+            }
+        } else {
+            // Local device or default path — use the same path
+            remote_path.clone()
+        };
+        
+        Ok((remote_path, ip.clone(), local_mount))
+    }
+    
+    /// Set up the shared drive on the local machine
+    fn setup_shared_drive_on_local(&self, path: &str) -> Result<String> {
+        info!("📁 Setting up shared drive locally at {}...", path);
+        
+        let base_path = std::path::Path::new(path);
+        
+        // Create with sudo if needed
+        if !base_path.exists() {
+            if let Err(e) = std::fs::create_dir_all(base_path) {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    info!("Requires elevated permissions to create {}. Using sudo...", path);
+                    let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+                    
+                    let _ = std::process::Command::new("sudo")
+                        .arg("mkdir").arg("-p").arg(path)
+                        .status();
+                        
+                    let _ = std::process::Command::new("sudo")
+                        .arg("chown").arg("-R")
+                        .arg(format!("{}:{}", user, user))
+                        .arg(path)
+                        .status();
+                } else {
+                    tracing::warn!("⚠️  Failed to create base directory {}: {}", path, e);
+                }
+            }
+        }
+        
+        self.initialize_shared_drive_structure(path)?;
+        
+        // Set up NFS server locally
+        if let Err(e) = self.setup_nfs_server(path) {
+            tracing::warn!("⚠️  Failed to configure NFS server: {}", e);
+        }
+        
+        info!("✅ Shared drive initialized at {}", path);
+        Ok(path.to_string())
+    }
+    
+    /// Set up the shared drive on a remote device via SSH.
+    /// Uses existing credentials from device assessment — no extra login prompt.
+    /// `path` is the export path on the remote device (e.g., /media/fast/NoSlop).
+    /// `local_mount_path` is where non-hosting nodes will mount the share (e.g., /media/hai-drive).
+    fn setup_shared_drive_on_remote(&self, remote_ip: &str, path: &str, local_mount_path: &str, existing_creds: Option<&(String, String)>) -> Result<String> {
+        use crate::installer::ssh_client::{SSHClient, SSHCredentials, SSHClientTrait};
+        
+        // Get username from existing credentials or fall back to current user
+        let username = match existing_creds {
+            Some((user, _)) => user.clone(),
+            None => std::env::var("USER").unwrap_or_else(|_| "root".to_string()),
+        };
+        
+        let mut password = match existing_creds {
+            Some((_, pwd)) => pwd.clone(),
+            None => String::new(),
+        };
+        
+        info!("📁 Setting up shared drive on {}:{} as {}...", remote_ip, path, username);
+        
+        let creds = SSHCredentials { username: username.clone(), password: String::new() };
+        let mut client = SSHClient::new(remote_ip.to_string(), creds);
+        client.connect()?;
+        
+        // Prefer SSH key auth (already distributed during assessment)
+        let key_path = dirs::home_dir()
+            .unwrap_or_else(|| std::path::Path::new("/root").to_path_buf())
+            .join(".ssh/hainet-mesh");
+        
+        if key_path.exists() {
+            client.authenticate_pubkey(&key_path, None)?;
+        } else if let Some((_, pwd)) = existing_creds {
+            // Fall back to password auth if key not available
+            let creds = SSHCredentials { username: username.clone(), password: pwd.clone() };
+            let mut client_pw = SSHClient::new(remote_ip.to_string(), creds);
+            client_pw.connect()?;
+            client_pw.authenticate_password()?;
+            client = client_pw;
+        } else {
+            anyhow::bail!("No credentials available for {}. Cannot set up shared drive.", remote_ip);
+        }
+        
+        // Test if sudo requires password or has outdated permissions
+        if password.is_empty() {
+            if client.execute_command("sudo -n apt-get update -qq 2>/dev/null").is_err() {
+                warn!("⚠️  The remote node's sudo permissions are outdated and require an update.");
+                if let Ok(pwd) = dialoguer::Password::new()
+                    .with_prompt(format!("Enter password for {}@{} to proceed", username, remote_ip))
+                    .interact()
+                {
+                    password = pwd;
+                    
+                    // Immediately heal the remote sudoers file so future operations and Step 5 succeed
+                    let sudoers_content = format!(
+                        "{user} ALL=(ALL) NOPASSWD: /usr/bin/systemctl * hainet-*, /usr/bin/systemctl * nfs-*, /usr/bin/systemctl daemon-reload, /usr/bin/apt-get install *, /usr/bin/apt-get update, /usr/sbin/exportfs *, /usr/bin/tee *, /usr/bin/mv /tmp/hainet-upload-* /usr/local/bin/*, /usr/bin/mv /tmp/hainet* /etc/*, /usr/bin/mkdir -p /usr/local/bin*, /usr/bin/mkdir -p /etc/hainet*, /usr/bin/mkdir -p /var/lib/hainet*, /usr/bin/mkdir -p /var/log/hainet*, /usr/bin/mkdir -p /media/*, /usr/bin/chown * hainet*, /usr/bin/chown -R *, /usr/bin/chmod *, /usr/sbin/useradd *, /usr/sbin/userdel *, /usr/sbin/groupdel *, /usr/bin/rm -f /usr/local/bin/hainet-*, /usr/bin/rm -f /etc/systemd/system/hainet-*, /usr/bin/rm -rf /etc/hainet*, /usr/bin/rm -rf /var/lib/hainet*, /usr/bin/rm -rf /var/log/hainet*, /usr/bin/rm -rf /opt/hainet*, /bin/mv /tmp/hainet-upload-* /usr/local/bin/*, /bin/mv /tmp/hainet* /etc/*, /bin/mkdir -p *, /bin/chown * hainet*, /bin/chown -R *, /bin/chmod *, /bin/rm -f /usr/local/bin/hainet-*, /bin/rm -f /etc/systemd/system/hainet-*, /bin/rm -rf /etc/hainet*, /bin/rm -rf /var/lib/hainet*, /bin/rm -rf /var/log/hainet*, /bin/rm -rf /opt/hainet*, /usr/bin/mount *, /bin/mount *",
+                        user = username
+                    );
+                    
+                    let update_sudoers_cmd = format!(
+                        "echo '{}' | sudo -S bash -c 'echo \"{}\" > /etc/sudoers.d/hainet && chmod 440 /etc/sudoers.d/hainet'",
+                        password, sudoers_content
+                    );
+                    let _ = client.execute_command(&update_sudoers_cmd);
+                }
+            }
+        }
+        
+        // Helper to run a command as root. 
+        // If password is empty, relies on NOPASSWD whitelist (must be exact command).
+        // If password provided, uses sudo -S with bash -c for maximum flexibility.
+        let run_sudo = |client: &SSHClient, cmd: &str| -> Result<String, anyhow::Error> {
+            let wrapped_cmd = if password.is_empty() {
+                format!("sudo -n {}", cmd)
+            } else {
+                format!("echo '{}' | sudo -S bash -c \"{}\"", password, cmd.replace("\"", "\\\""))
+            };
+            client.execute_command(&wrapped_cmd)
+        };
+        
+        // Check disk space on remote
+        if let Ok(disk_output) = client.execute_command("df -BG / 2>/dev/null | awk 'NR==2 {gsub(\"G\",\"\",$4); print $4}'") {
+            if let Ok(disk_gb) = disk_output.parse::<f64>() {
+                info!("📊 Remote device has {:.1} GB free disk space", disk_gb);
+            }
+        }
+        
+        // Create shared drive directory on remote
+        info!("📁 Creating shared drive on {}:{}...", remote_ip, path);
+        let _ = run_sudo(&client, &format!("mkdir -p {}", path));
+        let _ = run_sudo(&client, &format!("chown -R {}:{} {}", username, username, path));
+        
+        // Create subdirectory structure on remote
+        let directories = vec![
+            "comfyui/custom_nodes", "comfyui/models/checkpoints", "comfyui/models/clip",
+            "comfyui/models/configs", "comfyui/models/controlnet", "comfyui/models/diffusion_models",
+            "comfyui/models/embeddings", "comfyui/models/loras", "comfyui/models/upscale_models",
+            "comfyui/models/vae", "comfyui/workflows",
+            "logs", "media_cache", "ollama", "projects", "vllm/models", "whisper", "Zimms",
+        ];
+        
+        for dir in &directories {
+            let _ = client.execute_command(&format!("mkdir -p {}/{}", path, dir)); // Inner dirs owned by user, no sudo needed
+        }
+        
+        // Install NFS server on remote
+        info!("🌐 Installing NFS server on {}...", remote_ip);
+        let _ = run_sudo(&client, "apt-get update -qq");
+        
+        // When password is empty, we can't use ENV vars in sudo because SETENV is not in the whitelist.
+        let apt_cmd = if password.is_empty() {
+            "apt-get install -y nfs-kernel-server"
+        } else {
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y nfs-kernel-server"
+        };
+        
+        if let Err(e) = run_sudo(&client, apt_cmd) {
+            warn!("⚠️  Failed to install nfs-kernel-server on {}: {}", remote_ip, e);
+            warn!("   The sudoers entry may need updating. Re-run the installer to refresh permissions.");
+        }
+        
+        // Configure /etc/exports
+        let export_entry = format!("{} *(rw,sync,no_subtree_check,no_root_squash)", path);
+        let check_cmd = format!("grep -q '{}' /etc/exports 2>/dev/null && echo exists || echo missing", path);
+        let check_result = client.execute_command(&check_cmd).unwrap_or_else(|_| "missing".to_string());
+        
+        if check_result.contains("missing") {
+            let export_cmd = if password.is_empty() {
+                format!("echo '{}' | sudo -n tee -a /etc/exports", export_entry)
+            } else {
+                format!("echo '{}' | sudo -S bash -c \"echo '{}' >> /etc/exports\"", password, export_entry)
+            };
+            let _ = client.execute_command(&export_cmd);
+            
+            let _ = run_sudo(&client, "exportfs -ra");
+            let _ = run_sudo(&client, "systemctl enable nfs-kernel-server");
+            let _ = run_sudo(&client, "systemctl restart nfs-kernel-server");
+        }
+        
+        // Verify NFS server is actually running on remote before we try to mount
+        std::thread::sleep(std::time::Duration::from_secs(2)); // Give NFS time to start
+        let nfs_status = run_sudo(&client, "systemctl is-active nfs-kernel-server")
+            .unwrap_or_else(|_| "unknown".to_string());
+        
+        if nfs_status.trim() == "active" {
+            info!("✅ NFS server is running on {}", remote_ip);
+        } else {
+            warn!("⚠️  NFS server may not be running on {} (status: {}). Trying to start...", remote_ip, nfs_status.trim());
+            let _ = run_sudo(&client, "systemctl start nfs-kernel-server");
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            
+            let retry_status = run_sudo(&client, "systemctl is-active nfs-kernel-server")
+                .unwrap_or_else(|_| "unknown".to_string());
+            if retry_status.trim() != "active" {
+                warn!("⚠️  NFS server failed to start on {}. Mount will likely fail.", remote_ip);
+                warn!("   Check: sudo systemctl status nfs-kernel-server on {}", remote_ip);
+            }
+        }
+        
+        // Verify the export is visible
+        let showmount_check = client.execute_command(&format!("showmount -e localhost 2>/dev/null | grep -q '{}' && echo visible || echo hidden", path))
+            .unwrap_or_else(|_| "hidden".to_string());
+        if showmount_check.trim() != "visible" {
+            warn!("⚠️  NFS export for {} is not visible yet on {}. Re-exporting...", path, remote_ip);
+            let _ = run_sudo(&client, "exportfs -ra");
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        
+        client.disconnect()?;
+        
+        // Mount the remote NFS share on localhost at the local mount path
+        info!("🌐 Mounting {}:{} → {} on localhost...", remote_ip, path, local_mount_path);
+        let _ = std::process::Command::new("sudo")
+            .args(&["apt-get", "install", "-y", "nfs-common"])
+            .status();
+        let _ = std::process::Command::new("sudo")
+            .args(&["mkdir", "-p", local_mount_path])
+            .status();
+            
+        // Add to fstab if not already there (source is remote, destination is local)
+        let fstab_entry = format!("{}:{} {} nfs defaults 0 0", remote_ip, path, local_mount_path);
+        let fstab_check = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(&format!("grep -q '{}:{}' /etc/fstab", remote_ip, path))
+            .status();
+        if fstab_check.map(|s| !s.success()).unwrap_or(true) {
+            let _ = std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&format!("echo '{}' | sudo tee -a /etc/fstab", fstab_entry))
+                .status();
+        }
+        
+        // Try mounting with retries
+        let mut mount_ok = false;
+        for attempt in 1..=3 {
+            let mount_status = std::process::Command::new("sudo")
+                .args(&["mount", "-t", "nfs", &format!("{}:{}", remote_ip, path), local_mount_path])
+                .status();
+            
+            match mount_status {
+                Ok(status) if status.success() => {
+                    mount_ok = true;
+                    break;
+                }
+                _ => {
+                    if attempt < 3 {
+                        warn!("⚠️  Mount attempt {}/3 failed. Retrying in 3 seconds...", attempt);
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                    }
+                }
+            }
+        }
+        
+        if mount_ok {
+            info!("✅ Shared drive ready at {} (hosted on {}:{})", local_mount_path, remote_ip, path);
+        } else {
+            warn!("⚠️  Failed to mount {}:{} locally. The NFS share was configured on the remote", remote_ip, path);
+            warn!("   but the local mount failed. You can try manually:");
+            warn!("   sudo mount -t nfs {}:{} {}", remote_ip, path, local_mount_path);
+        }
+        
+        Ok(local_mount_path.to_string())
+    }
+    
+    /// Configures the NFS server to share the drive across the mesh (localhost)
+    fn setup_nfs_server(&self, shared_path: &str) -> Result<()> {
+        info!("🌐 Configuring NFS server to share {} on the local network...", shared_path);
+        
+        // Install NFS server if not present
+        let install_status = std::process::Command::new("sudo")
+            .arg("apt-get")
+            .arg("install")
+            .arg("-y")
+            .arg("nfs-kernel-server")
+            .status()
+            .context("Failed to run apt-get for nfs-kernel-server")?;
+            
+        if !install_status.success() {
+            tracing::warn!("Failed to install nfs-kernel-server. Shared drive may not be accessible to remote nodes.");
+        }
+        
+        // Update /etc/exports
+        let export_entry = format!("{} *(rw,sync,no_subtree_check,no_root_squash)", shared_path);
+        
+        let check_exports = std::process::Command::new("grep")
+            .arg("-q")
+            .arg(&export_entry)
+            .arg("/etc/exports")
+            .status()?;
+            
+        if !check_exports.success() {
+            let echo_cmd = format!("echo '{}' | sudo tee -a /etc/exports", export_entry);
+            std::process::Command::new("bash")
+                .arg("-c")
+                .arg(&echo_cmd)
+                .status()
+                .context("Failed to update /etc/exports")?;
+                
+            std::process::Command::new("sudo")
+                .arg("exportfs")
+                .arg("-a")
+                .status()?;
+                
+            std::process::Command::new("sudo")
+                .arg("systemctl")
+                .arg("restart")
+                .arg("nfs-kernel-server")
+                .status()?;
+                
+            info!("✅ NFS server configured and restarted.");
+        } else {
+            info!("✅ NFS export already exists.");
+        }
+        
+        Ok(())
     }
     
     /// Assess localhost capabilities with deep service discovery
@@ -465,7 +869,7 @@ impl Installer {
     }
     
     /// Discover devices on local network with SSH enabled
-    pub async fn discover_mesh_devices(&self, shared_drive_path: &str) -> Result<Vec<DeviceCandidate>> {
+    pub async fn discover_mesh_devices(&self, existing_shared_drive_path: Option<&str>) -> Result<Vec<DeviceCandidate>> {
         info!("🔍 Discovering devices on local network...");
         
         // Step 1: Ensure nmap is installed
@@ -537,9 +941,34 @@ impl Installer {
 
             self.display_capabilities(&capabilities);
             
+            // Step 4.5: Set up shared drive if user doesn't have one yet
+            let (shared_drive_path, host_ip_opt, remote_path_opt) = match existing_shared_drive_path {
+                Some(path) => (path.to_string(), None, None),
+                None => {
+                    // Build device list from assessed capabilities (now we have real disk data)
+                    let device_disk_info: Vec<(String, String, f64, bool)> = capabilities.iter().map(|cap| {
+                        let is_local = cap.ip == "127.0.0.1" || cap.ip == "localhost" || local_ips.contains(&cap.ip);
+                        (cap.hostname.clone(), cap.ip.clone(), cap.disk_gb, is_local)
+                    }).collect();
+                    
+                    let (remote_path, host_ip, local_mount_path) = self.prompt_shared_drive_device_choice(&device_disk_info)?;
+                    let is_local = device_disk_info.iter().any(|(_, ip, _, local)| ip == &host_ip && *local);
+                    
+                    if is_local {
+                        self.setup_shared_drive_on_local(&remote_path)?;
+                        (remote_path, None, None) // On local, path is same, no host IP needed for slaves to know
+                    } else {
+                        // Use existing credentials from device assessment
+                        let creds = credentials_map.get(&host_ip);
+                        self.setup_shared_drive_on_remote(&host_ip, &remote_path, &local_mount_path, creds)?;
+                        (local_mount_path, Some(host_ip), Some(remote_path))
+                    }
+                }
+            };
+            
             // Step 5: Set up SSH keys and deploy (if user wants to proceed)
             if self.prompt_deploy_mesh()? {
-                self.setup_and_deploy_mesh(&capabilities, credentials_map, &remote_devices, shared_drive_path).await?;
+                self.setup_and_deploy_mesh(&capabilities, credentials_map, &remote_devices, &shared_drive_path, host_ip_opt.as_deref(), remote_path_opt.as_deref()).await?;
             } else {
                 info!("\n⚠️  Skipping mesh deployment");
                 info!("📋 You can deploy later using the hainet-seed CLI");
@@ -567,7 +996,7 @@ impl Installer {
     }
     
     /// Set up SSH keys and deploy to mesh
-    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities], credentials_map: std::collections::HashMap<String, (String, String)>, scanned_devices: &[DeviceCandidate], shared_drive_path: &str) -> Result<()> {
+    async fn setup_and_deploy_mesh(&self, capabilities: &[DeviceCapabilities], credentials_map: std::collections::HashMap<String, (String, String)>, scanned_devices: &[DeviceCandidate], shared_drive_path: &str, host_ip: Option<&str>, remote_path: Option<&str>) -> Result<()> {
         info!("\n🔐 Setting up SSH keys and deploying to mesh...");
         
         // Step 1: Generate SSH key pair (idempotent — reuses existing key)
@@ -604,6 +1033,12 @@ impl Installer {
         // Step 4: Assign roles and deploy
         let mut orchestrator = DeploymentOrchestrator::new();
         orchestrator.set_shared_drive_path(shared_drive_path.to_string());
+        if let Some(ip) = host_ip {
+            orchestrator.set_shared_drive_host_ip(ip.to_string());
+        }
+        if let Some(path) = remote_path {
+            orchestrator.set_shared_drive_remote_path(path.to_string());
+        }
         orchestrator.assign_roles(capabilities.to_vec())?;
         
         // Ask for confirmation before deploying

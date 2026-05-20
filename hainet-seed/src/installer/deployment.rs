@@ -57,7 +57,12 @@ pub struct DeviceAssignment {
 /// Remote deployment orchestrator
 pub struct DeploymentOrchestrator {
     assignments: Vec<DeviceAssignment>,
+    /// The local mount point used by all nodes (e.g., /media/hai-drive)
     shared_drive_path: String,
+    /// The IP of the device hosting the NFS share
+    shared_drive_host_ip: Option<String>,
+    /// The export path on the hosting device (e.g., /media/fast/NoSlop on BigBOY)
+    shared_drive_remote_path: Option<String>,
 }
 
 /// Returns the systemd service names that should be deployed for a given role.
@@ -76,12 +81,24 @@ impl DeploymentOrchestrator {
         Self {
             assignments: Vec::new(),
             shared_drive_path: "/media/hai-drive".to_string(),
+            shared_drive_host_ip: None,
+            shared_drive_remote_path: None,
         }
     }
     
-    /// Set the shared drive path
+    /// Set the local mount path (used by all nodes to access the shared drive)
     pub fn set_shared_drive_path(&mut self, path: String) {
         self.shared_drive_path = path;
+    }
+    
+    /// Set the IP of the device hosting the NFS share
+    pub fn set_shared_drive_host_ip(&mut self, ip: String) {
+        self.shared_drive_host_ip = Some(ip);
+    }
+    
+    /// Set the export path on the hosting device (may differ from local mount path)
+    pub fn set_shared_drive_remote_path(&mut self, path: String) {
+        self.shared_drive_remote_path = Some(path);
     }
     
     /// Assign roles to devices based on capabilities
@@ -341,6 +358,16 @@ impl DeploymentOrchestrator {
         
         println!("📁 Creating system directories...");
         self.create_system_directories(&client)?;
+        
+        // Step 2.5: Mount shared network drive from master
+        if assignment.role != DeviceRole::Master {
+            println!("🌐 Mounting shared network drive from master...");
+            if let Some(master) = self.master_node() {
+                self.mount_shared_drive_on_remote(&client, &master.ip)?;
+            } else {
+                warn!("⚠️  No master node defined, skipping NFS mount for {}", assignment.hostname);
+            }
+        }
         
         // Step 3: Transfer binaries based on role
         println!("📤 Transferring binaries...");
@@ -1015,6 +1042,56 @@ WantedBy=multi-user.target
         Ok(())
     }
     
+    /// Mount the NFS shared drive on a remote node
+    ///
+    /// Uses the shared_drive_host_ip and shared_drive_remote_path to construct
+    /// the correct NFS source, and shared_drive_path as the local mount point.
+    /// Example: mount -t nfs 192.168.0.22:/media/fast/NoSlop /media/hai-drive
+    fn mount_shared_drive_on_remote<C: SSHClientTrait>(&self, client: &C, master_ip: &str) -> Result<()> {
+        let local_mount = &self.shared_drive_path;
+        // The NFS host is the device that exports the share (may differ from master)
+        let nfs_host = self.shared_drive_host_ip.as_deref().unwrap_or(master_ip);
+        // The remote export path may differ from the local mount point
+        let remote_export = self.shared_drive_remote_path.as_deref().unwrap_or(local_mount);
+        
+        info!("🌐 Mounting NFS share {}:{} → {}", nfs_host, remote_export, local_mount);
+        
+        // Install nfs-common
+        if let Err(e) = client.execute_command("sudo apt-get install -y nfs-common") {
+            warn!("⚠️  Failed to install nfs-common on remote: {}", e);
+        }
+        
+        // Create local mount point
+        client.execute_command(&format!("sudo mkdir -p {}", local_mount))?;
+        
+        // Check if already mounted
+        let check_mount = client.execute_command(&format!("mount | grep -q 'on {} type nfs'", local_mount));
+        
+        if check_mount.is_err() {
+            // Check if already in fstab (use the remote export path as source)
+            let fstab_entry = format!("{}:{} {} nfs defaults 0 0", nfs_host, remote_export, local_mount);
+            let check_fstab = client.execute_command(&format!("grep -q '{}:{}' /etc/fstab", nfs_host, remote_export));
+            
+            if check_fstab.is_err() {
+                let add_fstab = format!("echo '{}' | sudo tee -a /etc/fstab", fstab_entry);
+                client.execute_command(&add_fstab)?;
+            }
+            
+            // Mount using the NFS source and local destination
+            let mount_cmd = format!("sudo mount -t nfs {}:{} {}", nfs_host, remote_export, local_mount);
+            if let Err(e) = client.execute_command(&mount_cmd) {
+                warn!("⚠️  Failed to mount {}:{} → {}: {}", nfs_host, remote_export, local_mount, e);
+                warn!("   You can try manually: sudo mount -t nfs {}:{} {}", nfs_host, remote_export, local_mount);
+            } else {
+                println!("✓ Shared drive mounted: {}:{} → {}", nfs_host, remote_export, local_mount);
+            }
+        } else {
+            println!("✓ Shared drive already mounted at {}.", local_mount);
+        }
+        
+        Ok(())
+    }
+
     /// Set up systemd system services for the device role
     fn setup_services<C: SSHClientTrait>(&self, client: &C, role: &DeviceRole) -> Result<()> {
         let services: Vec<&str> = services_for_role(role);
