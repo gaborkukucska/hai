@@ -3,7 +3,7 @@
 //! Provides ComfyUI and FFmpeg tools.
 //! Implements the Model Context Protocol (MCP) using the official rmcp SDK.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
 use rmcp::service::RequestContext;
@@ -11,7 +11,7 @@ use rmcp::RoleServer;
 use std::borrow::Cow;
 use std::future::Future;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 pub mod comfyui;
 pub mod ffmpeg;

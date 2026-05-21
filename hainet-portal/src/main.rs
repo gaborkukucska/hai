@@ -7,15 +7,12 @@ mod assets;
 mod auth;
 
 use axum::{
-    routing::get,
     Router,
-    response::{Response, IntoResponse},
+    response::IntoResponse,
     http::{StatusCode, Uri, header},
-    body::Body,
 };
 use tracing::info;
 use anyhow::Result;
-use std::path::PathBuf;
 use std::net::SocketAddr;
 
 use assets::Assets;
@@ -55,6 +52,13 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 
     if path.is_empty() {
         path = "index.html".to_string();
+    }
+
+    if path.starts_with("api/") {
+        return (
+            StatusCode::NOT_FOUND, 
+            axum::Json(serde_json::json!({"error": "not_found"}))
+        ).into_response();
     }
 
     match Assets::get(&path) {

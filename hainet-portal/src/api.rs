@@ -5,7 +5,6 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::fs;
 use crate::auth::{get_hainet_dir, hash_password, verify_password, encrypt_seed, generate_jwt};
 

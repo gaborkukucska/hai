@@ -7,10 +7,9 @@ use aes_gcm::{
     aead::{Aead, KeyInit, generic_array::GenericArray},
     Aes256Gcm, Nonce,
 };
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
+use jsonwebtoken::{encode, Header, EncodingKey};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::fs;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {

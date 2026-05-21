@@ -68,9 +68,9 @@ pub struct DeploymentOrchestrator {
 /// Returns the systemd service names that should be deployed for a given role.
 pub fn services_for_role(role: &DeviceRole) -> Vec<&'static str> {
     match role {
-        DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"],
+        DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge"],
         DeviceRole::Slave => vec!["hainet-core", "hainet-chain"],
-        DeviceRole::Standalone => vec!["hainet-core", "hainet-portal"],
+        DeviceRole::Standalone => vec!["hainet-core", "hainet-chain", "hainet-bridge"],
         DeviceRole::UIOnly => vec!["hainet-portal"],
     }
 }
@@ -352,6 +352,10 @@ impl DeploymentOrchestrator {
         
         client.authenticate_pubkey(&key_path, None)?;
         
+        // Step 1.5: Stop any existing services for clean re-deployment
+        println!("🔄 Stopping existing services (if any)...");
+        let _ = client.execute_command("sudo -n systemctl stop hainet-core hainet-chain hainet-bridge hainet-portal 2>/dev/null || true");
+        
         // Step 2: Create system user and directories
         println!("🔧 Creating hainet system user...");
         self.create_system_user(&client)?;
@@ -372,6 +376,10 @@ impl DeploymentOrchestrator {
         // Step 3: Transfer binaries based on role
         println!("📤 Transferring binaries...");
         self.transfer_binaries(&client, &assignment.role, &assignment.capabilities.arch)?;
+        
+        // Step 3.5: Transfer AI persona prompts
+        println!("📤 Transferring AI persona prompts...");
+        self.transfer_prompts(&client)?;
         
         // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
@@ -444,9 +452,9 @@ impl DeploymentOrchestrator {
         // Step 3: Copy binaries to system directories
         println!("📤 Copying binaries...");
         let binaries = match assignment.role {
-            DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"],
+            DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge"],
             DeviceRole::Slave => vec!["hainet-core", "hainet-chain"],
-            DeviceRole::Standalone => vec!["hainet-core", "hainet-portal"],
+            DeviceRole::Standalone => vec!["hainet-core", "hainet-chain", "hainet-bridge"],
             DeviceRole::UIOnly => vec!["hainet-portal"],
         };
         // Use target-triple-aware path to match where build_binaries() puts output
@@ -480,15 +488,35 @@ impl DeploymentOrchestrator {
             }
         }
 
+        // Step 3.5: Copy AI persona prompts
+        println!("📤 Copying AI persona prompts...");
+        self.copy_prompts_local()?;
+
         // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
+        // Determine correct log directory (same logic as remote configure_device)
+        let is_nfs_host = self.shared_drive_host_ip.as_deref().map_or(false, |hip| {
+            // For localhost, check if the NFS host IP matches any local IP
+            let local_ips: Vec<String> = local_ip_address::list_afinet_netifas()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, ip)| ip.to_string())
+                .collect();
+            local_ips.contains(&hip.to_string())
+        });
+        let log_dir = if is_nfs_host {
+            let base = self.shared_drive_remote_path.as_deref().unwrap_or(&self.shared_drive_path);
+            format!("{}/logs", base)
+        } else {
+            format!("{}/logs", self.shared_drive_path)
+        };
         let config_content = match assignment.role {
-            DeviceRole::Master => "[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"/var/log/hainet\"\nlog_level = \"info\"\n".to_string(),
+            DeviceRole::Master => format!("[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", log_dir),
             DeviceRole::Slave => {
                 let master_ip = self.master_node().map(|m| m.ip.as_str()).unwrap_or("10.0.0.10");
-                format!("[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"/var/log/hainet\"\nlog_level = \"info\"\n", master_ip)
+                format!("[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", master_ip, log_dir)
             },
-            _ => "[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"/var/log/hainet\"\nlog_level = \"info\"\n".to_string(),
+            _ => format!("[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", log_dir),
         };
 
         let config_path = "/tmp/hainet.toml";
@@ -511,6 +539,8 @@ After=network.target
 
 [Service]
 Type=simple
+User=hainet
+Group=hainet
 ExecStart=/usr/local/bin/{}
 Restart=always
 RestartSec=10
@@ -941,7 +971,6 @@ WantedBy=multi-user.target
                 "hainet-core",
                 "hainet-chain",
                 "hainet-bridge",
-                "hainet-portal",
             ],
             DeviceRole::Slave => vec![
                 "hainet-core",
@@ -949,7 +978,8 @@ WantedBy=multi-user.target
             ],
             DeviceRole::Standalone => vec![
                 "hainet-core",
-                "hainet-portal",
+                "hainet-chain",
+                "hainet-bridge",
             ],
             DeviceRole::UIOnly => vec![
                 "hainet-portal",
@@ -995,9 +1025,86 @@ WantedBy=multi-user.target
         Ok(())
     }
     
+    /// Transfer the AI Persona prompts directory to the remote device
+    #[cfg(not(test))]
+    fn transfer_prompts<C: SSHClientTrait>(&self, client: &C) -> Result<()> {
+        let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
+        let prompts_dir = workspace_root.join("hainet-persona").join("prompts");
+        
+        if !prompts_dir.exists() {
+            println!("⚠️  Prompts directory not found at {:?}, skipping", prompts_dir);
+            return Ok(());
+        }
+        
+        // Tar the prompts directory locally
+        let tar_path = "/tmp/hainet-prompts.tar.gz";
+        let _ = std::process::Command::new("tar")
+            .args(&["-czf", tar_path, "-C", prompts_dir.parent().unwrap().to_str().unwrap(), "prompts"])
+            .status()?;
+            
+        let temp_remote_path = "/tmp/hainet-prompts.tar.gz";
+        println!("   Uploading prompts...");
+        client.upload_file(std::path::Path::new(tar_path), temp_remote_path)?;
+        
+        // Extract on remote and set ownership
+        let extract_cmd = format!(
+            "sudo -n mkdir -p /var/lib/hainet/hainet-persona && sudo -n tar -xzf {} -C /var/lib/hainet/hainet-persona && sudo -n chown -R hainet:hainet /var/lib/hainet/hainet-persona && rm {}",
+            temp_remote_path, temp_remote_path
+        );
+        let _ = client.execute_command(&extract_cmd);
+        
+        // Cleanup local tar
+        let _ = std::fs::remove_file(tar_path);
+        
+        println!("✓ Installed AI persona prompts");
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn transfer_prompts<C: SSHClientTrait>(&self, _client: &C) -> Result<()> {
+        Ok(())
+    }
+
+    /// Copy the AI Persona prompts directory to the local device
+    fn copy_prompts_local(&self) -> Result<()> {
+        let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
+        let prompts_dir = workspace_root.join("hainet-persona").join("prompts");
+        
+        if !prompts_dir.exists() {
+            println!("⚠️  Prompts directory not found at {:?}, skipping", prompts_dir);
+            return Ok(());
+        }
+        
+        std::process::Command::new("sudo")
+            .args(&["mkdir", "-p", "/var/lib/hainet/hainet-persona"])
+            .status()?;
+            
+        std::process::Command::new("sudo")
+            .args(&["cp", "-r", prompts_dir.to_str().unwrap(), "/var/lib/hainet/hainet-persona/"])
+            .status()?;
+            
+        std::process::Command::new("sudo")
+            .args(&["chown", "-R", "hainet:hainet", "/var/lib/hainet/hainet-persona"])
+            .status()?;
+            
+        println!("✓ Installed AI persona prompts to /var/lib/hainet/hainet-persona/prompts");
+        Ok(())
+    }
+    
     /// Configure device with role-specific settings
     fn configure_device<C: SSHClientTrait>(&self, client: &C, assignment: &DeviceAssignment) -> Result<()> {
-        let log_dir = format!("{}/logs", self.shared_drive_path);
+        // Determine the correct log directory.
+        // If this device IS the NFS host, use the actual export path (e.g. /media/fast/hai-drive/logs)
+        // rather than the mount-point path (which would create a local-only directory).
+        let is_nfs_host = self.shared_drive_host_ip.as_deref() == Some(&assignment.ip);
+        let log_dir = if is_nfs_host {
+            // Use the real export path on the NFS host machine
+            let base = self.shared_drive_remote_path.as_deref().unwrap_or(&self.shared_drive_path);
+            format!("{}/logs", base)
+        } else {
+            format!("{}/logs", self.shared_drive_path)
+        };
+
         // Create hainet.toml configuration with system directories
         let config = match assignment.role {
             DeviceRole::Master => {
@@ -1037,6 +1144,10 @@ WantedBy=multi-user.target
         let _ = client.execute_command(&format!("sudo -n mv {} /etc/hainet/hainet.toml 2>/dev/null || cp {} ~/hainet/config/hainet.toml 2>/dev/null || true", temp_path, temp_path));
         let _ = client.execute_command("sudo -n chown hainet:hainet /etc/hainet/hainet.toml 2>/dev/null || true");
         
+        // Ensure log directory exists and is writable by hainet
+        let _ = client.execute_command(&format!("sudo -n mkdir -p {} 2>/dev/null || mkdir -p {}", log_dir, log_dir));
+        let _ = client.execute_command(&format!("sudo -n chown -R hainet:hainet {} 2>/dev/null || true", log_dir));
+        
         println!("✓ Configuration written to /etc/hainet/hainet.toml");
         
         Ok(())
@@ -1056,37 +1167,48 @@ WantedBy=multi-user.target
         
         info!("🌐 Mounting NFS share {}:{} → {}", nfs_host, remote_export, local_mount);
         
-        // Install nfs-common
-        if let Err(e) = client.execute_command("sudo apt-get install -y nfs-common") {
-            warn!("⚠️  Failed to install nfs-common on remote: {}", e);
+        // Install nfs-common only if mount.nfs is missing
+        if client.execute_command("which mount.nfs >/dev/null 2>&1").is_err() {
+            if let Err(e) = client.execute_command("sudo -n apt-get update -qq && sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y nfs-common") {
+                warn!("⚠️  Failed to install nfs-common on remote (requires passwordless sudo): {}", e);
+            }
         }
         
         // Create local mount point
-        client.execute_command(&format!("sudo mkdir -p {}", local_mount))?;
+        client.execute_command(&format!("sudo -n mkdir -p {}", local_mount))?;
         
-        // Check if already mounted
-        let check_mount = client.execute_command(&format!("mount | grep -q 'on {} type nfs'", local_mount));
+        // Check if the *exact* correct share is mounted
+        let expected_source = format!("{}:{}", nfs_host, remote_export);
+        let check_correct_mount = client.execute_command(&format!("mount | grep -q '^{} on {} '", expected_source, local_mount));
         
-        if check_mount.is_err() {
+        if check_correct_mount.is_err() {
+            // The correct share is NOT mounted. 
+            // Is *anything* mounted there? If so, it's a mis-mount and we must unmount it.
+            let check_any_mount = client.execute_command(&format!("mount | grep -q ' on {} '", local_mount));
+            if check_any_mount.is_ok() {
+                warn!("⚠️  Incorrect filesystem mounted at {}. Forcefully unmounting...", local_mount);
+                let _ = client.execute_command(&format!("sudo -n umount -f {} 2>/dev/null || true", local_mount));
+            }
+        
             // Check if already in fstab (use the remote export path as source)
-            let fstab_entry = format!("{}:{} {} nfs defaults 0 0", nfs_host, remote_export, local_mount);
-            let check_fstab = client.execute_command(&format!("grep -q '{}:{}' /etc/fstab", nfs_host, remote_export));
+            let fstab_entry = format!("{} {} nfs defaults 0 0", expected_source, local_mount);
+            let check_fstab = client.execute_command(&format!("grep -q '^{}' /etc/fstab", expected_source));
             
             if check_fstab.is_err() {
-                let add_fstab = format!("echo '{}' | sudo tee -a /etc/fstab", fstab_entry);
+                let add_fstab = format!("echo '{}' | sudo -n tee -a /etc/fstab", fstab_entry);
                 client.execute_command(&add_fstab)?;
             }
             
             // Mount using the NFS source and local destination
-            let mount_cmd = format!("sudo mount -t nfs {}:{} {}", nfs_host, remote_export, local_mount);
+            let mount_cmd = format!("sudo -n mount -t nfs {} {}", expected_source, local_mount);
             if let Err(e) = client.execute_command(&mount_cmd) {
-                warn!("⚠️  Failed to mount {}:{} → {}: {}", nfs_host, remote_export, local_mount, e);
-                warn!("   You can try manually: sudo mount -t nfs {}:{} {}", nfs_host, remote_export, local_mount);
+                warn!("⚠️  Failed to mount {} → {}: {}", expected_source, local_mount, e);
+                warn!("   You can try manually: sudo mount -t nfs {} {}", expected_source, local_mount);
             } else {
-                println!("✓ Shared drive mounted: {}:{} → {}", nfs_host, remote_export, local_mount);
+                println!("✓ Shared drive mounted: {} → {}", expected_source, local_mount);
             }
         } else {
-            println!("✓ Shared drive already mounted at {}.", local_mount);
+            println!("✓ Shared drive already mounted at {} from {}.", local_mount, expected_source);
         }
         
         Ok(())
@@ -1104,6 +1226,8 @@ WantedBy=multi-user.target
                  After=network.target\n\n\
                  [Service]\n\
                  Type=simple\n\
+                 User=hainet\n\
+                 Group=hainet\n\
                  ExecStart=/usr/local/bin/{}\n\
                  Restart=always\n\
                  RestartSec=10\n\

@@ -5,7 +5,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
-use tracing::{debug, error, info, warn};
+use tracing::debug;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Device preference for audio/video devices

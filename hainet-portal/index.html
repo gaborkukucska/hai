@@ -7,6 +7,16 @@
     <title>HAI-Net Portal</title>
   </head>
   <body>
+    <script>
+      // Redirect users accessing the legacy standalone portal (port 3000) 
+      // or Vite dev server (5173) to the new unified core daemon (port 8080).
+      if (window.location.port === '3000' || window.location.port === '5173') {
+        const masterIp = window.location.hostname;
+        console.warn(`Redirecting to unified headless portal on ${masterIp}:8080...`);
+        // We use window.location.replace to prevent back-button loops
+        window.location.replace(`${window.location.protocol}//${masterIp}:8080${window.location.pathname}${window.location.search}${window.location.hash}`);
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

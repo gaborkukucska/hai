@@ -422,6 +422,14 @@ async fn run_health_server(
                     // Handle CORS preflight
                     ("204 No Content".to_string(), "".to_string())
                 },
+                // Block API routes from falling through to the SPA fallback
+                ("GET", path) if path.starts_with("/api/") => {
+                    warn!("API: Not Found: {} {}", method, path);
+                    (
+                        "404 Not Found".to_string(),
+                        r#"{"error":"not_found"}"#.to_string()
+                    )
+                },
                 // --- Static file serving: Portal UI assets ---
                 // Any GET that doesn't match an API route serves the React app.
                 ("GET", static_path) => {
@@ -475,6 +483,14 @@ fn serve_static_asset(path: &str) -> (String, String) {
     // Root path → index.html
     if asset_path.is_empty() {
         asset_path = "index.html".to_string();
+    }
+
+    if asset_path.starts_with("api/") {
+        warn!("API route not found, preventing SPA fallback: /{}", asset_path);
+        return (
+            "404 Not Found".to_string(),
+            r#"{"error":"not_found"}"#.to_string()
+        );
     }
 
     debug!("Static asset request: {}", asset_path);

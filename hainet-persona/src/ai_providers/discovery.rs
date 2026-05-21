@@ -196,8 +196,6 @@ impl ProviderDiscovery {
     async fn scan_subnet(&self, subnet: &str) -> Result<Vec<DiscoveredProvider>> {
         info!("Scanning subnet {} for AI providers (common ports)", subnet);
 
-        let mut providers = Vec::new();
-
         // Parse subnet (e.g., "192.168.1.0/24")
         let parts: Vec<&str> = subnet.split('/').collect();
         if parts.len() != 2 {
@@ -212,34 +210,41 @@ impl ProviderDiscovery {
         let prefix = format!("{}.{}.{}", base_ip_parts[0], base_ip_parts[1], base_ip_parts[2]);
 
         // Scan common provider ports on each IP in subnet
-        // For /24 subnet, scan IPs 1-254 (skip 0 and 255)
-        // Only scan a subset for performance (e.g., every 10th IP + common ones)
         let scan_ips: Vec<u8> = vec![
             1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 
             100, 110, 120, 130, 140, 150, 160, 170, 180, 190,
             200, 210, 220, 230, 240, 250
         ];
 
+        // Build all probe tasks and execute them concurrently
+        let mut handles = Vec::new();
         for last_octet in scan_ips {
             let ip = format!("{}.{}", prefix, last_octet);
-            
             for (provider_type, port) in &self.localhost_ports {
                 let endpoint = format!("http://{}:{}", ip, port);
+                let client = self.client.clone();
+                let pt = *provider_type;
                 
-                // Quick probe with short timeout to avoid blocking
-                match tokio::time::timeout(
-                    Duration::from_millis(500),
-                    self.probe_provider(*provider_type, &endpoint)
-                ).await {
-                    Ok(Ok(provider)) if provider.available => {
-                        info!("✓ Found {} at {} ({} models)", 
-                            provider_type, endpoint, provider.models.len());
-                        providers.push(provider);
+                handles.push(tokio::spawn(async move {
+                    match tokio::time::timeout(
+                        Duration::from_millis(500),
+                        probe_provider_static(&client, pt, &endpoint)
+                    ).await {
+                        Ok(Ok(provider)) if provider.available => Some(provider),
+                        _ => None,
                     }
-                    _ => {
-                        // Silently skip unavailable endpoints
-                    }
-                }
+                }));
+            }
+        }
+
+        // Await all probes concurrently
+        let results = futures::future::join_all(handles).await;
+        let mut providers = Vec::new();
+        for result in results {
+            if let Ok(Some(provider)) = result {
+                info!("✓ Found {} at {} ({} models)", 
+                    provider.provider_type, provider.endpoint, provider.models.len());
+                providers.push(provider);
             }
         }
 
@@ -551,6 +556,63 @@ impl ProviderDiscovery {
             })
             .collect())
     }
+}
+/// Free-standing probe function for use in spawned tasks (cannot capture &self)
+async fn probe_provider_static(
+    client: &Client,
+    provider_type: ProviderType,
+    endpoint: &str,
+) -> Result<DiscoveredProvider> {
+    let start = std::time::Instant::now();
+
+    let probe_url = match provider_type {
+        ProviderType::Ollama => format!("{}/api/tags", endpoint),
+        _ => format!("{}/v1/models", endpoint),
+    };
+
+    let available = match client.get(&probe_url).send().await {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
+    };
+
+    let latency_ms = start.elapsed().as_millis() as u64;
+
+    let models = if available {
+        match provider_type {
+            ProviderType::Ollama => {
+                #[derive(Deserialize)]
+                struct OllamaResp { models: Vec<OllamaM> }
+                #[derive(Deserialize)]
+                struct OllamaM { name: String }
+                
+                let url = format!("{}/api/tags", endpoint);
+                match client.get(&url).send().await {
+                    Ok(resp) => match resp.json::<OllamaResp>().await {
+                        Ok(data) => data.models.into_iter()
+                            .filter(|m| {
+                                let n = m.name.to_lowercase();
+                                !n.contains("embed") && !n.contains("bge-") && !n.contains("nomic-embed")
+                            })
+                            .map(|m| m.name)
+                            .collect(),
+                        Err(_) => vec![],
+                    },
+                    Err(_) => vec![],
+                }
+            },
+            _ => vec![],
+        }
+    } else {
+        vec![]
+    };
+
+    Ok(DiscoveredProvider {
+        provider_type,
+        endpoint: endpoint.to_string(),
+        available,
+        latency_ms,
+        models,
+    })
 }
 
 /// Model information from discovery

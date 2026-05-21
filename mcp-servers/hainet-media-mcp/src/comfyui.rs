@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use tracing::{debug, info};
 
 #[derive(Clone)]

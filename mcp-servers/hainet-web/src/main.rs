@@ -3,7 +3,7 @@
 //! Provides web search, URL fetching, and documentation search capabilities
 //! for HAI-Net worker agents.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
 use rmcp::service::RequestContext;

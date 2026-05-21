@@ -85,7 +85,7 @@ impl Installer {
         };
         
         // Step 2: Discover devices and (if needed) set up shared drive during the process
-        let _devices = self.discover_mesh_devices(existing_path.as_deref()).await?;
+        let _devices = self.discover_mesh_devices(existing_path.as_ref()).await?;
         
         // Step 3: The actual deployment is now handled inside setup_and_deploy_mesh
         // which is called by discover_mesh_devices if the user approves the plan.
@@ -122,8 +122,12 @@ impl Installer {
         self.install_piper().await?;
         self.download_piper_model().await?;
 
-        // Install ComfyUI if we have a GPU (Tier 3/4)
-        if self.tier == SystemTier::Tier3 || self.tier == SystemTier::Tier4 {
+        let has_comfyui = localhost_caps.services.iter().any(|s| s.name == "comfyui");
+
+        // Install ComfyUI if we have a GPU (Tier 3/4) and it's not already installed
+        if has_comfyui {
+            info!("✅ Intelligent skip: ComfyUI is already running locally. Skipping installation.");
+        } else if self.tier == SystemTier::Tier3 || self.tier == SystemTier::Tier4 {
             self.install_comfyui().await?;
         } else {
             info!("⏭️  Skipping ComfyUI installation (requires a more capable GPU / Tier 3+ device).");
@@ -153,23 +157,39 @@ impl Installer {
         Ok(response == "y" || response == "yes")
     }
     
-    /// Ask user for the path to their existing shared drive
-    fn prompt_shared_drive_path(&self) -> Result<String> {
+    /// Ask user for the details of their existing shared drive
+    fn prompt_shared_drive_path(&self) -> Result<(String, String, String)> {
         use std::io::{self, Write};
         
-        print!("Enter the path to your shared folder (default: /media/hai-drive): ");
+        print!("Standard mount point across the mesh (default: /media/hai-drive): ");
         io::stdout().flush()?;
-        
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        
-        let mut path = input.trim().to_string();
-        if path.is_empty() {
-            path = "/media/hai-drive".to_string();
+        let mut input1 = String::new();
+        io::stdin().read_line(&mut input1)?;
+        let mut local_mount = input1.trim().to_string();
+        if local_mount.is_empty() {
+            local_mount = "/media/hai-drive".to_string();
+        }
+
+        print!("IP address of the NFS host/NAS (leave blank to default to Master Node): ");
+        io::stdout().flush()?;
+        let mut input2 = String::new();
+        io::stdin().read_line(&mut input2)?;
+        let host_ip = input2.trim().to_string(); // Empty string handled during deployment
+
+        print!("Remote export path on the NFS host (leave blank to default to {}): ", local_mount);
+        io::stdout().flush()?;
+        let mut input3 = String::new();
+        io::stdin().read_line(&mut input3)?;
+        let mut remote_path = input3.trim().to_string();
+        if remote_path.is_empty() {
+            remote_path = local_mount.clone();
         }
         
-        info!("✅ Using existing shared folder at {}", path);
-        Ok(path)
+        info!("✅ Using existing shared folder. Slaves will mount {}:{} at {}", 
+              if host_ip.is_empty() { "<Master_IP>" } else { &host_ip }, 
+              remote_path, local_mount);
+              
+        Ok((local_mount, host_ip, remote_path))
     }
     
     /// Create the standard HAI-Net subdirectory tree inside the shared drive
@@ -259,7 +279,7 @@ impl Installer {
         // For remote devices, ask where to mount locally (the remote path may not
         // make sense on this machine, e.g. /media/fast/NoSlop is BigBOY-specific).
         let local_mount = if !is_local && remote_path != "/media/hai-drive" {
-            print!("Local mount point on this machine (default: /media/hai-drive): ");
+            print!("Standard mount point across the mesh (default: /media/hai-drive): ");
             io::stdout().flush()?;
             
             let mut mount_input = String::new();
@@ -869,7 +889,7 @@ impl Installer {
     }
     
     /// Discover devices on local network with SSH enabled
-    pub async fn discover_mesh_devices(&self, existing_shared_drive_path: Option<&str>) -> Result<Vec<DeviceCandidate>> {
+    pub async fn discover_mesh_devices(&self, existing_shared_drive_path: Option<&(String, String, String)>) -> Result<Vec<DeviceCandidate>> {
         info!("🔍 Discovering devices on local network...");
         
         // Step 1: Ensure nmap is installed
@@ -943,7 +963,10 @@ impl Installer {
             
             // Step 4.5: Set up shared drive if user doesn't have one yet
             let (shared_drive_path, host_ip_opt, remote_path_opt) = match existing_shared_drive_path {
-                Some(path) => (path.to_string(), None, None),
+                Some((local_mount, host_ip, remote_path)) => {
+                    let h_ip = if host_ip.is_empty() { None } else { Some(host_ip.clone()) };
+                    (local_mount.clone(), h_ip, Some(remote_path.clone()))
+                },
                 None => {
                     // Build device list from assessed capabilities (now we have real disk data)
                     let device_disk_info: Vec<(String, String, f64, bool)> = capabilities.iter().map(|cap| {
@@ -956,7 +979,7 @@ impl Installer {
                     
                     if is_local {
                         self.setup_shared_drive_on_local(&remote_path)?;
-                        (remote_path, None, None) // On local, path is same, no host IP needed for slaves to know
+                        (remote_path.clone(), Some(host_ip), Some(remote_path)) // Send local IP as host so slaves know where to connect
                     } else {
                         // Use existing credentials from device assessment
                         let creds = credentials_map.get(&host_ip);

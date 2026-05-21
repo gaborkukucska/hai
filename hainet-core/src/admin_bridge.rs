@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, error};
 
 use hainet_persona::agents::{AdminAgent, Agent, AgentContext, MetricsCollector};
 use hainet_persona::messaging::MessageBus;

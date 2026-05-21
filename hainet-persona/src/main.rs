@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
     }
 
     // Try to connect bridge client
-    let mut bridge_client = match BridgeClient::connect("http://127.0.0.1:50051".to_string()).await {
+    let _bridge_client = match BridgeClient::connect("http://127.0.0.1:50051".to_string()).await {
         Ok(client) => {
             info!("✅ Connected to TrippleEffect bridge client");
             Some(client)

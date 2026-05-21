@@ -1,6 +1,5 @@
 use anyhow::{Result, anyhow};
 use tracing::{debug, info};
-use std::process::Command;
 
 #[derive(Clone)]
 pub struct FFmpegHandler {
