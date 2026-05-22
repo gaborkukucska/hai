@@ -1,11 +1,30 @@
 # HAI-Net Project Status Tracker
 # AI-optimized single source of truth for project planning and progress
-# Last Updated: 2026-05-17T03:00:00+08:00
+# Last Updated: 2026-05-22T02:47:00+08:00
 
 [meta]
-last_updated = "2026-05-17T03:00:00.000000+08:00"
+last_updated = "2026-05-22T02:47:00.000000+08:00"
 project_name = "HAI-Net"
-version = "0.55"
+version = "0.56"
+
+[[completed_cycles]]
+id = "11.0"
+date = "2026-05-22"
+phase = "Integration Phase 5 — UI & API Hardening"
+session = "Daemon Stabilization & Portal Fixes"
+changes = [
+    "Fixed Auth.tsx clipboard crash in HTTP non-secure contexts by implementing document.execCommand('copy') fallback",
+    "Fixed AgentStudio.tsx structural mismatches by mapping to the nested id and status fields returned by the Rust API",
+    "Resolved readonly SQLite database error (Code 8) over NFS by strictly aligning the hainet user to UID 995 and GID 995 across all mesh nodes",
+    "Fixed hainet-core panic loop by upgrading the Discovery probe to strictly validate content-type: application/json, preventing false positive 'OpenAI' detections on other UI nodes",
+    "Fixed ChatView.tsx slice crash by correctly parsing structured message objects instead of assuming flat strings",
+    "Rebuilt hainet-portal and embedded static assets into hainet-core for seamless deployment"
+]
+status = "success"
+next_session = "Phase 6: TropoMesh Hardware Compatibility"
+current_phase = "Grand Integration — Unified Headless Portal & Daemon Consolidation"
+current_cycle = "Integration Phase 5 — Stabilization (Completed)"
+
 [[completed_cycles]]
 id = "10.1"
 date = "2025-11-20"
