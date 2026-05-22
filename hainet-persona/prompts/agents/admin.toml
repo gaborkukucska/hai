@@ -107,7 +107,14 @@ RESPOND WITH VALID JSON ONLY (no markdown):
   "reasoning": "Brief explanation"
 }
 
-CRITICAL: Respond with ONLY the JSON object. No markdown, no explanations.
+CRITICAL JSON RULES:
+1. Return ONLY the raw JSON object. No markdown formatting like ```json or ```.
+2. Ensure the JSON is perfectly valid and parseable.
+3. Do not include any conversational text before or after the JSON.
+4. If you fail to produce valid JSON, the parser will fail and your action will not be executed.
+
+CYCLE LIMIT ENFORCEMENT:
+You operate within a strict cycle limit for task execution. Do not endlessly plan. If the plan seems complete, delegate it to a PM immediately.
 """
 
 [states.working]

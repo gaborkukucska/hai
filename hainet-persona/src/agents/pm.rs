@@ -27,6 +27,8 @@ use super::pm_intelligence::{
     HistoricalLearner, ProjectComplexity, DecompositionStrategy, 
     ProjectOutcome
 };
+use super::failover::{FailoverHandler, ModelEndpoint};
+use super::loop_detector;
 use super::session_tasks::{SessionTaskList, TaskStatus as SessionTaskStatus};
 
 /// Pending validation task
@@ -292,7 +294,14 @@ impl PMAgent {
     /// 
     /// Assigns tasks to workers, monitors progress, validates results
     pub async fn manage_loop(&mut self) -> Result<()> {
+        let mut cycle_count = 0;
+        const MAX_PM_CYCLES: u32 = 1000;
         loop {
+            cycle_count += 1;
+            if cycle_count > MAX_PM_CYCLES {
+                tracing::error!("PM {} exceeded maximum cycle count ({}) - forcing loop termination", self.id.name, MAX_PM_CYCLES);
+                break;
+            }
             // Check if we're still in Managing state
             if !matches!(self.state_machine.current_state(), AgentState::Managing) {
                 break;
@@ -666,7 +675,16 @@ impl PMAgent {
             .await
             .context("Failed to select a model for validation")?;
         
-        // Call LLM for validation decision
+        let mut failover_handler = FailoverHandler::new();
+        let initial_endpoint = ModelEndpoint {
+            provider: "local".to_string(), // assuming local default for PM
+            model: selected_model.model_id.clone(),
+            api_key_id: None,
+        };
+        failover_handler.add_endpoint(initial_endpoint.clone());
+        failover_handler.set_active(initial_endpoint.clone());
+
+        // Call LLM for validation decision with failover logic
         let options = GenerationOptions {
             temperature: Some(0.3),
             max_tokens: Some(4096),
@@ -681,26 +699,55 @@ impl PMAgent {
             &selected_model.model_id
         };
         
-        // Add timeout wrapper to prevent indefinite hanging
-        tracing::info!("[DIAGNOSTIC] PM {} calling LLM for validation (model: {})", self.id.name, model_name);
-        let llm_timeout = tokio::time::Duration::from_secs(300); // 300s timeout for LLM generation
-        let response = tokio::time::timeout(
-            llm_timeout,
-            client.generate(model_name, &prompt, options)
-        )
-        .await
-        .context(format!("LLM validation timed out after {:?}", llm_timeout))?
-        .context("Failed to validate task with LLM")?;
+        let mut response_text = String::new();
+        let mut success = false;
+        
+        for _ in 0..3 {
+            // Add timeout wrapper to prevent indefinite hanging
+            tracing::info!("[DIAGNOSTIC] PM {} calling LLM for validation (model: {})", self.id.name, model_name);
+            let llm_timeout = tokio::time::Duration::from_secs(300); // 300s timeout for LLM generation
+            match tokio::time::timeout(
+                llm_timeout,
+                client.generate(model_name, &prompt, options.clone())
+            ).await {
+                Ok(Ok(response)) => {
+                    if loop_detector::check_output_limit(&response.text) {
+                        tracing::warn!("PM {} LLM output truncated due to character limit", self.id.name);
+                        failover_handler.report_transient_failure(&initial_endpoint, "output_limit_exceeded");
+                        continue;
+                    }
+                    if let Some(pattern_len) = loop_detector::detect_autoregressive_loop(&response.text) {
+                        tracing::warn!("PM {} LLM stuck in autoregressive loop (pattern len {})", self.id.name, pattern_len);
+                        failover_handler.report_transient_failure(&initial_endpoint, "autoregressive_loop");
+                        continue;
+                    }
+                    response_text = response.text;
+                    success = true;
+                    break;
+                }
+                Ok(Err(e)) => {
+                    failover_handler.report_transient_failure(&initial_endpoint, &e.to_string());
+                }
+                Err(_) => {
+                    failover_handler.report_transient_failure(&initial_endpoint, "timeout");
+                }
+            }
+        }
+        
+        if !success {
+            return Err(anyhow::anyhow!("Failed to validate task with LLM after failover retries"));
+        }
+        
         tracing::debug!(
             target: "llm_messages",
             "[PM VALIDATION RESPONSE] Model: {}, Response ({} chars):\n{}",
             model_name,
-            response.text.len(),
-            response.text
+            response_text.len(),
+            response_text
         );
         
         // Parse validation decision
-        let validation = self.parse_validation_response(&response.text)?;
+        let validation = self.parse_validation_response(&response_text)?;
         
         let pm = self.project_manager.read().await;
         

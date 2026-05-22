@@ -7,6 +7,7 @@ use crate::bridge::agent_pb::{
     agent_service_client::AgentServiceClient,
     AgentConfig, InitializeRequest, MessageRequest, MessageResponse,
     StateRequest, TransitionRequest, TerminateRequest,
+    InterruptRequest,
 };
 
 /// Client for communicating with the Python TrippleEffect bridge via gRPC
@@ -115,6 +116,23 @@ impl BridgeClient {
             Ok(())
         } else {
             Err(anyhow!("Failed to terminate agent"))
+        }
+    }
+
+    /// Interrupt a currently executing tool
+    pub async fn interrupt_tool(&mut self, agent_id: String, tool_call_id: String, reason: String) -> Result<()> {
+        let request = tonic::Request::new(InterruptRequest {
+            agent_id,
+            tool_call_id,
+            reason,
+        });
+        
+        let response = self.client.interrupt_tool(request).await?.into_inner();
+        
+        if response.success {
+            Ok(())
+        } else {
+            Err(anyhow!("Failed to interrupt tool: {}", response.error_message))
         }
     }
 }

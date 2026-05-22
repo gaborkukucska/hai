@@ -18,6 +18,9 @@ service AgentService {
   
   // Terminate an agent
   rpc TerminateAgent(TerminateRequest) returns (TerminateResponse);
+  
+  // Interrupt a currently executing tool (used by Constitutional Guardian)
+  rpc InterruptTool(InterruptRequest) returns (InterruptResponse);
 }
 
 // Data structures
@@ -93,4 +96,15 @@ message TerminateRequest {
 
 message TerminateResponse {
   bool success = 1;
+}
+
+message InterruptRequest {
+  string agent_id = 1;
+  string tool_call_id = 2;
+  string reason = 3;
+}
+
+message InterruptResponse {
+  bool success = 1;
+  string error_message = 2;
 }

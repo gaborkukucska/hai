@@ -24,6 +24,8 @@ use super::{Agent, AgentContext, IntentParser, TaskPlanner, AgentStateMachine};
 use super::pm::PMAgent;
 use super::llm_config::AgentLLMConfig;
 use super::metrics::{MetricsCollector, OperationResult};
+use super::failover::{FailoverHandler, ModelEndpoint};
+use super::loop_detector;
 use super::session_tasks::SessionTaskList;
 use crate::config::HaiNetConfig;
 use crate::messaging::{AgentId, Message};
@@ -797,6 +799,15 @@ impl AdminAgent {
             ..Default::default()
         };
         
+        let mut failover_handler = FailoverHandler::new();
+        let initial_endpoint = ModelEndpoint {
+            provider: "local".to_string(),
+            model: selected_model.model_id.clone(),
+            api_key_id: None,
+        };
+        failover_handler.add_endpoint(initial_endpoint.clone());
+        failover_handler.set_active(initial_endpoint.clone());
+
         let client = selected_model.get_client()?;
         // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
         let model_name = if selected_model.model_id.contains("::") {
@@ -804,23 +815,48 @@ impl AdminAgent {
         } else {
             &selected_model.model_id
         };
-        let response = client.generate(
-            model_name,
-            &planning_prompt,
-            options
-        ).await.context("Failed to generate project plan with LLM")?;
         
-        // Log the full response for debugging
-        debug!(
-            target: "llm_messages",
-            "[ADMIN PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
-            model_name,
-            response.text.len(),
-            response.text
-        );
+        let mut response_text = String::new();
+        let mut success = false;
+        
+        for _ in 0..3 {
+            // Add timeout wrapper to prevent indefinite hanging
+            tracing::info!("[DIAGNOSTIC] Admin {} calling LLM for planning (model: {})", self.id.name, model_name);
+            let llm_timeout = tokio::time::Duration::from_secs(300); // 300s timeout for LLM generation
+            match tokio::time::timeout(
+                llm_timeout,
+                client.generate(model_name, &planning_prompt, options.clone())
+            ).await {
+                Ok(Ok(response)) => {
+                    if loop_detector::check_output_limit(&response.text) {
+                        tracing::warn!("Admin {} LLM output truncated due to character limit", self.id.name);
+                        failover_handler.report_transient_failure(&initial_endpoint, "output_limit_exceeded");
+                        continue;
+                    }
+                    if let Some(pattern_len) = loop_detector::detect_autoregressive_loop(&response.text) {
+                        tracing::warn!("Admin {} LLM stuck in autoregressive loop (pattern len {})", self.id.name, pattern_len);
+                        failover_handler.report_transient_failure(&initial_endpoint, "autoregressive_loop");
+                        continue;
+                    }
+                    response_text = response.text;
+                    success = true;
+                    break;
+                }
+                Ok(Err(e)) => {
+                    failover_handler.report_transient_failure(&initial_endpoint, &e.to_string());
+                }
+                Err(_) => {
+                    failover_handler.report_transient_failure(&initial_endpoint, "timeout");
+                }
+            }
+        }
+        
+        if !success {
+            return Err(anyhow::anyhow!("Failed to generate project plan with LLM after failover retries"));
+        }
         
         // Parse JSON response
-        let plan = self.parse_project_plan(&response.text)?;
+        let plan = self.parse_project_plan(&response_text)?;
         
         // Log parsed plan result
         trace!(

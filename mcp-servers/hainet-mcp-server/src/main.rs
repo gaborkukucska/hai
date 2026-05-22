@@ -2,6 +2,8 @@
 //!
 //! This server acts as a gateway for MCP calls, forwarding them to the appropriate services.
 
+mod tripple_tools;
+
 use anyhow::Result;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
@@ -42,6 +44,11 @@ impl MCPServer {
     }
 
     async fn handle_request(&self, tool: String, arguments: Value) -> Result<String, MCPError> {
+        // Dispatch to TrippleEffect tools first
+        if let Ok(res) = tripple_tools::handle_tripple_tool(&tool, arguments.clone()).await {
+            return Ok(res);
+        }
+
         if tool == "unknown_tool" {
             return Err(MCPError::UnknownTool(tool));
         }
@@ -61,8 +68,9 @@ impl ServerHandler for MCPServer {
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
         async move {
+            let mut tools = tripple_tools::list_tripple_tools();
             Ok(ListToolsResult {
-                tools: vec![],
+                tools,
                 next_cursor: None,
             })
         }

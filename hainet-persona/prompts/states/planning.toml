@@ -36,8 +36,18 @@ Local: {{local_resources}}
 Mesh: {{mesh_resources}}  
 External: {{external_resources}}
 
-Create a clear, step-by-step plan and explain it to {{user_name}} before proceeding.
-"""
+# Decomposition Strategies
+Use the following TrippleEffect decomposition strategies based on complexity:
+- **Sequential**: For linear, dependent tasks. Complete A before B.
+- **Parallel**: For independent tasks that can be executed concurrently.
+- **Hybrid**: Mix of sequential and parallel.
+- **Iterative**: For tasks requiring feedback loops and refinement.
+
+# Loop Detection Constraints
+CRITICAL: Do not create circular dependencies. Ensure all tasks have clear entry and exit criteria.
+If you detect repetitive sub-tasks without progress, break the loop immediately and alert the user.
+
+Create a clear, step-by-step plan and explain it to {{user_name}} before proceeding."""
 
 [pm_comms]
 prompt = """
