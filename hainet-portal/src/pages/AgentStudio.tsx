@@ -6,12 +6,20 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '../lib/tauri';
 
 /** Active agent info from the backend */
-interface AgentInfo {
-  agent_id: string;
+interface AgentId {
   agent_type: string;
-  status: string;
-  model?: string;
-  state?: string;
+  name: string;
+}
+
+interface AgentStatus {
+  state: string;
+  activity: string;
+  last_updated: number;
+}
+
+interface AgentInfo {
+  id: AgentId;
+  status: AgentStatus | null;
 }
 
 /** Active project info from the backend */
@@ -152,16 +160,16 @@ export default function AgentStudio() {
                  <p className="text-xs text-theme-text-muted">No agents running. Create a project to start the swarm.</p>
                ) : (
                  agents.map(agent => (
-                   <div key={agent.agent_id} className="flex items-center justify-between p-2 rounded-md hover:bg-theme-bg-tertiary transition-colors">
+                   <div key={agent.id?.name || String(Math.random())} className="flex items-center justify-between p-2 rounded-md hover:bg-theme-bg-tertiary transition-colors">
                      <div>
-                       <p className="font-medium text-sm">{agent.agent_type}</p>
+                       <p className="font-medium text-sm">{agent.id?.agent_type || 'Agent'}</p>
                        <p className="text-xs text-theme-text-muted flex items-center gap-1">
-                         <span className={`w-1.5 h-1.5 rounded-full ${getStatusColor(agent.status)}`}></span>
-                         {agent.state || agent.status || 'Unknown'}
+                         <span className={`w-1.5 h-1.5 rounded-full ${getStatusColor(agent.status?.state || 'idle')}`}></span>
+                         {agent.status?.state || agent.status?.activity || 'Unknown'}
                        </p>
                      </div>
                      <span className="text-xs px-2 py-1 bg-theme-bg-tertiary rounded text-theme-text-secondary">
-                       {agent.model || 'default'}
+                       {agent.id?.name || 'default'}
                      </span>
                    </div>
                  ))
@@ -186,9 +194,9 @@ export default function AgentStudio() {
                  <>
                    <p><span className="text-theme-accent-primary">[System]</span> Project "{selectedProject.title}" is {selectedProject.status}.</p>
                    {agents.map(agent => (
-                     <p key={agent.agent_id}>
-                       <span className="text-theme-accent-success">[{agent.agent_type}]</span>{' '}
-                       State: {agent.state || 'initializing'} — Status: {agent.status || 'idle'}
+                     <p key={agent.id?.name || String(Math.random())}>
+                       <span className="text-theme-accent-success">[{agent.id?.agent_type || 'Agent'}]</span>{' '}
+                       State: {agent.status?.state || 'initializing'} — Activity: {agent.status?.activity || 'idle'}
                      </p>
                    ))}
                  </>

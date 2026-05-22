@@ -378,8 +378,13 @@ impl DeploymentOrchestrator {
         self.transfer_binaries(&client, &assignment.role, &assignment.capabilities.arch)?;
         
         // Step 3.5: Transfer AI persona prompts
+        let base = if self.shared_drive_host_ip.as_deref() == Some(&assignment.ip) {
+            self.shared_drive_remote_path.as_deref().unwrap_or(&self.shared_drive_path)
+        } else {
+            &self.shared_drive_path
+        };
         println!("📤 Transferring AI persona prompts...");
-        self.transfer_prompts(&client)?;
+        self.transfer_prompts(&client, base)?;
         
         // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
@@ -420,20 +425,16 @@ impl DeploymentOrchestrator {
             }
         }
 
-        // Step 1: Create system user (skip if exists)
-        println!("🔧 Creating hainet system user...");
-        let user_exists = Command::new("id").arg("hainet").output()
-            .map_or(false, |o| o.status.success());
-        if !user_exists {
-            let status = Command::new("sudo")
-                .args(&["useradd", "-r", "-s", "/bin/false", "-d", "/var/lib/hainet", "-m", "hainet"])
-                .status()?;
-            if status.success() {
-                println!("✓ User 'hainet' created.");
-            }
-        } else {
-            println!("✓ User 'hainet' already exists (re-deployment).");
-        }
+        // Step 1: Create system user and align to UID/GID 995
+        println!("🔧 Creating/aligning hainet system user...");
+        let _ = Command::new("sudo").args(&["groupadd", "-g", "995", "hainet"]).status();
+        let _ = Command::new("sudo").args(&["groupadd", "hainet"]).status();
+        let _ = Command::new("sudo")
+            .args(&["useradd", "-r", "-u", "995", "-g", "hainet", "-s", "/bin/false", "-d", "/var/lib/hainet", "-m", "hainet"])
+            .status();
+        let _ = Command::new("sudo").args(&["usermod", "-u", "995", "hainet"]).status();
+        let _ = Command::new("sudo").args(&["groupmod", "-g", "995", "hainet"]).status();
+        println!("✓ System user 'hainet' created (aligned to UID 995)");
 
         // Step 2: Create system directories
         println!("📁 Creating system directories...");
@@ -490,7 +491,12 @@ impl DeploymentOrchestrator {
 
         // Step 3.5: Copy AI persona prompts
         println!("📤 Copying AI persona prompts...");
-        self.copy_prompts_local()?;
+        let base = if self.shared_drive_host_ip.as_deref() == Some(&assignment.ip) {
+            self.shared_drive_remote_path.as_deref().unwrap_or(&self.shared_drive_path)
+        } else {
+            &self.shared_drive_path
+        };
+        self.copy_prompts_local(base)?;
 
         // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
@@ -510,13 +516,19 @@ impl DeploymentOrchestrator {
         } else {
             format!("{}/logs", self.shared_drive_path)
         };
+        let data_dir = if is_nfs_host {
+            let base = self.shared_drive_remote_path.as_deref().unwrap_or(&self.shared_drive_path);
+            format!("{}/data", base)
+        } else {
+            format!("{}/data", self.shared_drive_path)
+        };
         let config_content = match assignment.role {
-            DeviceRole::Master => format!("[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", log_dir),
+            DeviceRole::Master => format!("[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"{}\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", data_dir, log_dir),
             DeviceRole::Slave => {
                 let master_ip = self.master_node().map(|m| m.ip.as_str()).unwrap_or("10.0.0.10");
-                format!("[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", master_ip, log_dir)
+                format!("[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"{}\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", master_ip, data_dir, log_dir)
             },
-            _ => format!("[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", log_dir),
+            _ => format!("[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"{}\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", data_dir, log_dir),
         };
 
         let config_path = "/tmp/hainet.toml";
@@ -527,6 +539,21 @@ impl DeploymentOrchestrator {
         Command::new("sudo")
             .args(&["chown", "hainet:hainet", "/etc/hainet/hainet.toml"])
             .status()?;
+
+        // Ensure log and data directories exist and are writable by hainet
+        let _ = Command::new("sudo")
+            .args(&["mkdir", "-p", &log_dir])
+            .status();
+        let _ = Command::new("sudo")
+            .args(&["chown", "-R", "hainet:hainet", &log_dir])
+            .status();
+        let _ = Command::new("sudo")
+            .args(&["mkdir", "-p", &data_dir])
+            .status();
+        let _ = Command::new("sudo")
+            .args(&["chown", "-R", "hainet:hainet", &data_dir])
+            .status();
+
 
         // Step 5: Create and enable systemd system services
         println!("🔧 Setting up system services...");
@@ -1027,7 +1054,7 @@ WantedBy=multi-user.target
     
     /// Transfer the AI Persona prompts directory to the remote device
     #[cfg(not(test))]
-    fn transfer_prompts<C: SSHClientTrait>(&self, client: &C) -> Result<()> {
+    fn transfer_prompts<C: SSHClientTrait>(&self, client: &C, dest_base_path: &str) -> Result<()> {
         let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
         let prompts_dir = workspace_root.join("hainet-persona").join("prompts");
         
@@ -1043,13 +1070,14 @@ WantedBy=multi-user.target
             .status()?;
             
         let temp_remote_path = "/tmp/hainet-prompts.tar.gz";
-        println!("   Uploading prompts...");
+        println!("   Uploading prompts to shared drive...");
         client.upload_file(std::path::Path::new(tar_path), temp_remote_path)?;
         
         // Extract on remote and set ownership
+        let dest_prompts_path = format!("{}/prompts", dest_base_path);
         let extract_cmd = format!(
-            "sudo -n mkdir -p /var/lib/hainet/hainet-persona && sudo -n tar -xzf {} -C /var/lib/hainet/hainet-persona && sudo -n chown -R hainet:hainet /var/lib/hainet/hainet-persona && rm {}",
-            temp_remote_path, temp_remote_path
+            "sudo -n mkdir -p {} && sudo -n tar -xzf {} -C {} && sudo -n chown -R hainet:hainet {} && rm {}",
+            dest_base_path, temp_remote_path, dest_base_path, dest_prompts_path, temp_remote_path
         );
         let _ = client.execute_command(&extract_cmd);
         
@@ -1061,12 +1089,12 @@ WantedBy=multi-user.target
     }
 
     #[cfg(test)]
-    fn transfer_prompts<C: SSHClientTrait>(&self, _client: &C) -> Result<()> {
+    fn transfer_prompts<C: SSHClientTrait>(&self, _client: &C, _dest_base_path: &str) -> Result<()> {
         Ok(())
     }
 
     /// Copy the AI Persona prompts directory to the local device
-    fn copy_prompts_local(&self) -> Result<()> {
+    fn copy_prompts_local(&self, dest_base_path: &str) -> Result<()> {
         let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
         let prompts_dir = workspace_root.join("hainet-persona").join("prompts");
         
@@ -1076,15 +1104,16 @@ WantedBy=multi-user.target
         }
         
         std::process::Command::new("sudo")
-            .args(&["mkdir", "-p", "/var/lib/hainet/hainet-persona"])
+            .args(&["mkdir", "-p", dest_base_path])
             .status()?;
             
         std::process::Command::new("sudo")
-            .args(&["cp", "-r", prompts_dir.to_str().unwrap(), "/var/lib/hainet/hainet-persona/"])
+            .args(&["cp", "-r", prompts_dir.to_str().unwrap(), dest_base_path])
             .status()?;
             
+        let dest_prompts_path = format!("{}/prompts", dest_base_path);
         std::process::Command::new("sudo")
-            .args(&["chown", "-R", "hainet:hainet", "/var/lib/hainet/hainet-persona"])
+            .args(&["chown", "-R", "hainet:hainet", &dest_prompts_path])
             .status()?;
             
         println!("✓ Installed AI persona prompts to /var/lib/hainet/hainet-persona/prompts");
@@ -1097,18 +1126,19 @@ WantedBy=multi-user.target
         // If this device IS the NFS host, use the actual export path (e.g. /media/fast/hai-drive/logs)
         // rather than the mount-point path (which would create a local-only directory).
         let is_nfs_host = self.shared_drive_host_ip.as_deref() == Some(&assignment.ip);
-        let log_dir = if is_nfs_host {
+        let base = if is_nfs_host {
             // Use the real export path on the NFS host machine
-            let base = self.shared_drive_remote_path.as_deref().unwrap_or(&self.shared_drive_path);
-            format!("{}/logs", base)
+            self.shared_drive_remote_path.as_deref().unwrap_or(&self.shared_drive_path)
         } else {
-            format!("{}/logs", self.shared_drive_path)
+            &self.shared_drive_path
         };
+        let log_dir = format!("{}/logs", base);
+        let data_dir = format!("{}/data", base);
 
         // Create hainet.toml configuration with system directories
         let config = match assignment.role {
             DeviceRole::Master => {
-                format!("[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", log_dir)
+                format!("[network]\nrole = \"master\"\nport = 8080\n\n[storage]\ndata_dir = \"{}\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", data_dir, log_dir)
             },
             DeviceRole::Slave => {
                 // Get master IP (first Master in assignments)
@@ -1117,12 +1147,12 @@ WantedBy=multi-user.target
                     .unwrap_or("10.0.0.10");
                 
                 format!(
-                    "[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n",
-                    master_ip, log_dir
+                    "[network]\nrole = \"slave\"\nmaster_ip = \"{}\"\nport = 8080\n\n[storage]\ndata_dir = \"{}\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n",
+                    master_ip, data_dir, log_dir
                 )
             },
             DeviceRole::Standalone => {
-                format!("[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"/var/lib/hainet/data\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", log_dir)
+                format!("[network]\nrole = \"standalone\"\nport = 8080\n\n[storage]\ndata_dir = \"{}\"\n\n[logs]\nlog_dir = \"{}\"\nlog_level = \"info\"\n", data_dir, log_dir)
             },
             DeviceRole::UIOnly => {
                 let master_ip = self.master_node()
@@ -1147,6 +1177,10 @@ WantedBy=multi-user.target
         // Ensure log directory exists and is writable by hainet
         let _ = client.execute_command(&format!("sudo -n mkdir -p {} 2>/dev/null || mkdir -p {}", log_dir, log_dir));
         let _ = client.execute_command(&format!("sudo -n chown -R hainet:hainet {} 2>/dev/null || true", log_dir));
+        
+        // Ensure data directory exists and is writable by hainet
+        let _ = client.execute_command(&format!("sudo -n mkdir -p {} 2>/dev/null || mkdir -p {}", data_dir, data_dir));
+        let _ = client.execute_command(&format!("sudo -n chown -R hainet:hainet {} 2>/dev/null || true", data_dir));
         
         println!("✓ Configuration written to /etc/hainet/hainet.toml");
         
@@ -1545,13 +1579,21 @@ mod tests {
 
 // Helper methods for DeploymentOrchestrator (outside of tests module)
 impl DeploymentOrchestrator {
-    /// Create hainet system user on remote device
+    /// Create hainet system user on remote device and align UID/GID to 995
     fn create_system_user<C: SSHClientTrait>(&self, client: &C) -> Result<()> {
-        // Use sudo without password first (works if NOPASSWD is configured)
-        // If that fails, the error is non-fatal since `|| true` is appended
-        let create_user_cmd = "sudo -n useradd -r -s /bin/false -d /var/lib/hainet -m hainet 2>/dev/null || true";
-        let _ = client.execute_command(create_user_cmd);
-        println!("✓ System user 'hainet' created (or already exists)");
+        // Try creating group with GID 995
+        let _ = client.execute_command("sudo -n groupadd -g 995 hainet 2>/dev/null || sudo -n groupadd hainet 2>/dev/null || true");
+        // Try creating user with UID 995 and group GID 995
+        let _ = client.execute_command("sudo -n useradd -r -u 995 -g hainet -s /bin/false -d /var/lib/hainet -m hainet 2>/dev/null || true");
+        
+        // If user already exists but has a different UID, align it to 995
+        let _ = client.execute_command("sudo -n usermod -u 995 hainet 2>/dev/null || true");
+        let _ = client.execute_command("sudo -n groupmod -g 995 hainet 2>/dev/null || true");
+        
+        // Ensure standard system directories are owned by aligned user
+        let _ = client.execute_command("sudo -n chown -R hainet:hainet /var/lib/hainet /var/log/hainet /etc/hainet 2>/dev/null || true");
+
+        println!("✓ System user 'hainet' created (aligned to UID 995)");
         Ok(())
     }
     

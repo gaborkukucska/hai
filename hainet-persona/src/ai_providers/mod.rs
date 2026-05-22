@@ -34,7 +34,7 @@ pub use config::OllamaConfig;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Central AI provider management system
 pub struct AIProviderManager {
@@ -198,9 +198,16 @@ impl AIProviderManager {
         // Catalog all models from discovered providers
         let mut catalog = self.catalog.write().await;
         for provider in providers {
-            let models = self.discovery.fetch_models(&provider).await?;
-            for model in models {
-                catalog.add_model(model);
+            match self.discovery.fetch_models(&provider).await {
+                Ok(models) => {
+                    for model in models {
+                        catalog.add_model(model);
+                    }
+                },
+                Err(e) => {
+                    warn!("⚠️  Failed to fetch models from {} at {}: {}. Skipping.", 
+                        provider.provider_type, provider.endpoint, e);
+                }
             }
         }
         

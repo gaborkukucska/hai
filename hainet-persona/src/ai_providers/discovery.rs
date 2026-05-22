@@ -571,7 +571,20 @@ async fn probe_provider_static(
     };
 
     let available = match client.get(&probe_url).send().await {
-        Ok(response) => response.status().is_success(),
+        Ok(response) => {
+            if !response.status().is_success() {
+                false
+            } else {
+                // Validate content-type is JSON to avoid false positives from SPA servers
+                // (e.g., other hainet-core nodes that serve HTML for unknown paths)
+                let content_type = response.headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_lowercase();
+                content_type.contains("application/json")
+            }
+        },
         Err(_) => false,
     };
 

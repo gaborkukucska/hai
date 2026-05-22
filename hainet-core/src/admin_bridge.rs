@@ -79,38 +79,18 @@ pub struct AdminBridge {
 
 impl AdminBridge {
     /// Create new Admin AI bridge
-    pub async fn new() -> Result<Self> {
+    pub async fn new(data_dir: std::path::PathBuf, prompts_path: std::path::PathBuf) -> Result<Self> {
         info!("Initializing Admin AI Bridge...");
-        
-        // Determine prompts path - try multiple strategies
-        let prompts_path = if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
-            // Running via cargo run — CARGO_MANIFEST_DIR is e.g. /home/tom/hai/hainet-core
-            // We need the workspace root (one parent up), then into hainet-persona/prompts
-            let workspace_root = std::path::PathBuf::from(&manifest_dir)
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."))
-                .to_path_buf();
-            info!("Workspace root from CARGO_MANIFEST_DIR: {:?}", workspace_root);
-            workspace_root.join("hainet-persona").join("prompts")
-        } else {
-            // Running as installed binary - use current directory
-            std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                .join("hainet-persona")
-                .join("prompts")
-        };
         
         info!("Prompts path: {:?}", prompts_path);
         
         // Create project manager with SQLite database
-        // Use a more reliable path in the user's home directory
-        let home_dir = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        let hainet_dir = home_dir.join(".hainet");
-        let data_dir = hainet_dir.join("data");
+        // Use the centralized data_dir provided by the configuration
+        info!("Data directory: {:?}", data_dir);
         
         // Create directories with proper permissions
         std::fs::create_dir_all(&data_dir)?;
+
         
         // Create user settings manager FIRST (needed by AIProviderManager)
         let settings_db_path = data_dir.join("user_settings.db");

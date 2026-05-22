@@ -70,8 +70,10 @@ export default function ChatView() {
       });
 
       // Parse the response — the backend returns the assistant's reply
-      const assistantContent = response?.content
-        || response?.message
+      const assistantContent = typeof response?.message === 'string'
+        ? response.message
+        : response?.message?.content
+        || response?.content
         || (typeof response === 'string' ? response : JSON.stringify(response));
 
       const assistantMsg: ChatMessage = {

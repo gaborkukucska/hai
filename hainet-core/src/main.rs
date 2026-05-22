@@ -99,15 +99,17 @@ async fn main() -> Result<()> {
         warn!("⚠  Port {} in use, health endpoint on port {}", config.network.port, health_port);
     }
 
-    // Initialize Admin AI Bridge and other backend states
-    let admin_bridge = AdminBridge::new().await
-        .expect("Failed to initialize Admin AI Bridge");
-    
-    // Initialize database directory
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("/root/.local/share"))
-        .join("hainet-portal");
+    // Initialize database directory from config
+    let data_dir = std::path::PathBuf::from(&config.storage.data_dir);
     let _ = std::fs::create_dir_all(&data_dir);
+    
+    // Determine prompts directory (sibling to data_dir)
+    let prompts_dir = data_dir.parent().unwrap_or(&data_dir).join("prompts");
+    
+    // Initialize Admin AI Bridge and other backend states
+    let admin_bridge = AdminBridge::new(data_dir.clone(), prompts_dir).await
+        .expect("Failed to initialize Admin AI Bridge");
+
     
     // Initialize MetricsCollector with database path
     let metrics_db_path = data_dir.join("metrics.db");

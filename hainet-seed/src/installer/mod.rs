@@ -212,6 +212,8 @@ impl Installer {
             "media_cache",
             "ollama",
             "projects",
+            "data",
+            "prompts",
             "vllm/models",
             "whisper",
             "Zimms",
