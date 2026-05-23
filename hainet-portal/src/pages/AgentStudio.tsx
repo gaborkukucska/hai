@@ -22,12 +22,21 @@ interface AgentInfo {
   status: AgentStatus | null;
 }
 
+interface TaskInfo {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  dependencies: string[];
+  worker_agent_id?: string;
+}
+
 /** Active project info from the backend */
 interface ProjectInfo {
   id: string;
   title: string;
   status: string;
-  tasks?: any[];
+  tasks?: TaskInfo[];
 }
 
 export default function AgentStudio() {
@@ -135,6 +144,86 @@ export default function AgentStudio() {
     }
   };
 
+  /** Get task status badge styling */
+  const getTaskBadge = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'unassigned': return 'bg-theme-bg-tertiary text-theme-text-muted border-theme-border';
+      case 'inprogress': return 'bg-blue-500/20 text-blue-400 border-blue-500/30 animate-pulse';
+      case 'underreview': return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
+      case 'needsrevision': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+      case 'complete': return 'bg-green-500/20 text-green-400 border-green-500/30';
+      case 'failed': return 'bg-red-500/20 text-red-400 border-red-500/30';
+      case 'stuck': return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
+      default: return 'bg-theme-bg-tertiary text-theme-text-muted border-theme-border';
+    }
+  };
+
+  /** Render a task and its dependents recursively */
+  const renderTaskTree = (task: TaskInfo, allTasks: TaskInfo[], depth: number = 0, visited: Set<string> = new Set()) => {
+    if (visited.has(task.id)) return null; // Prevent infinite loops in cycles
+    visited.add(task.id);
+
+    // Find tasks that depend on THIS task
+    const dependents = allTasks.filter(t => t.dependencies.includes(task.id));
+    
+    // Find assigned worker name if possible
+    let workerName = 'Unassigned';
+    if (task.worker_agent_id) {
+      const worker = agents.find(a => a.id.name === task.worker_agent_id || a.id.agent_type === task.worker_agent_id);
+      workerName = worker ? worker.id.name : task.worker_agent_id;
+    }
+
+    return (
+      <div key={task.id} className="flex flex-col mt-2">
+        <div 
+          className={`flex items-center gap-3 p-3 rounded-lg border bg-theme-bg-primary transition-all hover:border-theme-accent-primary/50`}
+          style={{ marginLeft: `${depth * 1.5}rem` }}
+        >
+          {/* Status icon / branch line */}
+          <div className="flex-shrink-0 relative">
+            {depth > 0 && (
+              <div className="absolute -left-6 top-1/2 w-4 border-t-2 border-theme-border border-dashed"></div>
+            )}
+            <div className={`w-3 h-3 rounded-full ${getTaskBadge(task.status).split(' ')[0]}`}></div>
+          </div>
+          
+          <div className="flex-1 min-w-0">
+            <div className="flex justify-between items-start mb-1">
+              <h4 className="text-sm font-medium text-theme-text-primary truncate" title={task.title}>
+                {task.title}
+              </h4>
+              <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full border ${getTaskBadge(task.status)}`}>
+                {task.status}
+              </span>
+            </div>
+            
+            <div className="flex items-center justify-between mt-1.5">
+              <span className="text-xs text-theme-text-muted truncate max-w-[70%]" title={task.description}>
+                {task.description.length > 60 ? task.description.substring(0, 60) + '...' : task.description}
+              </span>
+              {task.worker_agent_id && (
+                <span className="text-[10px] flex items-center gap-1 text-theme-accent-primary bg-theme-accent-primary/10 px-2 py-0.5 rounded">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  {workerName}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Render dependents nested underneath */}
+        {dependents.length > 0 && (
+          <div className="flex flex-col relative">
+            <div className="absolute left-[0.3rem] top-0 bottom-4 border-l-2 border-theme-border border-dashed" style={{ marginLeft: `${depth * 1.5}rem` }}></div>
+            {dependents.map(dep => renderTaskTree(dep, allTasks, depth + 1, visited))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 h-full overflow-y-auto bg-theme-bg-primary text-theme-text-primary p-6">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -200,19 +289,34 @@ export default function AgentStudio() {
              </h2>
 
              {/* Project log / task output area */}
-             <div className="flex-1 bg-theme-bg-primary rounded-md border border-theme-border p-4 font-mono text-xs text-theme-text-muted space-y-2 overflow-y-auto min-h-[200px]">
+             <div className="flex-1 bg-theme-bg-tertiary/30 rounded-md border border-theme-border p-4 overflow-y-auto min-h-[300px]">
                {!selectedProject ? (
-                 <p className="text-theme-text-muted">Create a new project to see live task output here.</p>
+                 <div className="h-full flex flex-col items-center justify-center text-theme-text-muted">
+                   <svg className="w-12 h-12 mb-3 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                   </svg>
+                   <p>Create a new project to see the task delegation tree here.</p>
+                 </div>
                ) : (
-                 <>
-                   <p><span className="text-theme-accent-primary">[System]</span> Project "{selectedProject.title}" is {selectedProject.status}.</p>
-                   {agents.map(agent => (
-                     <p key={agent.id?.name || String(Math.random())}>
-                       <span className="text-theme-accent-success">[{agent.id?.agent_type || 'Agent'}]</span>{' '}
-                       State: {agent.status?.state || 'initializing'} — Activity: {agent.status?.activity || 'idle'}
+                 <div className="space-y-1 pb-4">
+                   <div className="flex justify-between items-center mb-4 border-b border-theme-border pb-3">
+                     <h3 className="font-semibold text-theme-text-primary">Task Dependency Tree</h3>
+                     <span className="text-xs bg-theme-bg-tertiary px-2 py-1 rounded text-theme-text-secondary">
+                       {selectedProject.tasks?.filter(t => t.status === 'Complete').length || 0} / {selectedProject.tasks?.length || 0} Tasks Done
+                     </span>
+                   </div>
+                   
+                   {/* Find root tasks (no dependencies) and render their trees */}
+                   {selectedProject.tasks && selectedProject.tasks.length > 0 ? (
+                     selectedProject.tasks
+                       .filter(t => !t.dependencies || t.dependencies.length === 0)
+                       .map(rootTask => renderTaskTree(rootTask, selectedProject.tasks!))
+                   ) : (
+                     <p className="text-sm text-theme-text-muted italic py-4 text-center">
+                       PM Agent is analyzing project and generating tasks...
                      </p>
-                   ))}
-                 </>
+                   )}
+                 </div>
                )}
              </div>
 

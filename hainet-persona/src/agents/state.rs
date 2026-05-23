@@ -135,14 +135,31 @@ impl AgentStateMachine {
             
             // From Managing (PM agents)
             (Managing, Planning) => true, // Replanning needed
+            (Managing, Reviewing) => true, // Reviewing worker report
+            (Managing, Auditing) => true, // Final project audit
             (Managing, Idle) => true, // Project complete
             (Managing, Error) => true,
             
+            // From Reviewing (PM agents)
+            (Reviewing, Managing) => true, // Return to managing tasks
+            (Reviewing, Error) => true,
+            
+            // From Auditing (PM agents)
+            (Auditing, Idle) => true, // Audit passed, project done
+            (Auditing, Managing) => true, // Audit failed, need more work
+            (Auditing, Error) => true,
+            
             // From Working (Worker agents)
+            (Working, Testing) => true, // Test work before reporting
             (Working, Reporting) => true, // Task done, report to PM
             (Working, Idle) => true, // Task complete (direct)
             (Working, Planning) => false, // Must return to Idle first
             (Working, Error) => true,
+            
+            // From Testing (Worker agents)
+            (Testing, Reporting) => true, // Test passed, report
+            (Testing, Working) => true, // Test failed, back to work
+            (Testing, Error) => true,
             
             // From Reporting (Worker agents)
             (Reporting, Idle) => true, // PM validated, ready for next task

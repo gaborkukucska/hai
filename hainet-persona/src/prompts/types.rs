@@ -33,11 +33,14 @@ pub enum AgentState {
     Startup,      // Initializing
     Idle,         // Ready, waiting for work (Worker agents)
     Conversation, // Admin AI casual interaction with user
-    Planning,     // Figuring out how to do something
+    Planning,     // PM breaking down project or Worker planning subtask execution
     Monitoring,   // Admin AI monitoring active projects
-    Managing,     // PM agent managing project execution
-    Working,      // Actively executing tasks (Worker agents)
+    Managing,     // PM agent managing project execution and activating workers
+    Working,      // Worker actively executing tasks
+    Testing,      // Worker testing its own work before reporting
     Reporting,    // Worker reporting results to PM
+    Reviewing,    // PM reviewing worker reports
+    Auditing,     // PM auditing final project deliverables
     Error,        // Something went wrong
 }
 

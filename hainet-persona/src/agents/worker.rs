@@ -405,11 +405,21 @@ impl WorkerAgent {
                 // Record success outcome for learning
                 self.record_success_outcome(&task, start_time, &ExecutionPlan { steps: vec![] });
                 
+                // Transition to Testing
+                let _ = self.state_machine.transition(
+                    AgentState::Testing,
+                    "Testing and verifying executed work".to_string()
+                );
+                self.update_status(&format!("Testing task {}", task_id)).await;
+                
+                // Wait briefly to represent testing time in UI
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                
                 // Transition to Reporting
-                self.state_machine.transition(
+                let _ = self.state_machine.transition(
                     AgentState::Reporting,
                     "Task complete, reporting to PM".to_string()
-                )?;
+                );
                 self.update_status(&format!("Reporting task {}", task_id)).await;
                 
                 // Submit task for review
@@ -2418,7 +2428,8 @@ Return JSON (ONLY the JSON object, nothing else):
             let response = client.generate(model_name, &current_prompt, options.clone()).await?;
             
             match parse_tool_selection(&response.text) {
-                Ok(selection) => {
+                Ok(mut selection) => {
+                    crate::agents::worker_discovery::resolve_selection_aliases(&mut selection, &available_tools);
                     // Validate tools exist in available_tools (with fuzzy matching)
                     let mut resolved_tools = Vec::new();
                     let mut invalid_tools = Vec::new();
@@ -2583,7 +2594,10 @@ Return JSON:
             }
 
             match parse_execution_plan(&response.text) {
-                Ok(plan) => return Ok(plan),
+                Ok(mut plan) => {
+                    crate::agents::worker_discovery::resolve_plan_aliases(&mut plan, &tool_names);
+                    return Ok(plan);
+                },
                 Err(e) => {
                     last_error = e.to_string();
                     // Continue to next attempt
@@ -2915,7 +2929,8 @@ CRITICAL: Respond with ONLY the JSON object. No markdown, no code blocks, no exp
                 .context("Failed to get tool selection from LLM")?;
             
             match parse_tool_selection(&response.text) {
-                Ok(selection) => {
+                Ok(mut selection) => {
+                    crate::agents::worker_discovery::resolve_selection_aliases(&mut selection, &available_tools);
                     // Validate tools exist in available_tools (with fuzzy matching)
                     let mut resolved_tools = Vec::new();
                     let mut invalid_tools = Vec::new();
@@ -3163,7 +3178,10 @@ Return JSON with steps array:
             }
 
             match parse_execution_plan(&response.text) {
-                Ok(plan) => return Ok(plan),
+                Ok(mut plan) => {
+                    crate::agents::worker_discovery::resolve_plan_aliases(&mut plan, &tool_names);
+                    return Ok(plan);
+                },
                 Err(e) => {
                     last_error = e.to_string();
                     // Continue to next attempt
@@ -3255,8 +3273,13 @@ Return JSON with steps array:
             response.text
         );
 
-        parse_execution_plan(&response.text)
-            .context("Failed to parse corrected execution plan")
+        match parse_execution_plan(&response.text) {
+            Ok(mut plan) => {
+                crate::agents::worker_discovery::resolve_plan_aliases(&mut plan, &tool_names);
+                Ok(plan)
+            },
+            Err(e) => Err(anyhow::anyhow!("Failed to parse corrected execution plan: {}", e))
+        }
     }
 
     /// Execute discovery-based plan (Phase 4: Execution with Feedback)

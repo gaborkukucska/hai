@@ -109,6 +109,242 @@ impl DiscoveryContext {
     }
 }
 
+// =============================================================================
+// TrippleEffect-Style Tool Alias System
+// =============================================================================
+// Ported from TrippleEffect's executor.py tool_name_mapping and base.py 
+// ToolParameter.aliases. Provides two layers of aliasing:
+//
+// 1. Tool-name aliases: Maps hallucinated/shorthand tool names to the correct
+//    MCP tool identifier. Small LLMs frequently produce names like "read_file"
+//    instead of "hainet-files::file_read".
+//
+// 2. Parameter-level semantic aliases: Maps synonymous parameter names so the
+//    agent's intent is always caught regardless of the specific word used.
+//    e.g., "filepath" → "filename", "text" → "content"
+// =============================================================================
+
+use std::sync::LazyLock;
+
+/// Tool name alias entry: maps a hallucinated name to (correct_tool, extra_params)
+struct ToolNameAlias {
+    correct_tool: &'static str,
+    /// Extra parameters to inject when the alias is resolved
+    extra_params: &'static [(&'static str, &'static str)],
+}
+
+/// Static tool-name alias map (mirrors TE's executor.py tool_name_mapping)
+static TOOL_NAME_ALIASES: LazyLock<HashMap<&'static str, ToolNameAlias>> = LazyLock::new(|| {
+    let mut m = HashMap::new();
+
+    // File system aliases (TE: read_file → file_system + action=read)
+    m.insert("read_file", ToolNameAlias { correct_tool: "hainet-files::file_read", extra_params: &[] });
+    m.insert("write_file", ToolNameAlias { correct_tool: "hainet-files::file_write", extra_params: &[] });
+    m.insert("file_read", ToolNameAlias { correct_tool: "hainet-files::file_read", extra_params: &[] });
+    m.insert("file_write", ToolNameAlias { correct_tool: "hainet-files::file_write", extra_params: &[] });
+    m.insert("list_files", ToolNameAlias { correct_tool: "hainet-files::file_list", extra_params: &[] });
+    m.insert("file_list", ToolNameAlias { correct_tool: "hainet-files::file_list", extra_params: &[] });
+    m.insert("list_directory", ToolNameAlias { correct_tool: "hainet-files::file_list", extra_params: &[] });
+    m.insert("create_file", ToolNameAlias { correct_tool: "hainet-files::file_write", extra_params: &[] });
+    m.insert("save_file", ToolNameAlias { correct_tool: "hainet-files::file_write", extra_params: &[] });
+    m.insert("delete_file", ToolNameAlias { correct_tool: "hainet-files::file_delete", extra_params: &[] });
+    m.insert("mkdir", ToolNameAlias { correct_tool: "hainet-files::file_mkdir", extra_params: &[] });
+    m.insert("create_directory", ToolNameAlias { correct_tool: "hainet-files::file_mkdir", extra_params: &[] });
+
+    // Code editor aliases  
+    m.insert("edit_file", ToolNameAlias { correct_tool: "hainet-files::file_write", extra_params: &[] });
+    m.insert("code_editor", ToolNameAlias { correct_tool: "hainet-files::file_write", extra_params: &[] });
+
+    // Command/terminal aliases (TE: execute_command → command_executor)
+    m.insert("execute_command", ToolNameAlias { correct_tool: "hainet-system::run_command", extra_params: &[] });
+    m.insert("run_command", ToolNameAlias { correct_tool: "hainet-system::run_command", extra_params: &[] });
+    m.insert("terminal", ToolNameAlias { correct_tool: "hainet-system::run_command", extra_params: &[] });
+    m.insert("shell", ToolNameAlias { correct_tool: "hainet-system::run_command", extra_params: &[] });
+    m.insert("bash", ToolNameAlias { correct_tool: "hainet-system::run_command", extra_params: &[] });
+
+    // Search aliases
+    m.insert("search", ToolNameAlias { correct_tool: "hainet-system::web_search", extra_params: &[] });
+    m.insert("web_search", ToolNameAlias { correct_tool: "hainet-system::web_search", extra_params: &[] });
+
+    // Git aliases
+    m.insert("git_status", ToolNameAlias { correct_tool: "hainet-dev::git_status", extra_params: &[] });
+    m.insert("git_commit", ToolNameAlias { correct_tool: "hainet-dev::git_commit", extra_params: &[] });
+    m.insert("git_diff", ToolNameAlias { correct_tool: "hainet-dev::git_diff", extra_params: &[] });
+
+    m
+});
+
+/// Parameter-level semantic alias definitions (mirrors TE's ToolParameter.aliases)
+/// Maps (canonical_param_name → list of aliases)
+static PARAM_ALIASES: LazyLock<HashMap<&'static str, Vec<&'static str>>> = LazyLock::new(|| {
+    let mut m = HashMap::new();
+
+    // File path aliases (TE: filename.aliases = ["filepath", "file", "file_path", ...])
+    m.insert("filename", vec!["filepath", "file", "file_path", "file_name", "target_file", "name", "path"]);
+    m.insert("content", vec!["text", "data", "body", "code", "string", "content_str"]);
+    m.insert("directory", vec!["dir", "folder", "target_dir", "path"]);
+    m.insert("find_text", vec!["search", "find", "search_string", "search_text", "search_term"]);
+    m.insert("replace_text", vec!["replace", "replacement", "replacement_text", "replace_string", "replace_term"]);
+    m.insert("target_agent_id", vec!["target", "agent", "recipient", "to"]);
+    m.insert("message_content", vec!["content", "message", "text"]);
+    m.insert("query", vec!["q", "keyword", "search_term", "search"]);
+    m.insert("command", vec!["cmd", "shell_command", "exec"]);
+    m.insert("commit_message", vec!["message", "msg"]);
+    m.insert("url", vec!["link", "href", "endpoint"]);
+    m.insert("destination_path", vec!["dest", "destination", "target_path", "output"]);
+    m.insert("chunks", vec!["replacements", "replace_chunks", "edits", "replacements_json", "modifications"]);
+    m.insert("insert_line", vec!["line_number", "line", "at_line"]);
+    m.insert("replace_start_line", vec!["start_line_number", "from_line", "start_line"]);
+    m.insert("action", vec!["operation", "op", "command"]);
+    m.insert("limit", vec!["count", "max_results", "per_page", "max"]);
+
+    m
+});
+
+/// Resolve a potentially hallucinated tool name to its correct MCP identifier.
+/// Returns (resolved_tool_name, extra_params_to_inject, was_aliased).
+///
+/// This mirrors TrippleEffect's executor.py `tool_name_mapping` behavior where
+/// agents using shorthand names like "read_file" are transparently redirected
+/// to the correct tool without breaking the workflow.
+pub fn resolve_tool_alias(tool_name: &str) -> (String, Vec<(String, String)>, bool) {
+    // 1. Try exact match in alias map
+    if let Some(alias) = TOOL_NAME_ALIASES.get(tool_name) {
+        let extras: Vec<(String, String)> = alias.extra_params
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        tracing::info!(
+            "Tool alias resolved: '{}' → '{}' (injecting {} extra params)",
+            tool_name, alias.correct_tool, extras.len()
+        );
+        return (alias.correct_tool.to_string(), extras, true);
+    }
+
+    // 2. Try case-insensitive match
+    let lower = tool_name.to_lowercase();
+    for (alias_key, alias_val) in TOOL_NAME_ALIASES.iter() {
+        if alias_key.to_lowercase() == lower {
+            let extras: Vec<(String, String)> = alias_val.extra_params
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            tracing::info!(
+                "Tool alias resolved (case-insensitive): '{}' → '{}'",
+                tool_name, alias_val.correct_tool
+            );
+            return (alias_val.correct_tool.to_string(), extras, true);
+        }
+    }
+
+    // 3. Try fuzzy match: strip server prefix and check
+    // e.g., "hainet-files::read_file" → check "read_file" in aliases
+    if let Some(tool_part) = tool_name.split("::").last() {
+        if let Some(alias) = TOOL_NAME_ALIASES.get(tool_part) {
+            let extras: Vec<(String, String)> = alias.extra_params
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            tracing::info!(
+                "Tool alias resolved (after stripping prefix): '{}' → '{}'",
+                tool_name, alias.correct_tool
+            );
+            return (alias.correct_tool.to_string(), extras, true);
+        }
+    }
+
+    // No alias found — return as-is
+    (tool_name.to_string(), vec![], false)
+}
+
+/// Resolve parameter-level semantic aliases in a JSON params object.
+/// Maps synonymous parameter names to their canonical form so the tool
+/// receives the expected parameter names.
+///
+/// This mirrors TrippleEffect's executor.py dynamic parameter alias resolution
+/// where e.g., `filepath` → `filename`, `text` → `content`.
+pub fn resolve_param_aliases(params: &mut serde_json::Map<String, Value>) {
+    // Build a reverse lookup: alias → canonical name
+    // We only remap if the canonical name is NOT already present
+    for (canonical, aliases) in PARAM_ALIASES.iter() {
+        if params.contains_key(*canonical) {
+            continue; // Canonical name already present, no need to alias
+        }
+        for alias in aliases {
+            if let Some(value) = params.remove(*alias) {
+                tracing::info!(
+                    "Param alias resolved: '{}' → '{}'",
+                    alias, canonical
+                );
+                params.insert(canonical.to_string(), value);
+                break; // Only remap the first matching alias
+            }
+        }
+    }
+}
+
+/// Resolve tool aliases within a parsed DiscoveryExecutionPlan.
+/// Walks through each step and resolves both tool names and parameter aliases.
+pub fn resolve_plan_aliases(plan: &mut DiscoveryExecutionPlan, available_tools: &[String]) {
+    for step in &mut plan.steps {
+        // Resolve tool name
+        let (resolved_name, extra_params, was_aliased) = resolve_tool_alias(&step.tool);
+        
+        if was_aliased {
+            // Verify the resolved tool actually exists in the available tools
+            let exists = available_tools.iter().any(|t| t == &resolved_name);
+            if exists {
+                tracing::info!(
+                    "Plan step {}: resolved tool '{}' → '{}'",
+                    step.step_number.unwrap_or(0), step.tool, resolved_name
+                );
+                step.tool = resolved_name;
+                
+                // Inject extra params
+                if let Some(params_obj) = step.params.as_object_mut() {
+                    for (key, value) in extra_params {
+                        if !params_obj.contains_key(&key) {
+                            params_obj.insert(key, Value::String(value));
+                        }
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    "Plan step {}: alias '{}' resolved to '{}' but tool not available. Keeping original.",
+                    step.step_number.unwrap_or(0), step.tool, resolved_name
+                );
+            }
+        }
+
+        // Resolve parameter aliases
+        if let Some(params_obj) = step.params.as_object_mut() {
+            resolve_param_aliases(params_obj);
+        }
+    }
+}
+
+/// Resolve tool aliases within a ToolSelectionRequest.
+/// Walks through `needed_tools` and resolves any aliased names.
+pub fn resolve_selection_aliases(selection: &mut ToolSelectionRequest, available_tools: &[String]) {
+    let mut resolved_tools = Vec::new();
+    for tool_name in &selection.needed_tools {
+        let (resolved, _, was_aliased) = resolve_tool_alias(tool_name);
+        if was_aliased {
+            let exists = available_tools.iter().any(|t| t == &resolved);
+            if exists {
+                tracing::info!("Selection alias: '{}' → '{}'", tool_name, resolved);
+                resolved_tools.push(resolved);
+            } else {
+                // Keep original if resolved name doesn't exist
+                resolved_tools.push(tool_name.clone());
+            }
+        } else {
+            resolved_tools.push(tool_name.clone());
+        }
+    }
+    selection.needed_tools = resolved_tools;
+}
+
 /// Helper to format tool list for minimal planning prompt
 pub fn format_tool_list(tool_names: &[String]) -> String {
     tool_names

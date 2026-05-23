@@ -73,14 +73,14 @@ hainet/
 
 | Task | Detail |
 |---|---|
-| Create `services/agent-svc/` | Python package wrapping TrippleEffect as a managed subprocess |
-| Define gRPC/IPC contract | Protobuf schema for HAI-Net ↔ TrippleEffect communication |
-| Create `hainet-persona/src/bridge/` | Rust gRPC client + sidecar lifecycle management |
-| Port TE state machine patterns | Implement in `hainet-persona` Rust: state graphs, transition validation |
+| [DONE] Create `services/agent-svc/` | Python package wrapping TrippleEffect as a managed subprocess |
+| [DONE] Define gRPC/IPC contract | Protobuf schema for HAI-Net ↔ TrippleEffect communication |
+| [DONE] Create `hainet-persona/src/bridge/` | Rust gRPC client + sidecar lifecycle management |
+| [DONE] Port TE state machine patterns | Implement in `hainet-persona` Rust: state graphs, transition validation |
 | Port TE cycle handler patterns | AgentCycleHandler logic → Rust async tasks |
 | Port TE failover handler | Model failover chain → enhance `ai_providers` |
 | Port TE context management | Bounded workspace trees, auto-summarization |
-| Merge TE tool ecosystem | Map TE's 21 tools → HAI-Net MCP server equivalents |
+| [DONE] Merge TE tool ecosystem | Map TE's 21 tools → HAI-Net MCP server equivalents |
 | Port TE Constitutional Guardian | Merge with existing guardian module |
 | Unify prompt systems | TE's YAML prompts + HAI-Net's Handlebars templates |
 
@@ -91,8 +91,8 @@ hainet/
 | `AgentManager` | `PersonaService` in lib.rs | Sidecar first, then port |
 | `Agent.process_message()` async generator | `Agent::process_message()` trait | Events → tokio mpsc channel |
 | `AgentCycleHandler.run_cycle()` | New `CycleEngine` module | Port cycle logic to async tasks |
-| `WorkflowManager` state transitions | `AgentStateMachine` (exists!) | Merge TE's transition rules |
-| `ToolExecutor` | MCP servers (exist!) | Map TE tools → MCP tool calls |
+| `WorkflowManager` state transitions | `AgentStateMachine` (exists!) | [DONE] Merge TE's transition rules |
+| `ToolExecutor` | MCP servers (exist!) | [DONE] Map TE tools → MCP tool calls |
 | `ConstitutionalGuardian` | `GuardianAgent` (exists!) | Merge governance.yaml enforcement |
 | `FailoverHandler` | New `failover.rs` | Port model failover chain |
 | `ContextSummarizer` | New `context.rs` | Port token-bounded summarization |

@@ -374,15 +374,29 @@ impl PMAgent {
             // PRIORITY 3: Check for completed tasks needing validation
             let tasks_under_review = self.get_tasks_under_review().await?;
             
-            tracing::info!(
-                "PM {} found {} tasks under review",
-                self.id.name,
-                tasks_under_review.len()
-            );
-            
-            // Spawn async validations for tasks under review (non-blocking)
-            for task_id in tasks_under_review {
-                self.spawn_validation(task_id)?;
+            if !tasks_under_review.is_empty() {
+                let _ = self.state_machine.transition(
+                    AgentState::Reviewing, 
+                    "Reviewing worker reports".to_string()
+                );
+                self.update_status("Reviewing worker reports").await;
+                
+                tracing::info!(
+                    "PM {} found {} tasks under review",
+                    self.id.name,
+                    tasks_under_review.len()
+                );
+                
+                // Spawn async validations for tasks under review (non-blocking)
+                for task_id in tasks_under_review {
+                    self.spawn_validation(task_id)?;
+                }
+                
+                let _ = self.state_machine.transition(
+                    AgentState::Managing, 
+                    "Finished spawning validations".to_string()
+                );
+                self.update_status("Managing project execution").await;
             }
             
             // PRIORITY 4: Check for tasks needing revision
@@ -414,14 +428,28 @@ impl PMAgent {
             
             // Check if all tasks are complete
             if self.is_project_complete().await? {
+                let _ = self.state_machine.transition(
+                    AgentState::Auditing, 
+                    "Auditing project completeness".to_string()
+                );
+                self.update_status("Auditing final project deliverables").await;
+                
                 // Double check with LLM assessment
                 let assessment = self.assess_project_completeness().await?;
                 
                 if assessment.complete {
+                    let _ = self.state_machine.transition(
+                        AgentState::Idle, 
+                        "Project complete".to_string()
+                    );
                     tracing::info!("PM {} assessment: Project COMPLETE. Reasoning: {}", self.id.name, assessment.reasoning);
                     self.complete_project().await?;
                     break;
                 } else {
+                    let _ = self.state_machine.transition(
+                        AgentState::Managing, 
+                        "Project incomplete, missing tasks".to_string()
+                    );
                     tracing::info!("PM {} assessment: Project INCOMPLETE. Creating {} missing tasks. Reasoning: {}", 
                         self.id.name, assessment.missing_tasks.len(), assessment.reasoning);
                     
