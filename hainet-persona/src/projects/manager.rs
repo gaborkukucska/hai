@@ -160,12 +160,17 @@ impl ProjectManager {
     pub fn get_project_sandbox_path(project_title: &str) -> PathBuf {
         // Sanitize project name (match MCP server logic in hainet-files)
         // Replace characters that are problematic for filesystems
-        let sanitized = project_title
-            .replace(' ', "_")
-            .replace(':', "_")  // Fix for project names like "Snakey: The Game"
-            .replace('/', "_")
-            .replace('\\', "_");
-        
+        let mut sanitized = project_title.to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric(), "_")
+            .replace("__", "_")
+            .trim_matches('_')
+            .to_string();
+            
+        // Fallback if title was purely non-alphanumeric
+        if sanitized.is_empty() {
+            sanitized = "unnamed_project".to_string();
+        }
+            
         let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         tracing::info!("DEBUG: Current dir: {}", current.display());
 

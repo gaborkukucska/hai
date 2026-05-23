@@ -82,9 +82,9 @@ export default function Settings() {
     try {
       console.log('[Settings] Invoking save_model_preference command...');
       await invoke('save_model_preference', {
-        agentType,
+        agent_type: agentType,
         family: preferredFamily,
-        allowFallback,
+        allow_fallback: allowFallback,
       });
       console.log('[Settings] Save command completed successfully');
       

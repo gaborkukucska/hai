@@ -24,7 +24,7 @@ interface AgentInfo {
 
 /** Active project info from the backend */
 interface ProjectInfo {
-  project_id: string;
+  id: string;
   title: string;
   status: string;
   tasks?: any[];
@@ -230,27 +230,27 @@ export default function AgentStudio() {
                   <>
                     {selectedProject.status === 'paused' ? (
                       <button
-                        onClick={() => handleResume(selectedProject.project_id)}
+                        onClick={() => handleResume(selectedProject.id)}
                         className="flex-1 px-4 py-2 bg-theme-accent-success/20 border border-theme-accent-success text-theme-text-primary rounded-md transition-colors"
                       >
                         Resume Project
                       </button>
                     ) : (
                       <button
-                        onClick={() => handlePause(selectedProject.project_id)}
+                        onClick={() => handlePause(selectedProject.id)}
                         className="flex-1 px-4 py-2 bg-theme-bg-tertiary hover:bg-theme-border text-theme-text-primary rounded-md transition-colors"
                       >
                         Pause Project
                       </button>
                     )}
                     <button
-                      onClick={() => handleStop(selectedProject.project_id)}
+                      onClick={() => handleStop(selectedProject.id)}
                       className="px-4 py-2 bg-theme-accent-danger/20 border border-theme-accent-danger/30 text-theme-accent-danger rounded-md hover:bg-theme-accent-danger/30 transition-colors"
                     >
                       Stop
                     </button>
                     <button
-                      onClick={() => handleDelete(selectedProject.project_id)}
+                      onClick={() => handleDelete(selectedProject.id)}
                       className="px-4 py-2 bg-red-600/20 border border-red-500/30 text-red-500 rounded-md hover:bg-red-600/30 transition-colors ml-auto"
                       title="Delete Project"
                     >
@@ -275,10 +275,10 @@ export default function AgentStudio() {
             <div className="space-y-2">
               {projects.map(project => (
                 <div
-                  key={project.project_id}
+                  key={project.id}
                   onClick={() => setSelectedProject(project)}
                   className={`p-3 rounded-md cursor-pointer flex justify-between items-center transition-colors ${
-                    selectedProject?.project_id === project.project_id
+                    selectedProject?.id === project.id
                       ? 'bg-theme-bg-tertiary border-l-2 border-theme-accent-primary'
                       : 'hover:bg-theme-bg-tertiary/50'
                   }`}
