@@ -1,13 +1,15 @@
 use rmcp::model::Tool;
 use serde_json::Value;
 use anyhow::Result;
+use std::borrow::Cow;
+use std::sync::Arc;
 
 pub fn list_tripple_tools() -> Vec<Tool> {
     vec![
         Tool {
-            name: "structured_editor".to_string(),
-            description: Some("A structured file editor from TrippleEffect. Edits files with precise targeting.".to_string()),
-            input_schema: serde_json::json!({
+            name: Cow::Borrowed("structured_editor"),
+            description: Some(Cow::Borrowed("A structured file editor from TrippleEffect. Edits files with precise targeting.")),
+            input_schema: Arc::new(serde_json::from_value(serde_json::json!({
                 "type": "object",
                 "properties": {
                     "path": { "type": "string" },
@@ -15,23 +17,31 @@ pub fn list_tripple_tools() -> Vec<Tool> {
                     "replacement": { "type": "string" }
                 },
                 "required": ["path", "target", "replacement"]
-            }),
+            })).unwrap()),
+            output_schema: None,
+            annotations: None,
+            icons: None,
+            title: None,
         },
         Tool {
-            name: "deep_search".to_string(),
-            description: Some("Deep web search aggregator from TrippleEffect.".to_string()),
-            input_schema: serde_json::json!({
+            name: Cow::Borrowed("deep_search"),
+            description: Some(Cow::Borrowed("Deep web search aggregator from TrippleEffect.")),
+            input_schema: Arc::new(serde_json::from_value(serde_json::json!({
                 "type": "object",
                 "properties": {
                     "query": { "type": "string" }
                 },
                 "required": ["query"]
-            }),
+            })).unwrap()),
+            output_schema: None,
+            annotations: None,
+            icons: None,
+            title: None,
         },
         Tool {
-            name: "context_reader".to_string(),
-            description: Some("Context-bounded reader from TrippleEffect.".to_string()),
-            input_schema: serde_json::json!({
+            name: Cow::Borrowed("context_reader"),
+            description: Some(Cow::Borrowed("Context-bounded reader from TrippleEffect.")),
+            input_schema: Arc::new(serde_json::from_value(serde_json::json!({
                 "type": "object",
                 "properties": {
                     "path": { "type": "string" },
@@ -39,7 +49,11 @@ pub fn list_tripple_tools() -> Vec<Tool> {
                     "end_line": { "type": "integer" }
                 },
                 "required": ["path"]
-            }),
+            })).unwrap()),
+            output_schema: None,
+            annotations: None,
+            icons: None,
+            title: None,
         },
     ]
 }

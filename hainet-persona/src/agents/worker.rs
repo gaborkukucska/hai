@@ -303,10 +303,10 @@ impl WorkerAgent {
         Ok(())
     }
     
-    /// Execute assigned task with discovery-based tool loading (NEW)
+    /// Execute assigned task with discovery-based tool loading
     /// 
-    /// This method uses modular prompts and lazy-loads tool metadata to avoid
-    /// overwhelming small LLMs with excessive context.
+    /// Uses the native LLM + MCP tool execution path by default.
+    /// Falls back to the Python TE Bridge only if AGENT_BRIDGE_URL is explicitly set.
     pub async fn execute_task_with_discovery(&mut self) -> Result<()> {
         let task_id = self.current_task.as_ref()
             .ok_or_else(|| anyhow::anyhow!("No task assigned"))?
@@ -319,30 +319,91 @@ impl WorkerAgent {
         self.session_tasks.start_task(&task.title)
             .unwrap_or_else(|e| tracing::warn!("Failed to update session task: {}", e));
         
+        // Adjust execution strategy based on task history
+        self.execution_strategy.adjust_for_task(&task.title, &mut self.learner);
+        tracing::info!(
+            "Worker {} adaptive strategy for '{}': timeout={}ms, retries={}",
+            self.id.name,
+            task.title,
+            self.execution_strategy.base_timeout_ms,
+            self.execution_strategy.max_retries
+        );
+        
         // Transition to Planning
         self.state_machine.transition(
             AgentState::Planning,
-            "Discovery-based planning".to_string()
+            "Planning task execution".to_string()
         )?;
         self.update_status(&format!("Planning task {}", task_id)).await;
-
-        // Transition to Working
-        self.state_machine.transition(
-            AgentState::Working,
-            "Executing task plan".to_string()
-        )?;
-        self.update_status(&format!("Working on task {}", task_id)).await;
         
-        // Execute with discovery-based approach
-        // Execute with TE Bridge delegation
-        let _start_time = SystemTime::now();
-        let result = self.execute_with_bridge(&task).await;
+        // Choose execution engine: bridge (opt-in) or native (default)
+        let use_bridge = std::env::var("AGENT_BRIDGE_URL").is_ok();
+        let start_time = SystemTime::now();
+        
+        let result = if use_bridge {
+            // Opt-in: delegate to Python TE Bridge if explicitly configured
+            tracing::info!("Worker {} using Python TE Bridge for task: {}", self.id.name, task.title);
+            
+            self.state_machine.transition(
+                AgentState::Working,
+                "Executing via TE Bridge".to_string()
+            )?;
+            self.update_status(&format!("Working on task {}", task_id)).await;
+            
+            self.execute_with_bridge(&task).await
+        } else {
+            // Default: native LLM + MCP tool execution
+            tracing::info!("Worker {} using native MCP+LLM execution for task: {}", self.id.name, task.title);
+            
+            // Plan execution using LLM with tool discovery
+            let execution_plan = match self.plan_task_execution_with_learning(&task).await {
+                Ok(plan) => plan,
+                Err(e) => {
+                    tracing::error!("Worker {} planning failed for task {}: {}", self.id.name, task_id, e);
+                    
+                    // Fail the task so it doesn't get stuck in InProgress
+                    let project_manager = self.project_manager.write().await;
+                    if let Err(fail_err) = project_manager.fail_task(&task_id, format!("Planning failed: {}", e)).await {
+                        tracing::error!("Failed to mark task as failed after planning error: {}", fail_err);
+                    }
+                    
+                    // Send error to PM
+                    let error_report = crate::messaging::MessageContent::ErrorReport(crate::messaging::ErrorReport {
+                        error_type: "PlanningError".to_string(),
+                        message: format!("Planning failed: {}", e),
+                        stack_trace: None,
+                        recoverable: true,
+                    });
+                    if let Err(send_err) = self.send_message_to_pm_with_retry(&task.project_id, error_report, 4).await {
+                        tracing::warn!("Worker {} failed to send planning error to PM: {:?}", self.id.name, send_err);
+                    }
+                    
+                    return Err(e);
+                }
+            };
+            
+            tracing::info!("Worker {} planned {} steps for task: {}", 
+                self.id.name, execution_plan.steps.len(), task.title);
+            
+            // Transition to Working
+            self.state_machine.transition(
+                AgentState::Working,
+                format!("Executing {} steps", execution_plan.steps.len())
+            )?;
+            self.update_status(&format!("Working on task {}", task_id)).await;
+            
+            // Execute with adaptive retry and self-correction
+            self.execute_with_learning(&execution_plan, &task).await
+        };
         
         match result {
             Ok(deliverables) => {
                 // Mark task as complete in session
                 self.session_tasks.complete_task(&task.title)
                     .unwrap_or_else(|e| tracing::warn!("Failed to complete session task: {}", e));
+                
+                // Record success outcome for learning
+                self.record_success_outcome(&task, start_time, &ExecutionPlan { steps: vec![] });
                 
                 // Transition to Reporting
                 self.state_machine.transition(
@@ -355,7 +416,7 @@ impl WorkerAgent {
                 let project_manager = self.project_manager.write().await;
                 project_manager.complete_task(&task_id, deliverables.clone()).await?;
                 
-                tracing::info!("Worker {} completed task: {}", self.id.name, task.title);
+                tracing::info!("Worker {} completed task: {} and updated status to UnderReview", self.id.name, task.title);
                 
                 // Send TaskResult message to PM with retry
                 let task_result = crate::messaging::MessageContent::TaskResult(crate::messaging::TaskResult {
@@ -364,7 +425,7 @@ impl WorkerAgent {
                     output: serde_json::Value::String(deliverables.join("\n")),
                     error: None,
                     metrics: crate::messaging::TaskMetrics {
-                        duration_ms: 0,
+                        duration_ms: start_time.elapsed().unwrap_or_default().as_millis() as u64,
                         cost_usd: 0.0,
                         resource_tier_used: crate::messaging::ResourceTier::LocalOnly,
                         tokens_used: None,
@@ -381,6 +442,9 @@ impl WorkerAgent {
                 // Mark task as failed in session
                 self.session_tasks.fail_task(&task.title)
                     .unwrap_or_else(|err| tracing::warn!("Failed to fail session task: {}", err));
+                
+                // Record failure outcome for learning
+                self.record_failure_outcome(&task, start_time, &ExecutionPlan { steps: vec![] }, &e);
                 
                 // Properly fail the task in project manager to prevent it from being stuck
                 tracing::error!(

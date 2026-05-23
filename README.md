@@ -52,7 +52,7 @@ We've organized our documentation to help you find exactly what you need quickly
 ---
 
 <p align="center">
-  <strong>Latest Milestone:</strong> Phase 5 - Grand Integration of the Unified Headless Portal. The daemon now serves the React UI and API endpoints natively on port 8080 without requiring a separate web server.
+  <strong>Latest Milestone:</strong> Phase 5 - Grand Integration of the Unified Headless Portal. The daemon now serves the React UI and API endpoints natively on port 8080 without requiring a separate web server. The UI now fully supports detailed settings, user profiles, complete project lifecycle management (including deletion), and a TTS voice mode in the AI chat!
 </p>
 
 <!-- # END OF FILE README.md -->

@@ -75,14 +75,8 @@ impl Installer {
     pub async fn install(&mut self) -> Result<()> {
         info!("🚀 Starting HAI-Net Mesh-First installation workflow...");
         
-        // Step 1: Ask if user already has a networked shared folder
-        let has_existing = self.prompt_has_existing_shared_drive()?;
-        
-        let existing_path = if has_existing {
-            Some(self.prompt_shared_drive_path()?)
-        } else {
-            None
-        };
+        // Step 1: Check for existing shared folder setup (auto-detect or ask)
+        let existing_path = self.check_shared_drive_setup()?;
         
         // Step 2: Discover devices and (if needed) set up shared drive during the process
         let _devices = self.discover_mesh_devices(existing_path.as_ref()).await?;
@@ -140,14 +134,94 @@ impl Installer {
         Ok(())
     }
 
-    /// Ask if the user already has a networked and mounted shared folder
-    fn prompt_has_existing_shared_drive(&self) -> Result<bool> {
+    /// Check for shared drive setup, automatically detecting if possible.
+    /// Returns `Some((local_mount, host_ip, remote_path))` or `None` if not using a shared drive.
+    fn check_shared_drive_setup(&self) -> Result<Option<(String, String, String)>> {
         use std::io::{self, Write};
         
         println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!("📁 Shared Drive Setup");
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        print!("Do you already have a networked and mounted read/write shared folder? (y/N): ");
+        
+        if let Some((local_mount, host_ip, remote_path)) = self.detect_existing_shared_drive() {
+            let display_ip = if host_ip.is_empty() { "localhost" } else { &host_ip };
+            println!("🔍 Detected existing NFS setup:");
+            println!("   Host:       {}", display_ip);
+            println!("   Export:     {}", remote_path);
+            println!("   Mounted at: {}", local_mount);
+            print!("\nUse this detected setup? (Y/n): ");
+            io::stdout().flush()?;
+            
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let response = input.trim().to_lowercase();
+            
+            if response.is_empty() || response == "y" || response == "yes" {
+                info!("✅ Using detected shared folder.");
+                return Ok(Some((local_mount, host_ip, remote_path)));
+            } else {
+                println!("Ignoring detected setup.");
+            }
+        }
+        
+        let has_existing = self.prompt_has_existing_shared_drive()?;
+        if has_existing {
+            Ok(Some(self.prompt_shared_drive_path()?))
+        } else {
+            Ok(None)
+        }
+    }
+    
+    /// Attempt to automatically detect an existing NFS shared drive setup.
+    /// Returns `Some((local_mount, host_ip, remote_path))` if detected.
+    fn detect_existing_shared_drive(&self) -> Option<(String, String, String)> {
+        // 1. Check for active NFS mounts on this machine
+        if let Ok(mounts) = std::fs::read_to_string("/proc/mounts") {
+            for line in mounts.lines() {
+                if line.contains(" nfs ") || line.contains(" nfs4 ") {
+                    // Format: "10.0.0.2:/media/fast/NoSlop /media/hai-drive nfs4 rw,relatime..."
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let source = parts[0]; // "IP:PATH"
+                        let local_mount = parts[1].to_string();
+                        
+                        if let Some((ip, remote_path)) = source.split_once(':') {
+                            return Some((local_mount, ip.to_string(), remote_path.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 2. If no active mount, check if this machine is the NFS host
+        if let Ok(exports) = std::fs::read_to_string("/etc/exports") {
+            for line in exports.lines() {
+                let trimmed = line.trim();
+                // Skip comments and empty lines
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+                
+                // Usually formatted like: "/media/hai-drive *(rw,sync,...)"
+                if let Some((path, _)) = trimmed.split_once(' ') {
+                    if path.contains("hai-drive") || path.contains("NoSlop") || path.starts_with("/media/") {
+                        // We found a likely export. The local path IS the remote path.
+                        // host_ip is empty because this machine is the host.
+                        let ip = local_ip_address::local_ip().map(|ip| ip.to_string()).unwrap_or_default();
+                        return Some((path.to_string(), ip, path.to_string()));
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+
+    /// Ask if the user already has a networked and mounted shared folder
+    fn prompt_has_existing_shared_drive(&self) -> Result<bool> {
+        use std::io::{self, Write};
+        
+        print!("\nDo you already have a networked and mounted read/write shared folder? (y/N): ");
         io::stdout().flush()?;
         
         let mut input = String::new();

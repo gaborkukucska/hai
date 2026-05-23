@@ -67,7 +67,10 @@ export const Sidebar: React.FC = () => {
 
       {/* User / node status footer — shows real peer count */}
       <div className="p-4 border-t border-theme-border">
-        <div className="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-theme-bg-tertiary transition-colors cursor-pointer">
+        <NavLink 
+          to="/profile"
+          className="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-theme-bg-tertiary transition-colors cursor-pointer"
+        >
           <div className="w-8 h-8 rounded-full bg-theme-bg-tertiary flex items-center justify-center shrink-0 border border-theme-border">
             <User size={16} className="text-theme-text-muted" />
           </div>
@@ -82,7 +85,7 @@ export const Sidebar: React.FC = () => {
           </div>
           {/* Green dot for online status */}
           <span className="w-2 h-2 rounded-full bg-theme-accent-success animate-pulse shrink-0"></span>
-        </div>
+        </NavLink>
       </div>
     </aside>
   );

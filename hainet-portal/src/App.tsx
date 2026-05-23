@@ -6,6 +6,8 @@ import SocialFeed from './pages/SocialFeed';
 import AgentStudio from './pages/AgentStudio';
 import ComputeNode from './pages/ComputeNode';
 import NetworkSettings from './pages/NetworkSettings';
+import Settings from './pages/Settings';
+import UserProfile from './pages/UserProfile';
 import { useState, useEffect } from 'react';
 
 function App() {
@@ -52,7 +54,8 @@ function App() {
                 <Route path="/studio" element={<AgentStudio />} />
                 <Route path="/compute" element={<ComputeNode />} />
                 <Route path="/network" element={<NetworkSettings />} />
-                <Route path="/settings" element={<NetworkSettings />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/profile" element={<UserProfile />} />
                 <Route path="*" element={<Navigate to="/chat" replace />} />
               </Routes>
             </main>

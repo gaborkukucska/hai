@@ -42,6 +42,7 @@ export default function ChatInterface() {
   const [showAgents, setShowAgents] = useState(true)
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [isVideoVisible, setIsVideoVisible] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false); // TTS voice mode
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -94,6 +95,11 @@ export default function ChatInterface() {
       setMessages(prev => [...prev, response.message])
       console.log('Agent state:', response.agent_state)
       console.log('Active projects:', response.active_projects)
+
+      // TTS Voice Mode
+      if (voiceMode && response.message.content) {
+        speakText(response.message.content);
+      }
 
       if (response.message.video_src) {
         const streamUrl = await invoke<string>('stream_video', { path: response.message.video_src });
@@ -160,6 +166,18 @@ export default function ChatInterface() {
     setInput(text)
     setShowVoiceInput(false)
   }
+
+  // Speak text using browser TTS
+  const speakText = (text: string) => {
+    if ('speechSynthesis' in window) {
+      // Basic text cleanup for TTS
+      const cleanText = text.replace(/```[\s\S]*?```/g, 'Code block omitted.');
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+  };
 
   // Handle voice errors
   const handleVoiceError = (error: string) => {
@@ -367,6 +385,22 @@ export default function ChatInterface() {
               title="Toggle voice input"
             >
               🎤
+            </button>
+            <button
+              onClick={() => {
+                const newMode = !voiceMode;
+                setVoiceMode(newMode);
+                if (!newMode && 'speechSynthesis' in window) {
+                  window.speechSynthesis.cancel();
+                }
+              }}
+              className={`${voiceMode
+                ? 'bg-hai-primary text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-white'
+                } px-4 py-3 rounded-lg transition-colors`}
+              title="Toggle auto-speak (TTS)"
+            >
+              🔊
             </button>
             <button
               onClick={() => setShowWebcam(!showWebcam)}

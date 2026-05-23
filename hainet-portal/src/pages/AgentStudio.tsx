@@ -111,6 +111,19 @@ export default function AgentStudio() {
     }
   };
 
+  /** Delete a project */
+  const handleDelete = async (projectId: string) => {
+    if (!window.confirm('Are you sure you want to delete this project?')) return;
+    try {
+      await invoke('delete_project', { project_id: projectId });
+      console.debug('[AgentStudio] Deleted project:', projectId);
+      setSelectedProject(null);
+      fetchData();
+    } catch (e: any) {
+      console.error('[AgentStudio] Failed to delete:', e);
+    }
+  };
+
   /** Get status color indicator */
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -235,6 +248,13 @@ export default function AgentStudio() {
                       className="px-4 py-2 bg-theme-accent-danger/20 border border-theme-accent-danger/30 text-theme-accent-danger rounded-md hover:bg-theme-accent-danger/30 transition-colors"
                     >
                       Stop
+                    </button>
+                    <button
+                      onClick={() => handleDelete(selectedProject.project_id)}
+                      className="px-4 py-2 bg-red-600/20 border border-red-500/30 text-red-500 rounded-md hover:bg-red-600/30 transition-colors ml-auto"
+                      title="Delete Project"
+                    >
+                      Delete
                     </button>
                   </>
                 )}
