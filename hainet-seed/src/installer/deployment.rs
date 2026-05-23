@@ -1225,7 +1225,7 @@ WantedBy=multi-user.target
             }
         
             // Check if already in fstab (use the remote export path as source)
-            let fstab_entry = format!("{} {} nfs defaults 0 0", expected_source, local_mount);
+            let fstab_entry = format!("{} {} nfs _netdev,x-systemd.automount,noauto,retry=10000,timeo=14 0 0", expected_source, local_mount);
             let check_fstab = client.execute_command(&format!("grep -q '^{}' /etc/fstab", expected_source));
             
             if check_fstab.is_err() {

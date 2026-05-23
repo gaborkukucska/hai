@@ -5,12 +5,55 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '../lib/tauri';
 
+interface DynamicComponent {
+  type: string;
+  props?: any;
+  children?: any[];
+  action?: any;
+}
+
 /** Shape of a single chat message */
 interface ChatMessage {
   id: number;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  dynamicComponent?: DynamicComponent;
 }
+
+const DynamicRenderer = ({ comp }: { comp: DynamicComponent | string }) => {
+  if (typeof comp === 'string') return <span>{comp}</span>;
+  if (!comp || !comp.type) return null;
+  
+  const children = comp.children?.map((c, i) => (
+    <React.Fragment key={i}>
+      <DynamicRenderer comp={c} />
+    </React.Fragment>
+  ));
+
+  const props = comp.props || {};
+
+  if (comp.type === 'Button') {
+    return (
+      <button {...props} onClick={() => {
+        if (comp.action?.type === 'invoke' && comp.action?.payload?.command) {
+            invoke(comp.action.payload.command, comp.action.payload.args || {}).then(console.log).catch(console.error);
+        }
+      }}>
+        {children}
+      </button>
+    );
+  }
+
+  if (comp.type === 'Stack') {
+    return <div className="flex flex-col gap-2" {...props}>{children}</div>;
+  }
+  
+  if (comp.type === 'Text') {
+    return <span {...props}>{children}</span>;
+  }
+  
+  return <div {...props}>{children}</div>;
+};
 
 export default function ChatView() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -70,16 +113,27 @@ export default function ChatView() {
       });
 
       // Parse the response — the backend returns the assistant's reply
-      const assistantContent = typeof response?.message === 'string'
-        ? response.message
-        : response?.message?.content
-        || response?.content
-        || (typeof response === 'string' ? response : JSON.stringify(response));
+      let assistantContent = "";
+      let dynamicComponent = undefined;
+
+      if (typeof response?.message === 'string') {
+        assistantContent = response.message;
+      } else if (response?.message) {
+        assistantContent = response.message.content !== undefined ? response.message.content : "";
+        dynamicComponent = response.message.dynamic_component;
+      } else if (response?.content) {
+        assistantContent = response.content;
+      } else if (typeof response === 'string') {
+        assistantContent = response;
+      } else {
+        assistantContent = JSON.stringify(response);
+      }
 
       const assistantMsg: ChatMessage = {
         id: Date.now() + 1,
         role: 'assistant',
         content: assistantContent,
+        dynamicComponent,
       };
 
       setMessages(prev => [...prev, assistantMsg]);
@@ -173,7 +227,12 @@ export default function ChatView() {
                    ? 'rounded-tr-none bg-theme-bg-tertiary'
                    : 'rounded-tl-none'
                }`}>
-                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  {msg.content && <p className="text-sm whitespace-pre-wrap">{msg.content}</p>}
+                  {msg.dynamicComponent && (
+                    <div className="mt-2">
+                      <DynamicRenderer comp={msg.dynamicComponent} />
+                    </div>
+                  )}
                </div>
             </div>
           ))}

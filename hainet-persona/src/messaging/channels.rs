@@ -175,6 +175,8 @@ impl MessageBus {
         }))
     }
 
+
+
     /// Register Guardian agent for monitoring all messages
     ///
     /// The Guardian receives a copy of every message (read-only monitoring).
@@ -205,9 +207,18 @@ impl MessageBus {
     pub async fn unregister_agent(&self, agent_id: &AgentId) -> Result<()> {
         debug!("Unregistering agent: {:?}", agent_id);
 
+        let mut removed = false;
+
         {
             let mut channels = self.channels.write().await;
-            channels.remove(agent_id);
+            if channels.remove(agent_id).is_some() {
+                removed = true;
+            }
+        }
+
+        {
+            let mut statuses = self.agent_statuses.write().await;
+            statuses.remove(agent_id);
         }
 
         {
@@ -215,8 +226,12 @@ impl MessageBus {
             stats.remove(agent_id);
         }
 
-        info!("Agent unregistered: {:?}", agent_id);
-        Ok(())
+        if removed {
+            info!("Agent unregistered successfully: {:?}", agent_id);
+            Ok(())
+        } else {
+            Err(anyhow!("Agent not found in registry: {:?}", agent_id))
+        }
     }
 
     /// Send a message from one agent to another

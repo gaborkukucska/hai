@@ -592,7 +592,7 @@ impl Installer {
             .status();
             
         // Add to fstab if not already there (source is remote, destination is local)
-        let fstab_entry = format!("{}:{} {} nfs defaults 0 0", remote_ip, path, local_mount_path);
+        let fstab_entry = format!("{}:{} {} nfs _netdev,x-systemd.automount,noauto,retry=10000,timeo=14 0 0", remote_ip, path, local_mount_path);
         let fstab_check = std::process::Command::new("bash")
             .arg("-c")
             .arg(&format!("grep -q '{}:{}' /etc/fstab", remote_ip, path))

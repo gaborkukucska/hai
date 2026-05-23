@@ -433,8 +433,22 @@ impl AdminBridge {
     /// Delete a project
     pub async fn delete_project(&self, project_id: String) -> Result<()> {
         let admin = self.admin.read().await;
+        let bus = admin.context().message_bus.clone();
         let project_manager = admin.project_manager().read().await;
         let pid = hainet_persona::projects::ProjectId::from_string(&project_id)?;
+        
+        // Fetch project to get agent IDs before deletion so we can terminate them
+        if let Ok(Some(project)) = project_manager.get_project(&pid).await {
+            // Unregister PM
+            if let Some(pm_id) = &project.pm_agent_id {
+                let _ = bus.read().await.unregister_agent(pm_id).await;
+            }
+            // Unregister Workers
+            for worker_id in &project.worker_agent_ids {
+                let _ = bus.read().await.unregister_agent(worker_id).await;
+            }
+        }
+        
         project_manager.delete_project(&pid).await?;
         Ok(())
     }
