@@ -8,6 +8,23 @@ project_name = "HAI-Net"
 version = "0.57"
 
 [[completed_cycles]]
+id = "12.3"
+date = "2026-05-28"
+phase = "Integration Phase 1 — Agentic Core (TrippleEffect)"
+session = "Worker Stabilization & Coordination Hardening"
+changes = [
+    "Fixed `worker_report_prompt` violating ONE-action-per-turn engine constraints by refactoring it to a two-step flow (send_message -> request_state)",
+    "Added native `send_message` handler to Worker autonomous cycle to ensure LLM reports correctly route to the MessageBus and PM agent",
+    "Added native `project_management` handler to Worker autonomous cycle to support `worker_decompose` state (sub-task creation and listing)",
+    "Injected missing template variables (`{address_book}`, `{project_name}`, `{team_wip_updates}`) into worker prompt payload to provide missing context",
+    "Fixed compile error regarding `assigned_to` -> `assigned_worker` field mismatch in Worker project management logic"
+]
+status = "success"
+next_session = "Phase 2: Compute Sharing Integration"
+current_phase = "Grand Integration — TrippleEffect Migration"
+current_cycle = "Integration Phase 1 — Complete"
+
+[[completed_cycles]]
 id = "12.2"
 date = "2026-05-28"
 phase = "Integration Phase 1 — Agentic Core (TrippleEffect)"

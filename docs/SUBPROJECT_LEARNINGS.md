@@ -21,6 +21,9 @@
 - **Native JSON Tool Calling + XML Fallback**: Always try native tool calling first (Ollama's `tools` parameter). Fall back to XML parsing for models that don't support it. Both paths must be robust.
 - **ChatML Template Injection**: Some Ollama models ship with broken chat templates. TrippleEffect now forces a standardized ChatML template on all models to prevent multi-turn conversation degradation.
 - **PM Startup Retry**: If a PM agent outputs only `<think>` tags without a valid kickoff plan, inject framework feedback and retry the same state. This prevents PMs from "thinking forever."
+- **ONE-Action-Per-Turn Constraint**: The execution engine processes exactly ONE JSON action per turn. Legacy prompts that asked the LLM to bundle multiple tools (e.g. `send_message` and `request_state`) must be split into sequential turns, otherwise tools drop silently.
+- **Agent Address Book Injection**: Worker agents MUST have the dynamic agent ID of their PM injected into their system prompt (via the `{address_book}` template variable) or they will hallucinate targets for `send_message` and fail to report completion.
+- **Native Tool Interception**: Not all tools should route to MCP. Core communication (`send_message`) and state management (`project_management`) must be intercepted natively in the autonomous cycle loop before reaching the generic MCP executor.
 
 ### Known Issues (to carry forward)
 
