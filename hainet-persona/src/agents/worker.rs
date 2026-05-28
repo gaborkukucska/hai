@@ -2120,12 +2120,35 @@ CRITICAL: Only use tools from available servers: {}
     
     /// Extract JSON from LLM response (handles braces)
     fn extract_json_from_response(&self, response: &str) -> String {
+        // Strip <think>...</think> blocks before extraction to prevent
+        // brace-matching from grabbing JSON fragments inside reasoning.
+        let cleaned = Self::strip_think_blocks(response);
+        let response = cleaned.as_str();
+
         if let Some(start) = response.find('{') {
             if let Some(end) = response.rfind('}') {
                 return response[start..=end].to_string();
             }
         }
         response.to_string()
+    }
+
+    /// Remove all `<think>...</think>` blocks from the LLM response so that
+    /// any JSON-like content inside reasoning doesn't confuse brace extraction.
+    fn strip_think_blocks(input: &str) -> String {
+        let mut result = String::with_capacity(input.len());
+        let mut remaining = input;
+        while let Some(start) = remaining.find("<think>") {
+            result.push_str(&remaining[..start]);
+            if let Some(end) = remaining[start..].find("</think>") {
+                remaining = &remaining[start + end + "</think>".len()..];
+            } else {
+                // Unclosed <think> — discard everything after it
+                return result;
+            }
+        }
+        result.push_str(remaining);
+        result
     }
     
     /// Extract JSON from markdown code blocks

@@ -1943,6 +1943,11 @@ CRITICAL: JSON only. No explanations.
 
     /// Extract JSON from a raw LLM response (handles markdown fences and bare braces)
     fn extract_json_from_response(&self, response: &str) -> String {
+        // Strip <think>...</think> blocks before extraction to prevent
+        // brace-matching from grabbing JSON fragments inside reasoning.
+        let cleaned = Self::strip_think_blocks(response);
+        let response = cleaned.as_str();
+
         // Try markdown code block first
         let markers = ["```json\n", "```\n"];
         for marker in markers.iter() {
@@ -1961,6 +1966,24 @@ CRITICAL: JSON only. No explanations.
             }
         }
         response.to_string()
+    }
+
+    /// Remove all `<think>...</think>` blocks from the LLM response so that
+    /// any JSON-like content inside reasoning doesn't confuse brace extraction.
+    fn strip_think_blocks(input: &str) -> String {
+        let mut result = String::with_capacity(input.len());
+        let mut remaining = input;
+        while let Some(start) = remaining.find("<think>") {
+            result.push_str(&remaining[..start]);
+            if let Some(end) = remaining[start..].find("</think>") {
+                remaining = &remaining[start + end + "</think>".len()..];
+            } else {
+                // Unclosed <think> — discard everything after it
+                return result;
+            }
+        }
+        result.push_str(remaining);
+        result
     }
 
     /// Build a summary of current project tasks for injection into prompts.
@@ -2194,7 +2217,9 @@ CRITICAL: JSON only. No explanations.
             };
 
             // Parse LLM JSON action
+            tracing::debug!("PM {} raw LLM response (cycle {}): {}", self.id.name, loop_count, response_text);
             let json_str = self.extract_json_from_response(&response_text);
+            tracing::debug!("PM {} extracted JSON (cycle {}): {}", self.id.name, loop_count, json_str);
             let action: serde_json::Value = match serde_json::from_str(&json_str) {
                 Ok(json) => json,
                 Err(_) => {
@@ -2243,9 +2268,11 @@ CRITICAL: JSON only. No explanations.
                 if let Err(e) = self.state_machine.transition(AgentState::Planning, "Auto-transition after kickoff plan intercept".to_string()) {
                     local_context.push(format!("System: Error: State transition failed: {}", e));
                 } else {
+                    self.te_state_name = "pm_build_team_tasks".to_string();
                     duplicate_tracker.reset();
-                    self.update_status("Transitioned to Planning").await;
-                    local_context.push("System: State successfully changed to pm_build_team_tasks".to_string());
+                    self.update_status("Transitioned to Planning (pm_build_team_tasks)").await;
+                    tracing::info!("PM {} te_state_name set to '{}' after kickoff intercept", self.id.name, self.te_state_name);
+                    local_context.push("System: State successfully changed to pm_build_team_tasks. You must now create worker agents using the manage_team tool.".to_string());
                 }
                 continue;
             }
