@@ -450,11 +450,16 @@ impl WorkerAgent {
             let framework_instructions = self.get_te_prompt("worker_standard_framework_instructions")
                 .unwrap_or_default();
             
+            let tool_instructions = format!(
+                "Available tools: {}\n\nUse the 'framework::tool_information' tool to request the JSON schema and detailed description of any tool before using it if you don't know its parameters.",
+                tools_list_str
+            );
+            
             system_prompt = system_prompt.replace("{worker_standard_framework_instructions}", &framework_instructions);
             system_prompt = system_prompt.replace("{agent_id}", &self.id.name);
             system_prompt = system_prompt.replace("{role}", &format!("{:?}", self.worker_type));
             system_prompt = system_prompt.replace("{personality_instructions}", &self.template.system_prompt);
-            system_prompt = system_prompt.replace("{available_tools}", &tools_list_str);
+            system_prompt = system_prompt.replace("{tool_instructions}", &tool_instructions);
             system_prompt = system_prompt.replace("{task_description}", &task.description);
             system_prompt = system_prompt.replace("{task_id}", &task.id.to_string());
             
@@ -519,6 +524,26 @@ impl WorkerAgent {
             };
             if duplicate_tracker.record_call(sig) {
                 local_context.push("System: Error: You are repeating the same action. Force transition required. Please execute request_state.".to_string());
+                continue;
+            }
+            
+            if tool_name == "framework::tool_information" || tool_name == "tool_information" {
+                if let Some(tools_array) = params.get("tools").and_then(|t| t.as_array()) {
+                    let mut tool_schemas = Vec::new();
+                    let client = self.mcp_client.read().await;
+                    for tool_val in tools_array {
+                        if let Some(tool_name_req) = tool_val.as_str() {
+                            if let Ok(meta) = client.get_tool_metadata(tool_name_req).await {
+                                tool_schemas.push(serde_json::to_string(&meta).unwrap_or_default());
+                            } else {
+                                tool_schemas.push(format!("Error: Could not find schema for tool '{}'", tool_name_req));
+                            }
+                        }
+                    }
+                    local_context.push(format!("System: [tool_information result]\n{}", tool_schemas.join("\n\n")));
+                } else {
+                    local_context.push("System: Error: tool_information requires a 'tools' parameter containing an array of tool names. Example: {\"tool\": \"framework::tool_information\", \"params\": {\"tools\": [\"hainet-files::file_read\"]}}".to_string());
+                }
                 continue;
             }
             
@@ -3798,7 +3823,7 @@ mod tests {
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
         let mcp_client = Arc::new(RwLock::new(MCPClientManager::new()));
-        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await.unwrap());
         
         WorkerAgent::new(
             WorkerType::Files, 

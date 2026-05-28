@@ -20,8 +20,9 @@ static PROMPTS_CACHE: OnceLock<Option<String>> = OnceLock::new();
 /// Candidate paths for `prompts.yaml`, tried in order.
 fn candidate_paths() -> Vec<PathBuf> {
     let mut paths = vec![
-        PathBuf::from("/media/hai-drive/prompts/prompts.yaml"),
-        PathBuf::from("/var/lib/hainet/.hainet/prompts.yaml"),
+        PathBuf::from("/media/hai-drive/prompts/prompts.yaml"),      // Slave nodes (NFS mount)
+        PathBuf::from("/media/fast/hai-drive/prompts/prompts.yaml"), // Master node (BigBOY local export)
+        PathBuf::from("/var/lib/hainet/.hainet/prompts.yaml"),       // Local localhost deployment
     ];
 
     // Try to locate workspace root relative to executable

@@ -23,63 +23,74 @@ pub async fn handle_invoke(
             let attachments_val = args.get("attachments").cloned().unwrap_or(Value::Array(vec![]));
             let attachments: Vec<admin_bridge::FileAttachment> = serde_json::from_value(attachments_val).unwrap_or_default();
             
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             let res = bridge.send_message(content, attachments).await.map_err(|e| e.to_string())?;
             Ok(serde_json::to_value(res).unwrap())
         },
         "get_history" => {
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             let res = bridge.get_history().await.map_err(|e| e.to_string())?;
             Ok(serde_json::to_value(res).unwrap())
         },
         "clear_history" => {
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             bridge.clear_history().await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         },
         "get_agent_state" => {
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             let res = bridge.get_state().await.map_err(|e| e.to_string())?;
             Ok(json!(res))
         },
         "get_active_agents" => {
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             let res = bridge.get_active_agents().await.map_err(|e| e.to_string())?;
             Ok(serde_json::to_value(res).unwrap())
         },
         "get_active_projects" => {
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             let res = bridge.get_active_projects().await.map_err(|e| e.to_string())?;
             Ok(serde_json::to_value(res).unwrap())
         },
         "pause_project" => {
             let id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             bridge.pause_project(id).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         },
         "resume_project" => {
             let id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             bridge.resume_project(id).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         },
         "stop_project" => {
             let id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             bridge.stop_project(id).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         },
         "rename_project" => {
             let id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
             let name = args.get("new_title").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             bridge.rename_project(id, name).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         },
         "delete_project" => {
             let id = args.get("project_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let bridge = app_state.admin_bridge.read().await;
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
             bridge.delete_project(id).await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         },
@@ -159,10 +170,10 @@ pub async fn handle_invoke(
                 return Ok(json!({ "logs": journalctl_logs }));
             }
             
-            // Fallback: read the most recent .log file from workspace logs/ directory
+            // Fallback: read the most recent .log file from configured log directory
             let log_dirs: Vec<std::path::PathBuf> = vec![
-                std::path::PathBuf::from("/var/log/hainet"),
-                // Try to find workspace logs dir relative to executable
+                app_state.log_dir.clone(),
+                std::path::PathBuf::from("/media/hai-drive/logs"),      // Slave node fallback
                 std::env::current_exe()
                     .ok()
                     .and_then(|p| p.parent().map(|d| d.to_path_buf()))

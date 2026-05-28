@@ -32,11 +32,6 @@ impl MilestoneId {
         &self.0
     }
 
-    /// Convert to string representation
-    pub fn to_string(&self) -> String {
-        self.0.to_string()
-    }
-
     /// Parse from string
     pub fn from_string(s: &str) -> Result<Self> {
         Ok(Self(Uuid::parse_str(s)?))

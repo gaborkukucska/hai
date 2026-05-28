@@ -46,7 +46,7 @@ struct PortalAssets;
 /// Shared application state passed to every API handler.
 pub struct AppState {
     /// Bridge to the Admin AI agent system
-    pub admin_bridge: Arc<RwLock<AdminBridge>>,
+    pub admin_bridge: Option<Arc<RwLock<AdminBridge>>>,
     /// Text-to-speech handler
     pub tts_handler: Arc<RwLock<TTSHandler>>,
     /// Live hardware profile from hainet-collab (PPLPWR port)
@@ -55,6 +55,8 @@ pub struct AppState {
     pub gossip_engine: Arc<RwLock<GossipEngine>>,
     /// In-memory social feed posts (bridged to gossip later)
     pub social_posts: Arc<RwLock<Vec<SocialPost>>>,
+    /// Configured log directory
+    pub log_dir: std::path::PathBuf,
 }
 
 /// A social feed post (temporary in-memory struct until full gossip integration)
@@ -106,9 +108,14 @@ async fn main() -> Result<()> {
     // Determine prompts directory (sibling to data_dir)
     let prompts_dir = data_dir.parent().unwrap_or(&data_dir).join("prompts");
     
-    // Initialize Admin AI Bridge and other backend states
-    let admin_bridge = AdminBridge::new(data_dir.clone(), prompts_dir).await
-        .expect("Failed to initialize Admin AI Bridge");
+    // Initialize Admin AI Bridge only on master nodes
+    let admin_bridge = if config.network.role.to_lowercase() == "master" {
+        Some(AdminBridge::new(data_dir.clone(), prompts_dir, config.network.role.clone()).await
+            .expect("Failed to initialize Admin AI Bridge"))
+    } else {
+        info!("Skipping Admin AI Bridge initialization on non-master node");
+        None
+    };
 
     
     // Initialize MetricsCollector with database path
@@ -159,11 +166,12 @@ async fn main() -> Result<()> {
     let tts_handler = TTSHandler::new();
     
     let app_state = Arc::new(AppState {
-        admin_bridge: Arc::new(RwLock::new(admin_bridge)),
+        admin_bridge: admin_bridge.map(|b| Arc::new(RwLock::new(b))),
         tts_handler: Arc::new(RwLock::new(tts_handler)),
         hardware_profile: Arc::new(RwLock::new(hardware_profile)),
         gossip_engine: Arc::new(RwLock::new(gossip_engine)),
         social_posts: Arc::new(RwLock::new(vec![])),
+        log_dir: config.effective_log_dir(),
     });
 
     // Step 4: Start minimal TCP-based health/API endpoint

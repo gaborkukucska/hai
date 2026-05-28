@@ -79,7 +79,7 @@ pub struct AdminBridge {
 
 impl AdminBridge {
     /// Create new Admin AI bridge
-    pub async fn new(data_dir: std::path::PathBuf, prompts_path: std::path::PathBuf) -> Result<Self> {
+    pub async fn new(data_dir: std::path::PathBuf, prompts_path: std::path::PathBuf, role: String) -> Result<Self> {
         info!("Initializing Admin AI Bridge...");
         
         info!("Prompts path: {:?}", prompts_path);
@@ -99,7 +99,7 @@ impl AdminBridge {
         ));
         
         // Create AIProviderManager with user settings (needed by GuardianSystem)
-        let ai_provider_manager = Arc::new(AIProviderManager::new(Some(user_settings.clone())).await?);
+        let ai_provider_manager = Arc::new(AIProviderManager::new(Some(user_settings.clone()), role.clone()).await?);
         
         // Create shared context
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await?));

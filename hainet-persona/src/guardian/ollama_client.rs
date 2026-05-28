@@ -392,7 +392,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_json_from_markdown() {
-        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await.unwrap());
         let client = GuardianOllamaClient::new(
             ai_provider_manager,
             "gemma3:4b-it".to_string(),

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 async fn create_test_context() -> Result<Arc<AgentContext>> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
     let prompts_path = PathBuf::from(manifest_dir).join("prompts");
-    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await?);
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await?);
 
     Ok(Arc::new(AgentContext::new(
         Arc::new(RwLock::new(MessageBus::new().await?)),
@@ -28,7 +28,7 @@ async fn create_test_admin(context: Arc<AgentContext>) -> Result<AdminAgent> {
     let project_manager = Arc::new(RwLock::new(
         ProjectManager::new("sqlite::memory:").await?,
     ));
-    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await?);
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await?);
     let metrics = Arc::new(RwLock::new(
         MetricsCollector::new("sqlite::memory:").await?,
     ));

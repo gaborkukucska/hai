@@ -18,7 +18,7 @@ async fn create_test_admin_agent() -> Result<AdminAgent> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
     let prompts_path = PathBuf::from(manifest_dir).join("prompts");
 
-    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await?);
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await?);
 
     let context = Arc::new(AgentContext::new(
         Arc::new(RwLock::new(MessageBus::new().await?)),
@@ -32,7 +32,7 @@ async fn create_test_admin_agent() -> Result<AdminAgent> {
     ));
 
     // Set up real provider manager
-    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await?);
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await?);
 
     // Perform an initial discovery to populate the catalog
     ai_provider_manager.discover_providers().await?;

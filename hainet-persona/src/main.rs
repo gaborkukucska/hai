@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
     info!("✅ MCP client manager initialized");
 
     // 4. AI Provider Manager
-    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await?);
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await?);
     ai_provider_manager.discover_providers().await?;
     info!("✅ AI Provider Manager initialized");
 
@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
         guardian_system.clone(),
     ));
     
-    let ai_provider_manager = Arc::new(AIProviderManager::new(None).await?);
+    let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await?);
     ai_provider_manager.discover_providers().await?;
 
     let mut admin = AdminAgent::new(

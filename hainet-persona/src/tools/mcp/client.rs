@@ -27,7 +27,7 @@ type RunningClient = rmcp::service::RunningService<RoleClient, MinimalClientHand
 ///
 /// Provides structured access to tool information for LLM consumption.
 /// Designed to be loaded lazily when the LLM needs specific tool details.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolMetadata {
     /// Tool name (e.g., "file_write")
     pub name: String,

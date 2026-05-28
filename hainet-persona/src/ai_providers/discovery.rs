@@ -210,11 +210,7 @@ impl ProviderDiscovery {
         let prefix = format!("{}.{}.{}", base_ip_parts[0], base_ip_parts[1], base_ip_parts[2]);
 
         // Scan common provider ports on each IP in subnet
-        let scan_ips: Vec<u8> = vec![
-            1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 
-            100, 110, 120, 130, 140, 150, 160, 170, 180, 190,
-            200, 210, 220, 230, 240, 250
-        ];
+        let scan_ips: Vec<u8> = (1..=254).collect();
 
         // Build all probe tasks and execute them concurrently
         let mut handles = Vec::new();

@@ -2127,10 +2127,20 @@ CRITICAL: JSON only. No explanations.
             system_prompt = system_prompt.replace("{address_book}", &format!("Admin AI: admin_ai\nWorkers: {}", worker_summary));
             system_prompt = system_prompt.replace("{pm_provider}", "gemini");
             system_prompt = system_prompt.replace("{pm_model}", "gemini-2.5-flash");
-            system_prompt = system_prompt.replace("{tool_instructions}", "Available framework tools: request_state, project_management, manage_team, send_message");
+            if current_state == AgentState::Startup {
+                system_prompt = system_prompt.replace("{tool_instructions}", "");
+            } else {
+                let tool_instructions = format!(
+                    "Available tools: request_state, project_management, manage_team, send_message, framework::tool_information\n\nUse the 'framework::tool_information' tool to request the JSON schema and detailed description of any tool before using it if you don't know its parameters."
+                );
+                system_prompt = system_prompt.replace("{tool_instructions}", &tool_instructions);
+            }
 
-            // Append JSON output instruction
-            system_prompt.push_str("\n\nCRITICAL INSTRUCTION: You MUST respond with exactly ONE JSON object representing your action. Example: {\"tool\": \"request_state\", \"params\": {\"state\": \"pm_manage\"}}");
+            // Append JSON output instruction only if not in Startup state
+            // (Startup state has its own specific JSON schema defined in the prompt)
+            if current_state != AgentState::Startup {
+                system_prompt.push_str("\n\nCRITICAL INSTRUCTION: You MUST respond with exactly ONE JSON object representing your action. Example: {\"tool\": \"request_state\", \"params\": {\"state\": \"pm_manage\"}}");
+            }
 
             let options = GenerationOptions {
                 system: Some(system_prompt),
@@ -2236,7 +2246,28 @@ CRITICAL: JSON only. No explanations.
             // Native Tool Interception
             // =====================================================
 
-            // 1. request_state — drive the PM state machine
+            // 1. framework::tool_information
+            if tool_name == "framework::tool_information" || tool_name == "tool_information" {
+                if let Some(tools_array) = params.get("tools").and_then(|t| t.as_array()) {
+                    let mut tool_schemas = Vec::new();
+                    let client = self.mcp_client.read().await;
+                    for tool_val in tools_array {
+                        if let Some(tool_name_req) = tool_val.as_str() {
+                            if let Ok(meta) = client.get_tool_metadata(tool_name_req).await {
+                                tool_schemas.push(serde_json::to_string(&meta).unwrap_or_default());
+                            } else {
+                                tool_schemas.push(format!("Error: Could not find schema for tool '{}'. Note: Native tools like project_management, manage_team, and send_message do not require schemas.", tool_name_req));
+                            }
+                        }
+                    }
+                    local_context.push(format!("System: [tool_information result]\n{}", tool_schemas.join("\n\n")));
+                } else {
+                    local_context.push("System: Error: tool_information requires a 'tools' parameter containing an array of tool names. Example: {\"tool\": \"framework::tool_information\", \"params\": {\"tools\": [\"hainet-files::file_read\"]}}".to_string());
+                }
+                continue;
+            }
+
+            // 2. request_state — drive the PM state machine
             if tool_name == "request_state" || tool_name == "framework::request_state" {
                 if let Some(new_state_str) = params.get("state").and_then(|s| s.as_str()) {
                     let new_state = match new_state_str {
@@ -2651,7 +2682,7 @@ mod tests {
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
-        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await.unwrap());
         let mcp_client = Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new()));
         
         let project_id = ProjectId::new();
@@ -2665,7 +2696,7 @@ mod tests {
     }
     
     async fn check_ollama_gemma3() -> (bool, Vec<String>) {
-        let ai_provider_manager = match AIProviderManager::new(None).await {
+        let ai_provider_manager = match AIProviderManager::new(None, "standalone".to_string()).await {
             Ok(manager) => manager,
             Err(_) => return (false, vec![]),
         };
@@ -2712,7 +2743,7 @@ mod tests {
             ).await.unwrap()
         };
 
-        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await.unwrap());
         let mcp_client = Arc::new(RwLock::new(crate::tools::mcp::MCPClientManager::new()));
         let mut pm = PMAgent::new(project_id, message_bus, prompt_manager, project_manager, ai_provider_manager, mcp_client, None);
         

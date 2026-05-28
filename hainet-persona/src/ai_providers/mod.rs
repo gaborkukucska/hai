@@ -49,7 +49,7 @@ pub struct AIProviderManager {
 
 impl AIProviderManager {
     /// Create new provider manager and perform initial discovery
-    pub async fn new(user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>) -> Result<Self> {
+    pub async fn new(user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>, role: String) -> Result<Self> {
         info!("Initializing AI Provider Manager...");
         
         let discovery = ProviderDiscovery::new();
@@ -67,11 +67,22 @@ impl AIProviderManager {
             user_settings,
         };
 
-        // Perform initial discovery
-        manager.discover_providers().await?;
-        
-        // Initialize load balancing if configured
-        Self::initialize_load_balancing(&manager).await?;
+        // Perform initial discovery only if we are the agentic core
+        if role == "master" || role == "standalone" {
+            info!("Running as agentic core (role: {}), starting AI provider discovery...", role);
+            manager.discover_providers().await?;
+            
+            // Initialize load balancing if configured
+            Self::initialize_load_balancing(&manager).await?;
+        } else {
+            info!("Running as UI/file host (role: {}), skipping AI provider discovery.", role);
+            // We can still initialize load balancing from config if needed, or skip it.
+            // But since slave nodes need to route requests to the master, maybe we DO need to initialize load balancing
+            // from config, just without the auto-discovery loop?
+            // Wait, the user said: "Fix the auto-discovery algorithm... ONLY if that node is the one running the agentic core!"
+            // The slave nodes DO NOT run agents, so they don't even need load balancing or Ollama!
+            // The UI just sends requests to the daemon, but the daemon doesn't execute agents.
+        }
 
         Ok(manager)
     }

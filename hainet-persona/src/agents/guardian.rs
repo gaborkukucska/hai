@@ -830,7 +830,7 @@ mod tests {
     async fn test_guardian_creation() {
         let config = GuardianConfig::default();
         let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
-        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await.unwrap());
         let guardian = GuardianAgent::new(config, metrics, ai_provider_manager);
         
         assert_eq!(guardian.current_state().await, GuardianState::Startup);
@@ -840,7 +840,7 @@ mod tests {
     async fn test_guardian_start() {
         let config = GuardianConfig::default();
         let metrics = Arc::new(MetricsCollector::new(":memory:").await.unwrap());
-        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await.unwrap());
         let mut guardian = GuardianAgent::new(config, metrics, ai_provider_manager);
         
         // Create monitoring channel for Guardian

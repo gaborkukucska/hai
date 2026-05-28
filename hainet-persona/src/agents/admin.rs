@@ -423,7 +423,6 @@ impl AdminAgent {
         // 3. If has domain keyword → complex (even without action verb, implies creation)
         // 4. If Task intent with high confidence + multi-step → complex
         Ok(
-            (has_project_keyword && has_domain_keyword) ||
             has_project_keyword ||
             has_domain_keyword ||
             (intent.intent_type == super::intent::IntentType::Task && 
@@ -1575,7 +1574,7 @@ mod tests {
         // Use absolute path to prompts directory
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
         let prompts_path = PathBuf::from(manifest_dir).join("prompts");
-        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await.unwrap());
         
         Arc::new(AgentContext::new(
             Arc::new(RwLock::new(MessageBus::new().await.expect("Failed to create MessageBus"))),
@@ -1590,7 +1589,7 @@ mod tests {
         let project_manager = Arc::new(RwLock::new(
             ProjectManager::new("sqlite::memory:").await.unwrap()
         ));
-        let ai_provider_manager = Arc::new(AIProviderManager::new(None).await.unwrap());
+        let ai_provider_manager = Arc::new(AIProviderManager::new(None, "standalone".to_string()).await.unwrap());
         let metrics = Arc::new(RwLock::new(
             MetricsCollector::new("sqlite::memory:").await.unwrap()
         ));
