@@ -79,27 +79,27 @@ pub struct AdminBridge {
 
 impl AdminBridge {
     /// Create new Admin AI bridge
-    pub async fn new(data_dir: std::path::PathBuf, prompts_path: std::path::PathBuf, role: String) -> Result<Self> {
+    pub async fn new(
+        data_dir: std::path::PathBuf,
+        prompts_path: std::path::PathBuf,
+        role: String,
+        max_hardware_context: usize,
+    ) -> Result<Self> {
         info!("Initializing Admin AI Bridge...");
         
         info!("Prompts path: {:?}", prompts_path);
-        
-        // Create project manager with SQLite database
-        // Use the centralized data_dir provided by the configuration
         info!("Data directory: {:?}", data_dir);
         
         // Create directories with proper permissions
         std::fs::create_dir_all(&data_dir)?;
 
-        
-        // Create user settings manager FIRST (needed by AIProviderManager)
-        let settings_db_path = data_dir.join("user_settings.db");
-        let user_settings = Arc::new(RwLock::new(
-            hainet_persona::UserSettingsManager::new(&format!("sqlite://{}?mode=rwc", settings_db_path.display())).await?
-        ));
+        let user_settings = hainet_persona::UserSettingsManager::new(
+            &format!("sqlite://{}?mode=rwc", data_dir.join("user_settings.db").display())
+        ).await?;
+        let user_settings = Arc::new(RwLock::new(user_settings));
         
         // Create AIProviderManager with user settings (needed by GuardianSystem)
-        let ai_provider_manager = Arc::new(AIProviderManager::new(Some(user_settings.clone()), role.clone()).await?);
+        let ai_provider_manager = Arc::new(AIProviderManager::new(Some(user_settings.clone()), role.clone(), max_hardware_context).await?);
         
         // Create shared context
         let message_bus = Arc::new(RwLock::new(MessageBus::new().await?));

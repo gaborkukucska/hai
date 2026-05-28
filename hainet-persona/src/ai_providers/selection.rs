@@ -194,6 +194,7 @@ impl ModelSelector {
                         score: selected_score.total_score,
                         rank,
                         context: context.clone(),
+                        hardware_max_ctx: 0,
                     });
                 }
                 
@@ -270,6 +271,7 @@ impl ModelSelector {
                     score: score.total_score,
                     rank: index + 1,
                     context: context.clone(),
+                    hardware_max_ctx: 0,
                 });
             }
         }
@@ -473,18 +475,6 @@ impl SelectionContext {
     }
 }
 
-impl SelectedModel {
-    /// Get a client for the selected provider
-    pub fn get_client(&self) -> Result<Box<dyn crate::ai_providers::ProviderClient>> {
-        match self.provider_type {
-            crate::ai_providers::discovery::ProviderType::Ollama => {
-                Ok(Box::new(crate::ai_providers::providers::OllamaClient::new(self.endpoint.clone())))
-            }
-            _ => Err(anyhow!("Provider type not yet supported for client creation")),
-        }
-    }
-}
-
 /// Model size preference
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModelSizePreference {
@@ -504,6 +494,24 @@ pub struct SelectedModel {
     pub score: f32,
     pub rank: usize,
     pub context: SelectionContext,
+    #[serde(default)]
+    pub hardware_max_ctx: usize,
+}
+
+impl SelectedModel {
+    /// Get a client for the selected provider
+    pub fn get_client(&self) -> Result<Box<dyn crate::ai_providers::ProviderClient>> {
+        match self.provider_type {
+            crate::ai_providers::discovery::ProviderType::Ollama => {
+                Ok(Box::new(crate::ai_providers::providers::OllamaClient::new(
+                    self.endpoint.clone(),
+                    self.context.min_context_length,
+                    self.hardware_max_ctx
+                )))
+            }
+            _ => Err(anyhow::anyhow!("Provider type not yet supported for client creation")),
+        }
+    }
 }
 
 impl SelectedModel {

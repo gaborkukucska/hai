@@ -96,6 +96,22 @@ impl HardwareProfile {
             .map(|g| (g.vram_mb as f32 / 1024.0) >= min_vram_gb)
             .unwrap_or(false)
     }
+
+    /// Calculate the maximum safe context window length based on physical memory
+    pub fn max_safe_context_length(&self) -> usize {
+        let vram = self.gpu.as_ref().map(|g| g.vram_mb).unwrap_or(0);
+        let ram = self.ram_total_gb;
+        
+        if vram >= 16384 || ram >= 32.0 {
+            32768 // 32k for high-end (16GB+ VRAM or 32GB+ RAM)
+        } else if vram >= 8192 || ram >= 16.0 {
+            16384 // 16k for mid-range (8GB+ VRAM or 16GB+ RAM)
+        } else if vram >= 4096 || ram >= 8.0 {
+            8192 // 8k for low-end (4GB+ VRAM or 8GB+ RAM)
+        } else {
+            4096 // 4k absolute fallback
+        }
+    }
 }
 
 /// Calculate capability score (same formula as HAI-Net + NoSlop)

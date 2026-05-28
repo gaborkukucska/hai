@@ -108,9 +108,21 @@ async fn main() -> Result<()> {
     // Determine prompts directory (sibling to data_dir)
     let prompts_dir = data_dir.parent().unwrap_or(&data_dir).join("prompts");
     
+    // --- Integration: Detect local hardware (PPLPWR port) ---
+    info!("🖥️  Detecting local hardware profile (hainet-collab)...");
+    let hardware_profile = HardwareProfile::detect();
+    info!(
+        "✅ Hardware: {} cores, {:.1} GB RAM, GPU: {}, Score: {:.1}",
+        hardware_profile.cpu_cores,
+        hardware_profile.ram_total_gb,
+        hardware_profile.gpu.as_ref().map_or("None".to_string(), |g| g.name.clone()),
+        hardware_profile.capability_score
+    );
+
     // Initialize Admin AI Bridge only on master nodes
     let admin_bridge = if config.network.role.to_lowercase() == "master" {
-        Some(AdminBridge::new(data_dir.clone(), prompts_dir, config.network.role.clone()).await
+        let max_ctx = hardware_profile.max_safe_context_length();
+        Some(AdminBridge::new(data_dir.clone(), prompts_dir, config.network.role.clone(), max_ctx).await
             .expect("Failed to initialize Admin AI Bridge"))
     } else {
         info!("Skipping Admin AI Bridge initialization on non-master node");
@@ -142,16 +154,7 @@ async fn main() -> Result<()> {
     .await
     .expect("Failed to initialize SettingsStorage");
     
-    // --- Integration: Detect local hardware (PPLPWR port) ---
-    info!("🖥️  Detecting local hardware profile (hainet-collab)...");
-    let hardware_profile = HardwareProfile::detect();
-    info!(
-        "✅ Hardware: {} cores, {:.1} GB RAM, GPU: {}, Score: {:.1}",
-        hardware_profile.cpu_cores,
-        hardware_profile.ram_total_gb,
-        hardware_profile.gpu.as_ref().map_or("None".to_string(), |g| g.name.clone()),
-        hardware_profile.capability_score
-    );
+
 
     // --- Integration: Initialize gossip engine (gChat port) ---
     let node_id = uuid::Uuid::new_v4().to_string();

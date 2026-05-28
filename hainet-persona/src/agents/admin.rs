@@ -1004,11 +1004,17 @@ impl AdminAgent {
             &selected_model.model_id
         };
         
-        let response = client.generate(
-            model_name,
-            user_input,
-            options
-        ).await.context("Failed to generate conversational response")?;
+        tracing::info!("[DIAGNOSTIC] Admin {} calling LLM for conversation (model: {})", self.id.name, model_name);
+        
+        let llm_timeout = tokio::time::Duration::from_secs(300);
+        let response = match tokio::time::timeout(
+            llm_timeout,
+            client.generate(model_name, user_input, options)
+        ).await {
+            Ok(Ok(res)) => res,
+            Ok(Err(e)) => anyhow::bail!("Failed to generate conversational response: {}", e),
+            Err(_) => anyhow::bail!("Timeout waiting for LLM conversational response"),
+        };
         
         debug!(
             target: "llm_messages",

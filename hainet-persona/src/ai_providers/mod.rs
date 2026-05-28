@@ -45,12 +45,17 @@ pub struct AIProviderManager {
     pub request_queue: Option<Arc<OllamaRequestQueue>>,
     pub api_registry: Option<Arc<ApiRegistry>>,
     pub user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>,
+    pub max_hardware_context: usize,
 }
 
 impl AIProviderManager {
     /// Create new provider manager and perform initial discovery
-    pub async fn new(user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>, role: String) -> Result<Self> {
-        info!("Initializing AI Provider Manager...");
+    pub async fn new(
+        user_settings: Option<Arc<RwLock<crate::user_settings::UserSettingsManager>>>, 
+        role: String,
+        max_hardware_context: usize,
+    ) -> anyhow::Result<Self> {
+        tracing::info!("Initializing AI Provider Manager...");
         
         let discovery = ProviderDiscovery::new();
         let catalog = Arc::new(RwLock::new(ModelCatalog::new()));
@@ -65,6 +70,7 @@ impl AIProviderManager {
             request_queue: None,
             api_registry: None,
             user_settings,
+            max_hardware_context,
         };
 
         // Perform initial discovery only if we are the agentic core
@@ -257,13 +263,15 @@ impl AIProviderManager {
 
         let ranked_models = self.ranker.rank_models(&catalog, &context_with_prefs).await?;
         
-        let selected = self.selector.select_best(&ranked_models, &context_with_prefs).await?;
+        let mut selected = self.selector.select_best(&ranked_models, &context_with_prefs).await?;
+        selected.hardware_max_ctx = self.max_hardware_context;
         
         info!(
-            "Selected model {} for agent {} (score: {:.2})",
+            "Selected model {} for agent {} (score: {:.2}, hardware_max_ctx: {})",
             selected.model_id,
             context_with_prefs.agent_type,
-            selected.score
+            selected.score,
+            selected.hardware_max_ctx
         );
         
         Ok(selected)

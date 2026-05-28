@@ -20,10 +20,12 @@ use tracing::{debug, warn};
 pub struct OllamaClient {
     base_url: String,
     client: Client,
+    state_requested_ctx: usize,
+    hardware_max_ctx: usize,
 }
 
 impl OllamaClient {
-    pub fn new(base_url: String) -> Self {
+    pub fn new(base_url: String, state_requested_ctx: usize, hardware_max_ctx: usize) -> Self {
         // Configure HTTP client with generous timeouts for LLM generation
         let client = Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
@@ -34,6 +36,8 @@ impl OllamaClient {
         Self {
             base_url,
             client,
+            state_requested_ctx,
+            hardware_max_ctx,
         }
     }
 
@@ -119,6 +123,12 @@ impl ProviderClient for OllamaClient {
             model
         };
 
+        // Determine safe context window dynamically
+        let target_ctx = options.num_ctx.unwrap_or(self.state_requested_ctx);
+        let safe_ctx = target_ctx.min(self.hardware_max_ctx);
+        
+        debug!("Ollama generate: num_ctx resolved to {} (target: {}, hardware limit: {})", safe_ctx, target_ctx, self.hardware_max_ctx);
+
         let request = OllamaRequest {
             model: model_name.to_string(),
             prompt: prompt.to_string(),
@@ -129,7 +139,7 @@ impl ProviderClient for OllamaClient {
                 num_predict: options.max_tokens.map(|t| t as i32),
                 top_p: options.top_p,
                 stop: options.stop,
-                num_ctx: options.num_ctx.map(|t| t as i32),
+                num_ctx: Some(safe_ctx as i32),
             }),
             keep_alive: Some("10m".to_string()),
         };

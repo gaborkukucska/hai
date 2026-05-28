@@ -463,6 +463,44 @@ impl WorkerAgent {
             system_prompt = system_prompt.replace("{task_description}", &task.description);
             system_prompt = system_prompt.replace("{task_id}", &task.id.to_string());
             
+            // Project context substitutions
+            let project_name = self.current_project_name.clone().unwrap_or_else(|| "unknown".to_string());
+            system_prompt = system_prompt.replace("{project_name}", &project_name);
+            system_prompt = system_prompt.replace("{team_id}", &format!("team_{}", project_name));
+            system_prompt = system_prompt.replace("{session_name}", "main");
+            system_prompt = system_prompt.replace("{current_time_utc}", &chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string());
+            
+            // Address book — find PM agent ID so the worker knows who to message
+            let pm_agent_id = {
+                let bus = self.message_bus.read().await;
+                let agents = bus.get_active_agents().await;
+                agents.iter()
+                    .find(|a| a.id.agent_type == crate::messaging::AgentType::PM)
+                    .map(|a| a.id.name.clone())
+                    .unwrap_or_else(|| "PM (not found)".to_string())
+            };
+            system_prompt = system_prompt.replace("{address_book}", &format!("PM Agent: {}\nAdmin AI: admin_ai", pm_agent_id));
+            
+            // Task/team status
+            let task_summary = {
+                let pm = self.project_manager.read().await;
+                if let Ok(tasks) = pm.get_project_tasks(&task.project_id).await {
+                    tasks.iter()
+                        .map(|t| format!("- [{}] {} (assigned: {:?})", t.status, t.title, t.assigned_worker))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    "No task data available.".to_string()
+                }
+            };
+            system_prompt = system_prompt.replace("{team_wip_updates}", &task_summary);
+            
+            // Clear example/placeholder variables that don't apply in HAI-Net
+            system_prompt = system_prompt.replace("{kb_search_example}", "");
+            system_prompt = system_prompt.replace("{workspace_list_example}", "");
+            system_prompt = system_prompt.replace("{tool_examples}", "");
+            system_prompt = system_prompt.replace("{report_examples}", "");
+            
             system_prompt.push_str("\n\nCRITICAL INSTRUCTION: You MUST respond with exactly ONE JSON object representing your action. Example: {\"tool\": \"tool_name\", \"params\": {\"key\": \"value\"}}");
             
             let options = crate::ai_providers::providers::GenerationOptions {
@@ -571,6 +609,94 @@ impl WorkerAgent {
                     }
                 } else {
                     local_context.push("System: Error: request_state tool requires 'state' parameter.".to_string());
+                }
+                continue;
+            }
+            
+            // --- Native tool: send_message (inter-agent communication) ---
+            if tool_name == "send_message" {
+                let target = params.get("target_agent_id").and_then(|t| t.as_str()).unwrap_or("");
+                let content = params.get("message_content").or(params.get("message"))
+                    .and_then(|c| c.as_str()).unwrap_or("");
+                
+                // Find target agent in the bus
+                let target_agent_id = {
+                    let bus = self.message_bus.read().await;
+                    let agents = bus.get_active_agents().await;
+                    agents.iter()
+                        .find(|a| a.id.name.contains(target) || 
+                              (target.contains("admin") && a.id.agent_type == crate::messaging::AgentType::Admin) ||
+                              (target.contains("PM") && a.id.agent_type == crate::messaging::AgentType::PM))
+                        .map(|a| a.id.clone())
+                };
+                
+                if let Some(target_id) = target_agent_id {
+                    let msg = crate::messaging::Message::new(
+                        self.id.clone(),
+                        target_id.clone(),
+                        crate::messaging::MessageContent::StatusUpdate(crate::messaging::StatusUpdate {
+                            agent_id: self.id.clone(),
+                            state: self.state_machine.current_state().clone(),
+                            message: content.to_string(),
+                            progress: None,
+                        })
+                    );
+                    if let Err(e) = self.message_bus.write().await.send_message(msg).await {
+                        local_context.push(format!("System: Error sending message to {}: {}", target, e));
+                    } else {
+                        local_context.push(format!("System: Message sent to {}: {}", target_id.name, content));
+                    }
+                } else {
+                    local_context.push(format!("System: Error: Agent '{}' not found. Check your Address Book.", target));
+                }
+                continue;
+            }
+            
+            // --- Native tool: project_management (sub-task management for workers) ---
+            if tool_name == "project_management" {
+                let pm_action = params.get("action").and_then(|a| a.as_str()).unwrap_or("");
+                match pm_action {
+                    "list_tasks" => {
+                        let pm = self.project_manager.read().await;
+                        if let Ok(tasks) = pm.get_project_tasks(&task.project_id).await {
+                            let summary: String = tasks.iter()
+                                .map(|t| format!("- [{}] {} (ID: {}, assigned: {:?})", t.status, t.title, t.id, t.assigned_worker))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            local_context.push(format!("System: [list_tasks result]\n{}", summary));
+                        } else {
+                            local_context.push("System: Error listing tasks.".to_string());
+                        }
+                    }
+                    "add_task" => {
+                        let title = params.get("title").or(params.get("description"))
+                            .and_then(|t| t.as_str()).unwrap_or("Untitled Sub-Task").to_string();
+                        let description = params.get("description")
+                            .and_then(|d| d.as_str()).unwrap_or(&title).to_string();
+                        
+                        let project_manager = self.project_manager.write().await;
+                        match project_manager.create_task(&task.project_id, title.clone(), description).await {
+                            Ok(task_id) => {
+                                local_context.push(format!("System: Sub-task created: ID={}, Title={}", task_id, title));
+                            }
+                            Err(e) => {
+                                local_context.push(format!("System: Error creating sub-task: {}", e));
+                            }
+                        }
+                    }
+                    "modify_task" => {
+                        let task_id_str = params.get("task_id").and_then(|t| t.as_str()).unwrap_or("");
+                        let progress = params.get("task_progress").and_then(|p| p.as_str());
+                        
+                        if let Some(progress_str) = progress {
+                            local_context.push(format!("System: Task '{}' progress updated to '{}' (noted).", task_id_str, progress_str));
+                        } else {
+                            local_context.push(format!("System: modify_task acknowledged for '{}'.", task_id_str));
+                        }
+                    }
+                    _ => {
+                        local_context.push(format!("System: Unknown project_management action '{}'. Use: list_tasks, add_task, modify_task", pm_action));
+                    }
                 }
                 continue;
             }

@@ -109,6 +109,9 @@ pub struct PMAgent {
     
     /// Message receiver (kept alive to maintain registration)
     _receiver: Option<mpsc::Receiver<crate::messaging::Message>>,
+    
+    /// TrippleEffect state name (finer-grained than AgentState, used for prompt selection)
+    te_state_name: String,
 }
 
 impl PMAgent {
@@ -147,6 +150,7 @@ impl PMAgent {
             failover_handler: FailoverHandler::new(),
             context_manager: super::context_manager::ContextManager::new(8192),
             _receiver: None,
+            te_state_name: String::new(),
         }
     }
     
@@ -2028,6 +2032,7 @@ CRITICAL: JSON only. No explanations.
 
         // Start in Startup state — the LLM will drive transitions from here
         self.state_machine.transition(AgentState::Startup, "Autonomous cycle started".to_string())?;
+        self.te_state_name = "pm_startup".to_string();
 
         while loop_count < max_loops {
             loop_count += 1;
@@ -2082,16 +2087,23 @@ CRITICAL: JSON only. No explanations.
                 }
             }
 
-            // Map current AgentState to TE prompt name
-            let prompt_name = match current_state {
-                AgentState::Startup   => "pm_startup_prompt",
-                AgentState::Planning  => "pm_build_team_tasks_prompt",
-                AgentState::Managing  => "pm_manage_prompt",
-                AgentState::Reviewing => "pm_report_check_prompt",
-                AgentState::Auditing  => "pm_audit_prompt",
-                AgentState::Idle      => "pm_standby_prompt",
+            // Map TrippleEffect state name to prompt name
+            // This uses the fine-grained TE state string instead of the coarse AgentState
+            // so that sub-states like pm_activate_workers get their own dedicated prompt.
+            let prompt_name = match self.te_state_name.as_str() {
+                "pm_startup"          => "pm_startup_prompt",
+                "pm_build_team_tasks" => "pm_build_team_tasks_prompt",
+                "pm_activate_workers" => "pm_activate_workers_prompt",
+                "pm_work"             => "pm_work_prompt",
+                "pm_manage"           => "pm_manage_prompt",
+                "pm_manage_team"      => "pm_manage_prompt",
+                "pm_team_status"      => "pm_manage_prompt",
+                "pm_report_check"     => "pm_report_check_prompt",
+                "pm_audit"            => "pm_audit_prompt",
+                "pm_standby"          => "pm_standby_prompt",
                 _                     => "pm_manage_prompt",
             };
+            tracing::debug!("PM {} te_state='{}' -> prompt='{}'", self.id.name, self.te_state_name, prompt_name);
 
             // Load TE prompt
             let mut system_prompt = self.get_te_prompt(prompt_name)
@@ -2125,8 +2137,8 @@ CRITICAL: JSON only. No explanations.
             system_prompt = system_prompt.replace("{team_id}", &format!("team_{}", project_name));
             system_prompt = system_prompt.replace("{session_name}", "main");
             system_prompt = system_prompt.replace("{address_book}", &format!("Admin AI: admin_ai\nWorkers: {}", worker_summary));
-            system_prompt = system_prompt.replace("{pm_provider}", "gemini");
-            system_prompt = system_prompt.replace("{pm_model}", "gemini-2.5-flash");
+            system_prompt = system_prompt.replace("{pm_provider}", "auto");
+            system_prompt = system_prompt.replace("{pm_model}", "auto-selected");
             if current_state == AgentState::Startup {
                 system_prompt = system_prompt.replace("{tool_instructions}", "");
             } else {
@@ -2276,11 +2288,13 @@ CRITICAL: JSON only. No explanations.
                         "pm_activate_workers" => AgentState::Managing,
                         "pm_work"             => AgentState::Managing,
                         "pm_manage"           => AgentState::Managing,
+                        "pm_manage_team"      => AgentState::Managing,
+                        "pm_team_status"      => AgentState::Managing,
                         "pm_report_check"     => AgentState::Reviewing,
                         "pm_audit"            => AgentState::Auditing,
                         "pm_standby"          => AgentState::Idle,
                         _ => {
-                            local_context.push(format!("System: Error: Invalid PM state requested '{}'", new_state_str));
+                            local_context.push(format!("System: Error: Invalid PM state requested '{}'. Valid states: pm_startup, pm_build_team_tasks, pm_activate_workers, pm_manage, pm_report_check, pm_audit, pm_standby", new_state_str));
                             continue;
                         }
                     };
@@ -2288,8 +2302,10 @@ CRITICAL: JSON only. No explanations.
                     if let Err(e) = self.state_machine.transition(new_state.clone(), format!("LLM requested state change to {}", new_state_str)) {
                         local_context.push(format!("System: Error: State transition failed: {}", e));
                     } else {
+                        // Store the fine-grained TE state name for prompt selection
+                        self.te_state_name = new_state_str.to_string();
                         duplicate_tracker.reset();
-                        self.update_status(&format!("Transitioned to {:?}", new_state)).await;
+                        self.update_status(&format!("Transitioned to {:?} ({})", new_state, new_state_str)).await;
                         local_context.push(format!("System: State successfully changed to {}", new_state_str));
                     }
                 } else {
@@ -2359,24 +2375,34 @@ CRITICAL: JSON only. No explanations.
             }
 
             // 3. manage_team — worker lifecycle management
+            // NOTE: The LLM does NOT need to specify model/provider — the system handles
+            // model selection automatically via AIProviderManager and user preferences.
             if tool_name == "manage_team" {
-                let team_action = params.get("action").and_then(|a| a.as_str()).unwrap_or("");
+                // Infer action from params: if 'role' is present, treat as add_agent
+                let team_action = params.get("action").and_then(|a| a.as_str())
+                    .unwrap_or_else(|| {
+                        if params.get("role").is_some() {
+                            "add_agent"
+                        } else {
+                            "list_agents"
+                        }
+                    });
                 match team_action {
-                    "list_agents" => {
+                    "list_agents" | "list" | "status" => {
                         let summary = self.build_worker_summary();
                         local_context.push(format!("System: [list_agents result]\n{}", summary));
                     }
-                    "add_agent" => {
+                    "add_agent" | "add" | "create" | "spawn" => {
                         let role = params.get("role").and_then(|r| r.as_str()).unwrap_or("worker");
-                        let persona = params.get("persona").and_then(|p| p.as_str()).unwrap_or("General Worker");
+                        let persona = params.get("persona").and_then(|p| p.as_str()).unwrap_or(role);
                         
-                        // Select template based on persona/role
+                        // Select template based on persona/role — model/provider are auto-selected
                         let template = WorkerTemplate::select_for_task(persona);
                         let template_name = template.name.clone();
                         
                         // Check if we already have a worker of this type
                         if self.active_workers.contains_key(&template_name) {
-                            local_context.push(format!("System: Worker of type '{}' already exists. Reusing existing worker.", template_name));
+                            local_context.push(format!("System: Worker of type '{}' already exists and is ready. You can now assign tasks to it using project_management. Transition to pm_activate_workers to begin.", template_name));
                         } else {
                             // Create and spawn the worker
                             let mut worker = super::worker::WorkerAgent::from_template(
@@ -2406,13 +2432,13 @@ CRITICAL: JSON only. No explanations.
                             });
                             
                             local_context.push(format!(
-                                "System: Worker agent created. ID: {}, Type: {}, Role: {}. The agent is ready to receive tasks.",
+                                "System: Worker agent created successfully. ID: {}, Type: {}, Role: {}. Model selection is automatic. The agent is ready to receive tasks. Use request_state to transition to pm_activate_workers.",
                                 worker_id.name, template_name, role
                             ));
                         }
                     }
                     _ => {
-                        local_context.push(format!("System: Unknown manage_team action: '{}'", team_action));
+                        local_context.push(format!("System: Unknown manage_team action: '{}'. Valid actions: add_agent, list_agents", team_action));
                     }
                 }
                 continue;
