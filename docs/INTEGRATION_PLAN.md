@@ -84,7 +84,7 @@ hainet/
 | [DONE] Merge TE tool ecosystem | Map TE's 21 tools → HAI-Net MCP server equivalents |
 | Port TE Constitutional Guardian | Merge with existing guardian module |
 | [DONE] Unify prompt systems | TE's YAML prompts loaded at runtime via `get_te_prompt()` in pm.rs/worker.rs |
-| **[NEXT] PM Startup Plan Interceptor** | **Detect structured kickoff plan JSON in Startup state, auto-create tasks in DB, inject MASTER KICKOFF PLAN SUMMARY into context, auto-transition to Planning. Required because pm_startup_prompt outputs a plan structure, not a tool-call JSON, causing small models to stall.** |
+| [DONE] PM Startup Plan Interceptor | Detect structured kickoff plan JSON in Startup state, auto-create tasks in DB, inject MASTER KICKOFF PLAN SUMMARY into context, auto-transition to Planning. |
 
 **Key mapping — TrippleEffect Python → HAI-Net Rust**:
 
