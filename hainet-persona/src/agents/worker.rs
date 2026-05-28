@@ -451,7 +451,12 @@ impl WorkerAgent {
                 .unwrap_or_default();
             
             let tool_instructions = format!(
-                "Available tools: {}\n\nUse the 'framework::tool_information' tool to request the JSON schema and detailed description of any tool before using it if you don't know its parameters.",
+                "Available tools: {}, request_state, project_management, send_message\n\n\
+                Native Tool Minimal Schemas:\n\
+                - request_state: {{\"state\": \"<worker_state>\"}}\n\
+                - project_management: {{\"action\": \"<list_tasks|add_task|modify_task>\", ...}}\n\
+                - send_message: {{\"target_agent_id\": \"<agent_id>\", \"message_content\": \"<message>\"}}\n\n\
+                Use the 'framework::tool_information' tool to request the FULL JSON schema and detailed description of ANY tool (including native tools) if you need more details.",
                 tools_list_str
             );
             
@@ -574,7 +579,12 @@ impl WorkerAgent {
                             if let Ok(meta) = client.get_tool_metadata(tool_name_req).await {
                                 tool_schemas.push(serde_json::to_string(&meta).unwrap_or_default());
                             } else {
-                                tool_schemas.push(format!("Error: Could not find schema for tool '{}'", tool_name_req));
+                                match tool_name_req {
+                                    "request_state" => tool_schemas.push(r#"{"name":"request_state","description":"Drive the Worker state machine","inputSchema":{"type":"object","properties":{"state":{"type":"string","enum":["worker_startup","worker_decompose","worker_work","worker_test","worker_report","worker_wait"]}},"required":["state"]}}"#.to_string()),
+                                    "project_management" => tool_schemas.push(r#"{"name":"project_management","description":"CRUD operations on project sub-tasks","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["list_tasks","add_task","modify_task"]},"title":{"type":"string","description":"Task title (for add_task)"},"description":{"type":"string","description":"Task description"},"task_id":{"type":"string","description":"Required for modify_task"},"task_progress":{"type":"string","description":"Progress update for modify_task"}},"required":["action"]}}"#.to_string()),
+                                    "send_message" => tool_schemas.push(r#"{"name":"send_message","description":"Inter-agent communication","inputSchema":{"type":"object","properties":{"target_agent_id":{"type":"string"},"message_content":{"type":"string"}},"required":["target_agent_id","message_content"]}}"#.to_string()),
+                                    _ => tool_schemas.push(format!("Error: Could not find schema for tool '{}'. Note: Native tools like project_management and send_message are now documented via this tool.", tool_name_req))
+                                }
                             }
                         }
                     }

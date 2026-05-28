@@ -2143,7 +2143,13 @@ CRITICAL: JSON only. No explanations.
                 system_prompt = system_prompt.replace("{tool_instructions}", "");
             } else {
                 let tool_instructions = format!(
-                    "Available tools: request_state, project_management, manage_team, send_message, framework::tool_information\n\nUse the 'framework::tool_information' tool to request the JSON schema and detailed description of any tool before using it if you don't know its parameters."
+                    "Available tools: request_state, project_management, manage_team, send_message, framework::tool_information\n\n\
+                    Native Tool Minimal Schemas:\n\
+                    - request_state: {{\"state\": \"<pm_state>\"}}\n\
+                    - project_management: {{\"action\": \"<list_tasks|add_task|modify_task>\", ...}}\n\
+                    - manage_team: {{\"action\": \"<list_agents|add_agent>\", ...}}\n\
+                    - send_message: {{\"target_agent_id\": \"<agent_id>\", \"message_content\": \"<message>\"}}\n\n\
+                    Use the 'framework::tool_information' tool to request the FULL JSON schema and detailed description of ANY tool (including native tools like project_management) if you need more details."
                 );
                 system_prompt = system_prompt.replace("{tool_instructions}", &tool_instructions);
             }
@@ -2268,7 +2274,13 @@ CRITICAL: JSON only. No explanations.
                             if let Ok(meta) = client.get_tool_metadata(tool_name_req).await {
                                 tool_schemas.push(serde_json::to_string(&meta).unwrap_or_default());
                             } else {
-                                tool_schemas.push(format!("Error: Could not find schema for tool '{}'. Note: Native tools like project_management, manage_team, and send_message do not require schemas.", tool_name_req));
+                                match tool_name_req {
+                                    "request_state" => tool_schemas.push(r#"{"name":"request_state","description":"Drive the PM state machine","inputSchema":{"type":"object","properties":{"state":{"type":"string","enum":["pm_startup","pm_build_team_tasks","pm_activate_workers","pm_manage","pm_report_check","pm_audit","pm_standby"]}},"required":["state"]}}"#.to_string()),
+                                    "project_management" => tool_schemas.push(r#"{"name":"project_management","description":"CRUD operations on project tasks","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["list_tasks","add_task","modify_task"]},"title":{"type":"string","description":"Task title (for add_task)"},"description":{"type":"string","description":"Task description"},"task_id":{"type":"string","description":"Required for modify_task"},"assignee_agent_id":{"type":"string","description":"Used with modify_task to assign task"}},"required":["action"]}}"#.to_string()),
+                                    "manage_team" => tool_schemas.push(r#"{"name":"manage_team","description":"Worker lifecycle management","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["list_agents","add_agent"]},"role":{"type":"string","description":"Required for add_agent"},"persona":{"type":"string","description":"Optional persona name for add_agent"}},"required":["action"]}}"#.to_string()),
+                                    "send_message" => tool_schemas.push(r#"{"name":"send_message","description":"Inter-agent communication","inputSchema":{"type":"object","properties":{"target_agent_id":{"type":"string"},"message_content":{"type":"string"}},"required":["target_agent_id","message_content"]}}"#.to_string()),
+                                    _ => tool_schemas.push(format!("Error: Could not find schema for tool '{}'. Note: Native tools like project_management, manage_team, and send_message are now documented via this tool.", tool_name_req))
+                                }
                             }
                         }
                     }
