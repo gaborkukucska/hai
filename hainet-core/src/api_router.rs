@@ -141,6 +141,70 @@ pub async fn handle_invoke(
             Ok(serde_json::to_value(res).unwrap())
         },
         
+        // --- Logs ---
+        "get_system_logs" => {
+            let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(500) as usize;
+            
+            // Try journalctl first
+            let journalctl_logs = std::process::Command::new("journalctl")
+                .arg("-u").arg("hainet-core")
+                .arg("-n").arg(lines.to_string())
+                .arg("--no-pager")
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                .unwrap_or_default();
+            
+            if !journalctl_logs.trim().is_empty() {
+                return Ok(json!({ "logs": journalctl_logs }));
+            }
+            
+            // Fallback: read the most recent .log file from workspace logs/ directory
+            let log_dirs: Vec<std::path::PathBuf> = vec![
+                std::path::PathBuf::from("/var/log/hainet"),
+                // Try to find workspace logs dir relative to executable
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                    .unwrap_or_default()
+                    .join("../../logs"),
+                std::path::PathBuf::from("logs"),
+            ];
+            
+            let mut newest_log: Option<(std::path::PathBuf, std::time::SystemTime)> = None;
+            for dir in &log_dirs {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().map(|e| e == "log").unwrap_or(false) {
+                            if let Ok(meta) = path.metadata() {
+                                if let Ok(modified) = meta.modified() {
+                                    if newest_log.as_ref().map(|(_, t)| modified > *t).unwrap_or(true) {
+                                        newest_log = Some((path, modified));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if let Some((log_path, _)) = newest_log {
+                match std::fs::read_to_string(&log_path) {
+                    Ok(content) => {
+                        // Return only the last N lines
+                        let all_lines: Vec<&str> = content.lines().collect();
+                        let start = if all_lines.len() > lines { all_lines.len() - lines } else { 0 };
+                        let tail = all_lines[start..].join("\n");
+                        Ok(json!({ "logs": tail, "source": log_path.display().to_string() }))
+                    }
+                    Err(e) => Ok(json!({ "logs": format!("Failed to read log file {}: {}", log_path.display(), e) })),
+                }
+            } else {
+                Ok(json!({ "logs": "No logs available. journalctl returned empty and no log files found." }))
+            }
+        },
+        
         // --- STT/TTS ---
         "tts_is_ready" => {
             let tts = app_state.tts_handler.read().await;

@@ -8,6 +8,7 @@ import ComputeNode from './pages/ComputeNode';
 import NetworkSettings from './pages/NetworkSettings';
 import Settings from './pages/Settings';
 import UserProfile from './pages/UserProfile';
+import { LogOverlay } from './components/LogOverlay';
 import { useState, useEffect } from 'react';
 
 function App() {
@@ -59,6 +60,7 @@ function App() {
                 <Route path="*" element={<Navigate to="/chat" replace />} />
               </Routes>
             </main>
+            <LogOverlay />
           </>
         )}
       </div>

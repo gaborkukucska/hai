@@ -1932,36 +1932,9 @@ CRITICAL: JSON only. No explanations.
     // =========================================================================
 
     /// Load a prompt template from TrippleEffect's prompts.yaml by key name.
-    /// This is the PM equivalent of WorkerAgent::get_te_prompt.
+    /// Load a prompt from the TrippleEffect prompts.yaml (via shared prompt_loader).
     fn get_te_prompt(&self, prompt_name: &str) -> Option<String> {
-        let path = "/home/tom/hai/_workspace/TrippleEffect/prompts.yaml";
-        if let Ok(content) = std::fs::read_to_string(path) {
-            let marker = format!("{}: |", prompt_name);
-            let marker2 = format!("{}: |-", prompt_name);
-            let marker3 = format!("{}: |2", prompt_name);
-            let mut found = false;
-            let mut prompt_content = String::new();
-            
-            for line in content.lines() {
-                if line.starts_with(&marker) || line.starts_with(&marker2) || line.starts_with(&marker3) || line.starts_with(&format!("{}:", prompt_name)) {
-                    found = true;
-                    continue;
-                }
-                
-                if found {
-                    // Stop at next top-level key (non-indented, alphabetic start)
-                    if line.starts_with("--") || (line.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false) && !line.starts_with(' ')) {
-                        break;
-                    }
-                    prompt_content.push_str(line);
-                    prompt_content.push('\n');
-                }
-            }
-            if found {
-                return Some(prompt_content.trim().to_string());
-            }
-        }
-        None
+        super::prompt_loader::get_prompt(prompt_name)
     }
 
     /// Extract JSON from a raw LLM response (handles markdown fences and bare braces)

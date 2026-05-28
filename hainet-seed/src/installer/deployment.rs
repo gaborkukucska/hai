@@ -1066,6 +1066,7 @@ WantedBy=multi-user.target
     fn transfer_prompts<C: SSHClientTrait>(&self, client: &C, dest_base_path: &str) -> Result<()> {
         let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
         let prompts_dir = workspace_root.join("hainet-persona").join("prompts");
+        let te_prompts_file = workspace_root.join("_workspace").join("TrippleEffect").join("prompts.yaml");
         
         if !prompts_dir.exists() {
             println!("⚠️  Prompts directory not found at {:?}, skipping", prompts_dir);
@@ -1089,6 +1090,18 @@ WantedBy=multi-user.target
             dest_base_path, temp_remote_path, dest_base_path, dest_prompts_path, temp_remote_path
         );
         let _ = client.execute_command(&extract_cmd);
+        
+        // Also upload TrippleEffect prompts.yaml
+        if te_prompts_file.exists() {
+            let temp_te_path = "/tmp/te_prompts.yaml";
+            client.upload_file(&te_prompts_file, temp_te_path)?;
+            let _ = client.execute_command(&format!(
+                "cat {} | sudo -n tee {}/prompts.yaml > /dev/null && sudo -n chown hainet:hainet {}/prompts.yaml && rm {}",
+                temp_te_path, dest_prompts_path, dest_prompts_path, temp_te_path
+            ));
+        } else {
+            println!("⚠️  TrippleEffect prompts.yaml not found at {:?}, skipping", te_prompts_file);
+        }
         
         // Cleanup local tar
         let _ = std::fs::remove_file(tar_path);
@@ -1139,6 +1152,7 @@ WantedBy=multi-user.target
     fn copy_prompts_local(&self, dest_base_path: &str) -> Result<()> {
         let workspace_root = find_workspace_root().context("Failed to find workspace root for transfer")?;
         let prompts_dir = workspace_root.join("hainet-persona").join("prompts");
+        let te_prompts_file = workspace_root.join("_workspace").join("TrippleEffect").join("prompts.yaml");
         
         if !prompts_dir.exists() {
             println!("⚠️  Prompts directory not found at {:?}, skipping", prompts_dir);
@@ -1154,11 +1168,21 @@ WantedBy=multi-user.target
             .status()?;
             
         let dest_prompts_path = format!("{}/prompts", dest_base_path);
+        
+        // Also copy TrippleEffect prompts.yaml
+        if te_prompts_file.exists() {
+            std::process::Command::new("sudo")
+                .args(&["cp", te_prompts_file.to_str().unwrap(), &format!("{}/prompts.yaml", dest_prompts_path)])
+                .status()?;
+        } else {
+            println!("⚠️  TrippleEffect prompts.yaml not found at {:?}, skipping", te_prompts_file);
+        }
+        
         std::process::Command::new("sudo")
             .args(&["chown", "-R", "hainet:hainet", &dest_prompts_path])
             .status()?;
             
-        println!("✓ Installed AI persona prompts to /var/lib/hainet/hainet-persona/prompts");
+        println!("✓ Installed AI persona prompts to {}", dest_prompts_path);
         Ok(())
     }
     

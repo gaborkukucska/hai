@@ -29,6 +29,7 @@ pub mod cycle_engine;
 pub mod loop_detector;
 pub mod failover;
 pub mod context_manager;
+pub mod prompt_loader;
 
 // Re-export core agent types
 pub use admin::AdminAgent;

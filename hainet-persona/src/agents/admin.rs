@@ -1051,36 +1051,8 @@ impl AdminAgent {
     /// Load a prompt template from TrippleEffect's prompts.yaml by key name.
     /// Replaces {admin_standard_framework_instructions} automatically.
     fn get_te_prompt(&self, prompt_name: &str) -> Option<String> {
-        let path = "/home/tom/hai/_workspace/TrippleEffect/prompts.yaml";
-        let content = std::fs::read_to_string(path).ok()?;
-        
         let extract = |name: &str| -> Option<String> {
-            let marker1 = format!("{}: |", name);
-            let marker2 = format!("{}: |-", name);
-            let marker3 = format!("{}: |2", name);
-            let marker4 = format!("{}:", name);
-            let mut found = false;
-            let mut prompt_content = String::new();
-            
-            for line in content.lines() {
-                if line.starts_with(&marker1) || line.starts_with(&marker2) || line.starts_with(&marker3) || line.starts_with(&marker4) {
-                    found = true;
-                    continue;
-                }
-                
-                if found {
-                    if line.starts_with("--") || (line.chars().next().map_or(false, |c| c.is_alphabetic()) && !line.starts_with(' ')) {
-                        break;
-                    }
-                    prompt_content.push_str(line);
-                    prompt_content.push('\n');
-                }
-            }
-            if found {
-                Some(prompt_content.trim().to_string())
-            } else {
-                None
-            }
+            super::prompt_loader::get_prompt(name)
         };
 
         let mut prompt = extract(prompt_name)?;

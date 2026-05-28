@@ -296,28 +296,6 @@ impl AdminBridge {
         
         drop(admin);
         
-        let dynamic_component_json = serde_json::json!({
-            "type": "Stack",
-            "children": [
-                {
-                    "type": "Text",
-                    "props": { "style": { "fontWeight": "bold" } },
-                    "children": ["This is a dynamic component from the backend!"]
-                },
-                {
-                    "type": "Button",
-                    "props": { "style": { "backgroundColor": "#007bff", "color": "white", "border": "none", "padding": "10px", "borderRadius": "5px" } },
-                    "children": ["Get Agent State"],
-                    "action": {
-                        "type": "invoke",
-                        "payload": {
-                            "command": "get_agent_state"
-                        }
-                    }
-                }
-            ]
-        });
-
         // Create assistant message
         let assistant_message = ChatMessage {
             id: uuid::Uuid::new_v4().to_string(),
@@ -326,7 +304,7 @@ impl AdminBridge {
             timestamp: chrono::Utc::now().timestamp(),
             attachments: vec![],
             video_src: None,
-            dynamic_component: Some(dynamic_component_json),
+            dynamic_component: None,
         };
         
         // Store in history
