@@ -101,6 +101,12 @@ pub struct PMAgent {
     /// Pending async validations (task_id -> validation handle)
     pending_validations: HashMap<TaskId, PendingValidation>,
     
+    /// Failover handler for model/endpoint tracking (ported from TE)
+    failover_handler: FailoverHandler,
+    
+    /// Context manager for history bounds (ported from TE)
+    context_manager: super::context_manager::ContextManager,
+    
     /// Message receiver (kept alive to maintain registration)
     _receiver: Option<mpsc::Receiver<crate::messaging::Message>>,
 }
@@ -138,6 +144,8 @@ impl PMAgent {
             project_start_time: None,
             session_tasks: SessionTaskList::new(),
             pending_validations: HashMap::new(),
+            failover_handler: FailoverHandler::new(),
+            context_manager: super::context_manager::ContextManager::new(8192),
             _receiver: None,
         }
     }
@@ -161,21 +169,93 @@ impl PMAgent {
         ).await;
     }
 
+    /// Helper to generate text using the AI provider manager with failover, loop detection, and context limits.
+    /// (Ported from TrippleEffect's cycle_engine pattern)
+    async fn generate_llm_response(
+        &mut self,
+        prompt: &str,
+        options: Option<GenerationOptions>,
+        selection_context: SelectionContext,
+        preferred_family: Option<String>,
+        timeout_ms: u64,
+        task_name: &str,
+    ) -> Result<String> {
+        let max_attempts = 3;
+        let mut last_error = anyhow::anyhow!("Unknown error");
+        
+        // Context Management: Truncate prompt if it exceeds safety bounds
+        let estimated_tokens = prompt.len() / 4;
+        let final_prompt = if estimated_tokens > 8000 {
+            tracing::warn!("PM prompt exceeds token estimate ({} tokens). Truncating.", estimated_tokens);
+            let keep_len = (8000 * 4) / 2;
+            if prompt.len() > keep_len * 2 {
+                format!("{}... [TRUNCATED DUE TO CONTEXT LIMIT] ...{}", &prompt[..keep_len], &prompt[prompt.len()-keep_len..])
+            } else {
+                prompt.to_string()
+            }
+        } else {
+            prompt.to_string()
+        };
+        
+        for attempt in 1..=max_attempts {
+            let selected_model = self.ai_provider_manager.select_model_for_agent_with_preferences(
+                selection_context.clone(), 
+                preferred_family.clone()
+            ).await?;
+            
+            let client = selected_model.get_client()?;
+            let model_name = if selected_model.model_id.contains("::") {
+                selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+            } else {
+                &selected_model.model_id
+            };
+            
+            tracing::info!("[DIAGNOSTIC] PM {} calling LLM for {} (model: {}, attempt: {})", self.id.name, task_name, model_name, attempt);
+            let llm_timeout = tokio::time::Duration::from_millis(timeout_ms);
+            
+            match tokio::time::timeout(
+                llm_timeout,
+                client.generate(model_name, &final_prompt, options.clone().unwrap_or_default())
+            ).await {
+                Ok(Ok(response)) => {
+                    if let Some(pattern_len) = loop_detector::detect_autoregressive_loop(&response.text) {
+                        tracing::warn!("Autoregressive loop detected in PM {} output (pattern len: {})", task_name, pattern_len);
+                        return Ok(format!("{}\n[Framework Watchdog Intervention]: You have entered an autoregressive loop. Please stop repeating yourself and re-evaluate.", response.text));
+                    }
+                    return Ok(response.text);
+                },
+                Ok(Err(e)) => {
+                    tracing::warn!("PM LLM generation error on attempt {}: {}", attempt, e);
+                    let endpoint = ModelEndpoint {
+                        provider: selected_model.provider_type.to_string(),
+                        model: selected_model.model_id.clone(),
+                        api_key_id: None,
+                    };
+                    let err_str = e.to_string().to_lowercase();
+                    if err_str.contains("401") || err_str.contains("403") || err_str.contains("429") {
+                        self.failover_handler.report_key_failure(&endpoint, &err_str);
+                    } else {
+                        self.failover_handler.report_transient_failure(&endpoint, &err_str);
+                    }
+                    last_error = e;
+                },
+                Err(e) => {
+                    tracing::warn!("PM LLM generation timed out on attempt {}: {}", attempt, e);
+                    last_error = anyhow::anyhow!("Timeout: {}", e);
+                }
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(1000 * attempt as u64)).await;
+        }
+        
+        Err(last_error).context(format!("PM failed to generate response after {} attempts for {}", max_attempts, task_name))
+    }
+
     /// Start PM agent lifecycle
     /// 
     /// Startup → Idle → Planning → Managing
     pub async fn initialize_and_plan(&mut self) -> Result<()> {
         // Record project start time
         self.project_start_time = Some(SystemTime::now());
-        
-        // Add initial session task: project analysis
-        self.session_tasks.add_task("Analyze project requirements".to_string(), None);
-        
-        // Transition from Startup to Idle (PM agents must go through Idle first)
-        self.state_machine.transition(
-            AgentState::Idle,
-            "PM initialized, ready to plan".to_string()
-        )?;
         
         // Register with MessageBus
         let (receiver, _) = self.message_bus.write().await
@@ -184,28 +264,11 @@ impl PMAgent {
             .context("Failed to register PM agent with MessageBus")?;
         self._receiver = Some(receiver);
 
-        self.state_machine.transition(
-            AgentState::Planning,
-            "Initializing project planning".to_string()
-        )?;
-        self.update_status("Planning project").await;
+        tracing::info!("PM {} registered with MessageBus, entering autonomous cycle", self.id.name);
         
-        // Mark analysis task as in progress
-        let _ = self.session_tasks.start_task("Analyze project requirements");
-        
-        // Analyze project and create detailed plan
-        self.analyze_and_plan().await?;
-        
-        // Mark analysis as complete
-        let _ = self.session_tasks.complete_task("Analyze project requirements");
-        
-        // Transition to Managing
-        self.state_machine.transition(
-            AgentState::Managing,
-            "Plan complete, starting execution".to_string()
-        )?;
-        
-        Ok(())
+        // The autonomous cycle starts in Startup and drives all transitions itself
+        // (startup -> planning/build_team -> activate_workers -> manage -> audit -> standby)
+        self.execute_autonomous_cycle().await
     }
     
     /// Analyze project requirements and create detailed execution plan
@@ -531,7 +594,7 @@ impl PMAgent {
                 );
                 
                 // Mark task as stuck
-                let mut project_manager = self.project_manager.write().await;
+                let project_manager = self.project_manager.write().await;
                 project_manager.mark_task_stuck(
                     &task.id,
                     format!(
@@ -568,7 +631,7 @@ impl PMAgent {
                             dep_status
                         );
                         
-                        let mut project_manager = self.project_manager.write().await;
+                        let project_manager = self.project_manager.write().await;
                         project_manager.mark_task_stuck(
                             &task.id,
                             format!("Dependency {} is {:?}", dep_id, dep_status)
@@ -605,7 +668,7 @@ impl PMAgent {
                 );
                 
                 // Reset task to Unassigned for reassignment
-                let mut project_manager = self.project_manager.write().await;
+                let project_manager = self.project_manager.write().await;
                 project_manager.reset_stuck_task(&task.id).await?;
                 
                 tracing::info!(
@@ -629,7 +692,7 @@ impl PMAgent {
                     task.failure_reason.as_ref().unwrap_or(&"Unknown".to_string())
                 );
                 
-                let mut project_manager = self.project_manager.write().await;
+                let project_manager = self.project_manager.write().await;
                 project_manager.fail_task(&task.id, failure_reason.clone()).await?;
                 
                 // ESCALATION: Notify Admin of permanent failure
@@ -698,78 +761,25 @@ impl PMAgent {
                 selection_context.preferred_family = Some(family);
             }
         }
-        let selected_model = self.ai_provider_manager
-            .select_model_for_agent(selection_context)
-            .await
-            .context("Failed to select a model for validation")?;
-        
-        let mut failover_handler = FailoverHandler::new();
-        let initial_endpoint = ModelEndpoint {
-            provider: "local".to_string(), // assuming local default for PM
-            model: selected_model.model_id.clone(),
-            api_key_id: None,
-        };
-        failover_handler.add_endpoint(initial_endpoint.clone());
-        failover_handler.set_active(initial_endpoint.clone());
-
-        // Call LLM for validation decision with failover logic
+        // Call LLM for validation decision using centralized failover helper
         let options = GenerationOptions {
             temperature: Some(0.3),
             max_tokens: Some(4096),
             ..Default::default()
         };
-        
-        let client = selected_model.get_client()?;
-        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
-        let model_name = if selected_model.model_id.contains("::") {
-            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
-        } else {
-            &selected_model.model_id
-        };
-        
-        let mut response_text = String::new();
-        let mut success = false;
-        
-        for _ in 0..3 {
-            // Add timeout wrapper to prevent indefinite hanging
-            tracing::info!("[DIAGNOSTIC] PM {} calling LLM for validation (model: {})", self.id.name, model_name);
-            let llm_timeout = tokio::time::Duration::from_secs(300); // 300s timeout for LLM generation
-            match tokio::time::timeout(
-                llm_timeout,
-                client.generate(model_name, &prompt, options.clone())
-            ).await {
-                Ok(Ok(response)) => {
-                    if loop_detector::check_output_limit(&response.text) {
-                        tracing::warn!("PM {} LLM output truncated due to character limit", self.id.name);
-                        failover_handler.report_transient_failure(&initial_endpoint, "output_limit_exceeded");
-                        continue;
-                    }
-                    if let Some(pattern_len) = loop_detector::detect_autoregressive_loop(&response.text) {
-                        tracing::warn!("PM {} LLM stuck in autoregressive loop (pattern len {})", self.id.name, pattern_len);
-                        failover_handler.report_transient_failure(&initial_endpoint, "autoregressive_loop");
-                        continue;
-                    }
-                    response_text = response.text;
-                    success = true;
-                    break;
-                }
-                Ok(Err(e)) => {
-                    failover_handler.report_transient_failure(&initial_endpoint, &e.to_string());
-                }
-                Err(_) => {
-                    failover_handler.report_transient_failure(&initial_endpoint, "timeout");
-                }
-            }
-        }
-        
-        if !success {
-            return Err(anyhow::anyhow!("Failed to validate task with LLM after failover retries"));
-        }
+
+        let response_text = self.generate_llm_response(
+            &prompt,
+            Some(options),
+            selection_context,
+            None,
+            300_000, // 300s timeout for validation
+            "validation"
+        ).await.context("Failed to validate task with LLM")?;
         
         tracing::debug!(
             target: "llm_messages",
-            "[PM VALIDATION RESPONSE] Model: {}, Response ({} chars):\n{}",
-            model_name,
+            "[PM VALIDATION RESPONSE] Response ({} chars):\n{}",
             response_text.len(),
             response_text
         );
@@ -1222,7 +1232,7 @@ Return JSON:
     }
     
     /// Check if project is complete (all tasks terminal AND LLM assessment passes)
-    async fn is_project_complete(&self) -> Result<bool> {
+    async fn is_project_complete(&mut self) -> Result<bool> {
         let project_manager = self.project_manager.read().await;
         let tasks = project_manager.get_project_tasks(&self.project_id).await?;
         drop(project_manager);
@@ -1282,7 +1292,7 @@ Return JSON:
     }
 
     /// Assess project completeness using LLM
-    async fn assess_project_completeness(&self) -> Result<ProjectAssessment> {
+    async fn assess_project_completeness(&mut self) -> Result<ProjectAssessment> {
         let project_manager = self.project_manager.read().await;
         let project = project_manager.get_project(&self.project_id).await?
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
@@ -1344,25 +1354,22 @@ RESPOND WITH VALID JSON ONLY:
             allow_fallback: true,
         };
         
-        let selected_model = self.ai_provider_manager.select_model_for_agent(context).await?;
-        let client = selected_model.get_client()?;
-        
-        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
-        let model_name = if selected_model.model_id.contains("::") {
-            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
-        } else {
-            &selected_model.model_id
-        };
-            
-        let response = client.generate(model_name, &prompt, GenerationOptions::default()).await?;
+        let response_text = self.generate_llm_response(
+            &prompt,
+            None,
+            context,
+            None,
+            120_000,
+            "project assessment"
+        ).await?;
         
         // Parse JSON
-        let json_str = if response.text.contains("```json") {
-            response.text.split("```json").nth(1)
+        let json_str = if response_text.contains("```json") {
+            response_text.split("```json").nth(1)
                 .and_then(|s| s.split("```").next())
-                .unwrap_or(&response.text)
+                .unwrap_or(&response_text)
         } else {
-            &response.text
+            &response_text
         }.trim();
         
         serde_json::from_str(json_str)
@@ -1503,7 +1510,7 @@ RESPOND WITH VALID JSON ONLY:
     
     /// Generate detailed plan using LLM with discovery-based prompting (NEW)
     async fn generate_detailed_plan_with_discovery(
-        &self,
+        &mut self,
         project: &crate::projects::Project,
         existing_tasks: &[crate::projects::Task],
         strategy: DecompositionStrategy,
@@ -1577,22 +1584,18 @@ CRITICAL: JSON only. No explanations.
             self.session_tasks.to_prompt_format()
         );
         
-        // Select model with user preferences
         let mut selection_context = SelectionContext::for_pm();
+        let mut preferred_family_opt = None;
         
         // Apply user's preferred model family if available
         if let Some(ref user_settings) = self.user_settings {
             let settings = user_settings.read().await;
             if let Ok(Some(family)) = settings.get_model_preference("PM").await {
                 tracing::info!("PM {} using user-preferred model family: {}", self.id.name, family);
-                selection_context.preferred_family = Some(family);
+                selection_context.preferred_family = Some(family.clone());
+                preferred_family_opt = Some(family);
             }
         }
-        
-        let selected_model = self.ai_provider_manager
-            .select_model_for_agent(selection_context)
-            .await
-            .context("Failed to select a model for PM planning")?;
         
         let options = GenerationOptions {
             temperature: Some(0.5),
@@ -1600,23 +1603,21 @@ CRITICAL: JSON only. No explanations.
             ..Default::default()
         };
         
-        let client = selected_model.get_client()?;
-        let model_name = if selected_model.model_id.contains("::") {
-            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
-        } else {
-            &selected_model.model_id
-        };
+        let response_text = self.generate_llm_response(
+            &planning_prompt,
+            Some(options),
+            selection_context,
+            preferred_family_opt,
+            120_000,
+            "dynamic plan creation"
+        ).await.context("Failed to generate PM plan")?;
         
-        let response = client.generate(model_name, &planning_prompt, options)
-            .await
-            .context("Failed to generate PM plan")?;
-        
-        self.parse_detailed_plan(&response.text)
+        self.parse_detailed_plan(&response_text)
     }
     
     /// Generate detailed plan using LLM with strategy-aware prompting (LEGACY)
     async fn generate_detailed_plan_with_strategy(
-        &self,
+        &mut self,
         project: &crate::projects::Project,
         existing_tasks: &[crate::projects::Task],
         strategy: DecompositionStrategy,
@@ -1715,11 +1716,6 @@ CRITICAL: JSON only. No explanations.
         
         tracing::info!("🎯 Model selection for PM planning: preferred_family={:?}", preferred_family);
         
-        let selected_model = self.ai_provider_manager
-            .select_model_for_agent_with_preferences(selection_context, preferred_family)
-            .await
-            .context("Failed to select a model for planning")?;
-        
         let options = GenerationOptions {
             temperature: Some(0.7),
             max_tokens: Some(4096),
@@ -1727,34 +1723,23 @@ CRITICAL: JSON only. No explanations.
             ..Default::default()
         };
         
-        let client = selected_model.get_client()?;
-        // Strip provider prefix from model_id (e.g., "Ollama::model" -> "model")
-        let model_name = if selected_model.model_id.contains("::") {
-            selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
-        } else {
-            &selected_model.model_id
-        };
-        
-        // Add timeout wrapper to prevent indefinite hanging
-        tracing::info!("[DIAGNOSTIC] PM {} calling LLM for planning (model: {})", self.id.name, model_name);
-        let llm_timeout = tokio::time::Duration::from_secs(300); // 300s timeout for LLM generation
-        let response = tokio::time::timeout(
-            llm_timeout,
-            client.generate(model_name, &planning_prompt, options)
-        )
-        .await
-        .context(format!("LLM planning timed out after {:?}", llm_timeout))?
-        .context("Failed to generate detailed plan with LLM")?;
+        let response_text = self.generate_llm_response(
+            &planning_prompt,
+            Some(options),
+            selection_context,
+            preferred_family,
+            300_000, // 300s timeout for planning
+            "detailed plan generation"
+        ).await.context("Failed to generate detailed plan with LLM")?;
         
         tracing::debug!(
             target: "llm_messages",
-            "[PM PLANNING RESPONSE] Model: {}, Response ({} chars):\n{}",
-            model_name,
-            response.text.len(),
-            response.text
+            "[PM PLANNING RESPONSE] Response ({} chars):\n{}",
+            response_text.len(),
+            response_text
         );
 
-        self.parse_detailed_plan(&response.text)
+        self.parse_detailed_plan(&response_text)
     }
     
     /// Parse LLM response into DetailedPlan using multi-strategy JSON parsing
@@ -1940,6 +1925,570 @@ CRITICAL: JSON only. No explanations.
     /// Get reference to task graph (for testing)
     pub fn task_graph(&self) -> Option<&TaskGraph> {
         self.task_graph.as_ref()
+    }
+
+    // =========================================================================
+    // TrippleEffect Continuous Cycle Engine (PM)
+    // =========================================================================
+
+    /// Load a prompt template from TrippleEffect's prompts.yaml by key name.
+    /// This is the PM equivalent of WorkerAgent::get_te_prompt.
+    fn get_te_prompt(&self, prompt_name: &str) -> Option<String> {
+        let path = "/home/tom/hai/_workspace/TrippleEffect/prompts.yaml";
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let marker = format!("{}: |", prompt_name);
+            let marker2 = format!("{}: |-", prompt_name);
+            let marker3 = format!("{}: |2", prompt_name);
+            let mut found = false;
+            let mut prompt_content = String::new();
+            
+            for line in content.lines() {
+                if line.starts_with(&marker) || line.starts_with(&marker2) || line.starts_with(&marker3) || line.starts_with(&format!("{}:", prompt_name)) {
+                    found = true;
+                    continue;
+                }
+                
+                if found {
+                    // Stop at next top-level key (non-indented, alphabetic start)
+                    if line.starts_with("--") || (line.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false) && !line.starts_with(' ')) {
+                        break;
+                    }
+                    prompt_content.push_str(line);
+                    prompt_content.push('\n');
+                }
+            }
+            if found {
+                return Some(prompt_content.trim().to_string());
+            }
+        }
+        None
+    }
+
+    /// Extract JSON from a raw LLM response (handles markdown fences and bare braces)
+    fn extract_json_from_response(&self, response: &str) -> String {
+        // Try markdown code block first
+        let markers = ["```json\n", "```\n"];
+        for marker in markers.iter() {
+            if let Some(start_idx) = response.find(marker) {
+                let json_start = start_idx + marker.len();
+                if let Some(end_idx) = response[json_start..].find("```") {
+                    let json_text = &response[json_start..json_start + end_idx];
+                    return json_text.trim().to_string();
+                }
+            }
+        }
+        // Fall back to brace extraction
+        if let Some(start) = response.find('{') {
+            if let Some(end) = response.rfind('}') {
+                return response[start..=end].to_string();
+            }
+        }
+        response.to_string()
+    }
+
+    /// Build a summary of current project tasks for injection into prompts.
+    async fn build_task_status_summary(&self) -> String {
+        let project_manager = self.project_manager.read().await;
+        match project_manager.get_project_tasks(&self.project_id).await {
+            Ok(tasks) => {
+                let mut summary = String::new();
+                for task in &tasks {
+                    summary.push_str(&format!(
+                        "- [{}] {} (ID: {}, assigned: {:?})\n",
+                        format!("{:?}", task.status),
+                        task.title,
+                        task.id,
+                        task.assigned_worker.as_ref().map(|a| a.name.clone()).unwrap_or_else(|| "unassigned".to_string())
+                    ));
+                }
+                if summary.is_empty() {
+                    "No tasks yet.".to_string()
+                } else {
+                    summary
+                }
+            }
+            Err(e) => format!("Error fetching tasks: {}", e),
+        }
+    }
+
+    /// Build a summary of active workers for injection into prompts.
+    fn build_worker_summary(&self) -> String {
+        if self.active_workers.is_empty() {
+            return "No active workers.".to_string();
+        }
+        let mut summary = String::new();
+        for (template_name, (agent_id, _)) in &self.active_workers {
+            summary.push_str(&format!("- {} (type: {})\n", agent_id.name, template_name));
+        }
+        summary
+    }
+
+    /// TrippleEffect Continuous Cycle Engine for PM agents.
+    ///
+    /// Replaces the legacy procedural `manage_loop` with a prompt-driven,
+    /// state-machine autonomous loop. The PM decides its own actions via LLM
+    /// calls, using `request_state` to transition and native tool interception
+    /// for `project_management`, `manage_team`, and `send_message`.
+    pub async fn execute_autonomous_cycle(&mut self) -> Result<()> {
+        tracing::info!("PM {} starting TrippleEffect autonomous cycle for project {}", self.id.name, self.project_id);
+
+        let mut loop_count = 0;
+        let max_loops = 200; // PM cycles can be long-lived
+
+        let mut watchdog = crate::agents::cycle_engine::WatchdogState::new(AgentState::Startup);
+        let mut duplicate_tracker = crate::agents::cycle_engine::DuplicateToolTracker::new();
+        let mut local_context: Vec<String> = Vec::new();
+
+        // Seed initial context with project overview
+        let project_overview = {
+            let pm = self.project_manager.read().await;
+            match pm.get_project(&self.project_id).await? {
+                Some(p) => format!("Project: {}\nOverview: {}", p.title, p.overview),
+                None => return Err(anyhow::anyhow!("Project {} not found", self.project_id)),
+            }
+        };
+
+        local_context.push(format!(
+            "System/User: BEGIN PROJECT MANAGEMENT.\n{}\n\nYou are the Project Manager. Analyze the project and begin the startup workflow.",
+            project_overview
+        ));
+
+        // Start in Startup state — the LLM will drive transitions from here
+        self.state_machine.transition(AgentState::Startup, "Autonomous cycle started".to_string())?;
+
+        while loop_count < max_loops {
+            loop_count += 1;
+
+            let current_state = self.state_machine.current_state().clone();
+
+            // Terminal states — exit the loop
+            if current_state == AgentState::Idle {
+                tracing::info!("PM {} reached Idle state, cycle complete.", self.id.name);
+                break;
+            }
+            if current_state == AgentState::Error {
+                tracing::error!("PM {} in Error state, aborting cycle.", self.id.name);
+                break;
+            }
+
+            // Process any incoming messages from workers/admin
+            if let Some(receiver) = &mut self._receiver {
+                let mut messages = Vec::new();
+                while let Ok(msg) = receiver.try_recv() {
+                    messages.push(msg);
+                }
+                for msg in messages {
+                    let from = msg.from.name.clone();
+                    let content_str = format!("{:?}", msg.content);
+                    local_context.push(format!("System: Message received from {}: {}", from, content_str));
+                    self.handle_message(msg).await?;
+                }
+            }
+
+            // Check project status — bail on terminal project states
+            {
+                let pm = self.project_manager.read().await;
+                if let Some(project) = pm.get_project(&self.project_id).await? {
+                    match project.status {
+                        crate::projects::ProjectStatus::Cancelled |
+                        crate::projects::ProjectStatus::Failed |
+                        crate::projects::ProjectStatus::Completed => {
+                            tracing::info!("PM {} project in terminal state ({:?}), exiting cycle.", self.id.name, project.status);
+                            break;
+                        },
+                        crate::projects::ProjectStatus::Paused => {
+                            tracing::info!("PM {} project paused, sleeping...", self.id.name);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                            continue;
+                        },
+                        _ => {}
+                    }
+                } else {
+                    tracing::warn!("PM {} project not found, exiting cycle.", self.id.name);
+                    break;
+                }
+            }
+
+            // Map current AgentState to TE prompt name
+            let prompt_name = match current_state {
+                AgentState::Startup   => "pm_startup_prompt",
+                AgentState::Planning  => "pm_build_team_tasks_prompt",
+                AgentState::Managing  => "pm_manage_prompt",
+                AgentState::Reviewing => "pm_report_check_prompt",
+                AgentState::Auditing  => "pm_audit_prompt",
+                AgentState::Idle      => "pm_standby_prompt",
+                _                     => "pm_manage_prompt",
+            };
+
+            // Load TE prompt
+            let mut system_prompt = self.get_te_prompt(prompt_name)
+                .unwrap_or_else(|| format!("You are a Project Manager AI. Current state: {:?}. Manage the project.", current_state));
+
+            // Watchdog intervention
+            if watchdog.check(current_state.clone()) {
+                system_prompt.push_str("\n\n");
+                system_prompt.push_str(&watchdog.intervention_message(crate::agents::cycle_engine::AgentType::PM));
+            }
+
+            // Template variable substitution
+            let framework_instructions = self.get_te_prompt("pm_standard_framework_instructions")
+                .unwrap_or_default();
+            let task_summary = self.build_task_status_summary().await;
+            let worker_summary = self.build_worker_summary();
+            let project_name = {
+                let pm = self.project_manager.read().await;
+                pm.get_project(&self.project_id).await?
+                    .map(|p| p.title.clone())
+                    .unwrap_or_else(|| self.project_id.to_string())
+            };
+
+            system_prompt = system_prompt.replace("{pm_standard_framework_instructions}", &framework_instructions);
+            system_prompt = system_prompt.replace("{agent_id}", &self.id.name);
+            system_prompt = system_prompt.replace("{project_name}", &project_name);
+            system_prompt = system_prompt.replace("{task_description}", &project_overview);
+            system_prompt = system_prompt.replace("{team_wip_updates}", &format!("Tasks:\n{}\nWorkers:\n{}", task_summary, worker_summary));
+            system_prompt = system_prompt.replace("{current_time_utc}", &chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string());
+            // Clean up any remaining unresolved template vars
+            system_prompt = system_prompt.replace("{team_id}", &format!("team_{}", project_name));
+            system_prompt = system_prompt.replace("{session_name}", "main");
+            system_prompt = system_prompt.replace("{address_book}", &format!("Admin AI: admin_ai\nWorkers: {}", worker_summary));
+            system_prompt = system_prompt.replace("{pm_provider}", "gemini");
+            system_prompt = system_prompt.replace("{pm_model}", "gemini-2.5-flash");
+            system_prompt = system_prompt.replace("{tool_instructions}", "Available framework tools: request_state, project_management, manage_team, send_message");
+
+            // Append JSON output instruction
+            system_prompt.push_str("\n\nCRITICAL INSTRUCTION: You MUST respond with exactly ONE JSON object representing your action. Example: {\"tool\": \"request_state\", \"params\": {\"state\": \"pm_manage\"}}");
+
+            let options = GenerationOptions {
+                system: Some(system_prompt),
+                temperature: Some(0.4),
+                ..Default::default()
+            };
+
+            let context_history = local_context.join("\n\n");
+            let user_prompt = format!("Current Context:\n{}\n\nWhat is your NEXT ACTION?", context_history);
+
+            let preferred_family = if let Some(prefs) = &self.user_settings {
+                prefs.read().await.get_model_preference("PM").await.unwrap_or(None)
+            } else {
+                None
+            };
+
+            // Call LLM
+            let response_text = match self.generate_llm_response(
+                &user_prompt,
+                Some(options),
+                SelectionContext::for_pm(),
+                preferred_family,
+                120_000,
+                &format!("pm_cycle_{}", loop_count),
+            ).await {
+                Ok(text) => text,
+                Err(e) => {
+                    tracing::error!("PM {} LLM generation failed: {}", self.id.name, e);
+                    local_context.push(format!("System: Error generating response: {}", e));
+                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                    continue;
+                }
+            };
+
+            // Parse LLM JSON action
+            let json_str = self.extract_json_from_response(&response_text);
+            let action: serde_json::Value = match serde_json::from_str(&json_str) {
+                Ok(json) => json,
+                Err(_) => {
+                    local_context.push("System: Error: Failed to parse output as JSON. Please try again and ensure you output exactly ONE JSON object.".to_string());
+                    tracing::warn!("PM {} failed to parse JSON from LLM response (cycle {})", self.id.name, loop_count);
+                    continue;
+                }
+            };
+
+            let tool_name = action.get("tool").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let params = action.get("params").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
+
+            tracing::info!("PM {} cycle {} action: tool={} params={}", self.id.name, loop_count, tool_name, params);
+            local_context.push(format!("Assistant: Executing tool: {} with params: {}", tool_name, params));
+
+            // =====================================================
+            // PM Startup Interceptor
+            // =====================================================
+            if current_state == AgentState::Startup && action.get("tasks").is_some() && action.get("roles").is_some() {
+                tracing::info!("PM {} intercepted kickoff plan JSON", self.id.name);
+                
+                let mut created_tasks_count = 0;
+                if let Some(tasks) = action.get("tasks").and_then(|t| t.as_array()) {
+                    let project_manager = self.project_manager.write().await;
+                    for task_val in tasks {
+                        let title = task_val.get("description").or(task_val.get("id")).and_then(|t| t.as_str()).unwrap_or("Untitled Task").to_string();
+                        let description = task_val.get("description").and_then(|d| d.as_str()).unwrap_or(&title).to_string();
+                        
+                        match project_manager.create_task(&self.project_id, title.clone(), description).await {
+                            Ok(_task_id) => {
+                                self.session_tasks.add_task(title.clone(), None);
+                                created_tasks_count += 1;
+                            }
+                            Err(e) => tracing::error!("Failed to auto-create kickoff task: {}", e),
+                        }
+                    }
+                }
+                
+                let summary = format!(
+                    "[Framework System Message] **MASTER KICKOFF PLAN SUMMARY**\nRoles to create: {:?}\nTasks created: {}", 
+                    action.get("roles").unwrap_or(&serde_json::Value::Null), 
+                    created_tasks_count
+                );
+                local_context.push(format!("System: {}", summary));
+                
+                if let Err(e) = self.state_machine.transition(AgentState::Planning, "Auto-transition after kickoff plan intercept".to_string()) {
+                    local_context.push(format!("System: Error: State transition failed: {}", e));
+                } else {
+                    duplicate_tracker.reset();
+                    self.update_status("Transitioned to Planning").await;
+                    local_context.push("System: State successfully changed to pm_build_team_tasks".to_string());
+                }
+                continue;
+            }
+
+            // Duplicate detection
+            let sig = crate::agents::cycle_engine::ToolCallSignature {
+                tool_name: tool_name.clone(),
+                args_hash: params.to_string(),
+            };
+            if duplicate_tracker.record_call(sig) {
+                local_context.push("System: Error: You are repeating the same action. Please try a different approach or transition state.".to_string());
+                continue;
+            }
+
+            // =====================================================
+            // Native Tool Interception
+            // =====================================================
+
+            // 1. request_state — drive the PM state machine
+            if tool_name == "request_state" || tool_name == "framework::request_state" {
+                if let Some(new_state_str) = params.get("state").and_then(|s| s.as_str()) {
+                    let new_state = match new_state_str {
+                        "pm_startup"          => AgentState::Startup,
+                        "pm_build_team_tasks" => AgentState::Planning,
+                        "pm_activate_workers" => AgentState::Managing,
+                        "pm_work"             => AgentState::Managing,
+                        "pm_manage"           => AgentState::Managing,
+                        "pm_report_check"     => AgentState::Reviewing,
+                        "pm_audit"            => AgentState::Auditing,
+                        "pm_standby"          => AgentState::Idle,
+                        _ => {
+                            local_context.push(format!("System: Error: Invalid PM state requested '{}'", new_state_str));
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = self.state_machine.transition(new_state.clone(), format!("LLM requested state change to {}", new_state_str)) {
+                        local_context.push(format!("System: Error: State transition failed: {}", e));
+                    } else {
+                        duplicate_tracker.reset();
+                        self.update_status(&format!("Transitioned to {:?}", new_state)).await;
+                        local_context.push(format!("System: State successfully changed to {}", new_state_str));
+                    }
+                } else {
+                    local_context.push("System: Error: request_state tool requires 'state' parameter.".to_string());
+                }
+                continue;
+            }
+
+            // 2. project_management — CRUD on tasks
+            if tool_name == "project_management" {
+                let pm_action = params.get("action").and_then(|a| a.as_str()).unwrap_or("");
+                match pm_action {
+                    "list_tasks" => {
+                        let summary = self.build_task_status_summary().await;
+                        local_context.push(format!("System: [list_tasks result]\n{}", summary));
+                    }
+                    "add_task" => {
+                        let title = params.get("title").or(params.get("description"))
+                            .and_then(|t| t.as_str()).unwrap_or("Untitled Task").to_string();
+                        let description = params.get("description")
+                            .and_then(|d| d.as_str()).unwrap_or(&title).to_string();
+                        
+                        let project_manager = self.project_manager.write().await;
+                        match project_manager.create_task(&self.project_id, title.clone(), description).await {
+                            Ok(task_id) => {
+                                self.session_tasks.add_task(title.clone(), None);
+                                local_context.push(format!("System: Task created successfully. ID: {}, Title: {}", task_id, title));
+                            }
+                            Err(e) => {
+                                local_context.push(format!("System: Error creating task: {}", e));
+                            }
+                        }
+                    }
+                    "modify_task" => {
+                        let task_id_str = params.get("task_id").and_then(|t| t.as_str()).unwrap_or("");
+                        let assignee = params.get("assignee_agent_id").and_then(|a| a.as_str());
+                        
+                        if let Some(assignee_id) = assignee {
+                            // This is a task assignment — find matching task and assign
+                            let project_manager = self.project_manager.read().await;
+                            let tasks = project_manager.get_project_tasks(&self.project_id).await?;
+                            drop(project_manager);
+                            
+                            if let Some(task) = tasks.iter().find(|t| t.id.to_string().contains(task_id_str) || t.title.contains(task_id_str)) {
+                                let real_task_id = task.id.clone();
+                                match self.assign_task_to_worker(&real_task_id).await {
+                                    Ok(()) => {
+                                        local_context.push(format!("System: Task '{}' assigned to worker successfully.", task.title));
+                                    }
+                                    Err(e) => {
+                                        local_context.push(format!("System: Error assigning task: {}", e));
+                                    }
+                                }
+                            } else {
+                                local_context.push(format!("System: Error: Task '{}' not found in project.", task_id_str));
+                            }
+                        } else {
+                            // Other modifications (tags, status, etc.)
+                            local_context.push(format!("System: modify_task acknowledged for task '{}'. Changes noted.", task_id_str));
+                        }
+                    }
+                    _ => {
+                        local_context.push(format!("System: Unknown project_management action: '{}'", pm_action));
+                    }
+                }
+                continue;
+            }
+
+            // 3. manage_team — worker lifecycle management
+            if tool_name == "manage_team" {
+                let team_action = params.get("action").and_then(|a| a.as_str()).unwrap_or("");
+                match team_action {
+                    "list_agents" => {
+                        let summary = self.build_worker_summary();
+                        local_context.push(format!("System: [list_agents result]\n{}", summary));
+                    }
+                    "add_agent" => {
+                        let role = params.get("role").and_then(|r| r.as_str()).unwrap_or("worker");
+                        let persona = params.get("persona").and_then(|p| p.as_str()).unwrap_or("General Worker");
+                        
+                        // Select template based on persona/role
+                        let template = WorkerTemplate::select_for_task(persona);
+                        let template_name = template.name.clone();
+                        
+                        // Check if we already have a worker of this type
+                        if self.active_workers.contains_key(&template_name) {
+                            local_context.push(format!("System: Worker of type '{}' already exists. Reusing existing worker.", template_name));
+                        } else {
+                            // Create and spawn the worker
+                            let mut worker = super::worker::WorkerAgent::from_template(
+                                template,
+                                self.message_bus.clone(),
+                                self.prompt_manager.clone(),
+                                self.project_manager.clone(),
+                                self.mcp_client.clone(),
+                                self.ai_provider_manager.clone(),
+                                self.user_settings.clone(),
+                            );
+                            
+                            let worker_id = worker.id().clone();
+                            
+                            worker.state_machine_mut().transition(
+                                AgentState::Idle,
+                                "Worker initialized by PM autonomous cycle".to_string()
+                            )?;
+                            
+                            let (tx, rx) = mpsc::channel(100);
+                            self.active_workers.insert(template_name.clone(), (worker_id.clone(), tx));
+                            
+                            let worker_name = worker.id().name.clone();
+                            tokio::spawn(async move {
+                                worker.run(rx).await;
+                                tracing::info!("Worker {} run loop terminated", worker_name);
+                            });
+                            
+                            local_context.push(format!(
+                                "System: Worker agent created. ID: {}, Type: {}, Role: {}. The agent is ready to receive tasks.",
+                                worker_id.name, template_name, role
+                            ));
+                        }
+                    }
+                    _ => {
+                        local_context.push(format!("System: Unknown manage_team action: '{}'", team_action));
+                    }
+                }
+                continue;
+            }
+
+            // 4. send_message — inter-agent communication
+            if tool_name == "send_message" {
+                let target = params.get("target_agent_id").and_then(|t| t.as_str()).unwrap_or("");
+                let content = params.get("message_content").or(params.get("message"))
+                    .and_then(|c| c.as_str()).unwrap_or("");
+
+                if target.contains("admin") {
+                    // Send to admin
+                    let admin_id = {
+                        let bus = self.message_bus.read().await;
+                        let active_agents = bus.get_active_agents().await;
+                        active_agents.iter()
+                            .find(|a| a.id.agent_type == crate::messaging::AgentType::Admin)
+                            .map(|a| a.id.clone())
+                    };
+
+                    if let Some(admin_id) = admin_id {
+                        let msg = crate::messaging::Message::new(
+                            self.id.clone(),
+                            admin_id,
+                            crate::messaging::MessageContent::StatusUpdate(crate::messaging::StatusUpdate {
+                                agent_id: self.id.clone(),
+                                state: self.state_machine.current_state().clone(),
+                                message: content.to_string(),
+                                progress: None,
+                            })
+                        );
+                        if let Err(e) = self.message_bus.write().await.send_message(msg).await {
+                            local_context.push(format!("System: Error sending message to Admin: {}", e));
+                        } else {
+                            local_context.push(format!("System: Message sent to Admin AI: {}", content));
+                        }
+                    } else {
+                        local_context.push("System: Warning: No Admin agent registered.".to_string());
+                    }
+                } else {
+                    // Send to a worker
+                    let worker_id_opt = self.active_workers.values()
+                        .find(|(id, _)| id.name.contains(target))
+                        .map(|(id, _)| id.clone());
+                    
+                    if let Some(worker_id) = worker_id_opt {
+                        let msg = crate::messaging::Message::new(
+                            self.id.clone(),
+                            worker_id,
+                            crate::messaging::MessageContent::Query(content.to_string())
+                        );
+                        if let Err(e) = self.message_bus.write().await.send_message(msg).await {
+                            local_context.push(format!("System: Error sending message to {}: {}", target, e));
+                        } else {
+                            local_context.push(format!("System: Message sent to {}: {}", target, content));
+                        }
+                    } else {
+                        local_context.push(format!("System: Error: Agent '{}' not found in active workers.", target));
+                    }
+                }
+                continue;
+            }
+
+            // Unknown tool — inform LLM
+            local_context.push(format!(
+                "System: Warning: Unknown tool '{}'. Available tools: request_state, project_management, manage_team, send_message",
+                tool_name
+            ));
+
+            // Throttle to prevent spin-looping
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+
+        if loop_count >= max_loops {
+            tracing::error!("PM {} exceeded maximum cycle count ({}) - forcing termination", self.id.name, max_loops);
+        }
+
+        tracing::info!("PM {} autonomous cycle finished after {} iterations", self.id.name, loop_count);
+        Ok(())
     }
 }
 

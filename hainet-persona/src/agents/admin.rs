@@ -29,7 +29,7 @@ use super::loop_detector;
 use super::session_tasks::SessionTaskList;
 use crate::config::HaiNetConfig;
 use crate::messaging::{AgentId, Message};
-use crate::prompts::{AgentType, AgentState, PromptContext};
+use crate::prompts::{AgentType, AgentState};
 use crate::projects::{ProjectManager, ProjectId};
 use crate::ai_providers::{AIProviderManager, SelectionContext};
 use crate::ai_providers::providers::{GenerationOptions};
@@ -733,24 +733,19 @@ impl AdminAgent {
         attempt: usize,
     ) -> Result<ProjectPlan> {
         // Load planning prompt
-        let mut prompt_manager = self.context.prompt_manager.write().await;
-        let mut prompt_context = PromptContext::default();
-        prompt_context.current_request = Some(user_input.to_string());
-        prompt_context.task_analysis = Some(format!("{:?}", intent.intent_type));
-        prompt_context.variables.insert("intent_type".to_string(), serde_json::json!(format!("{:?}", intent.intent_type)));
-        prompt_context.variables.insert("entities".to_string(), serde_json::json!(format!("{:?}", intent.entities)));
-        // Set current_state so the renderer can find the correct state prompt
-        prompt_context.variables.insert("current_state".to_string(), serde_json::Value::String("planning".to_string()));
+        let mut system_prompt = self.get_te_prompt("admin_ai_planning_prompt")
+            .unwrap_or_else(|| "You are Admin AI. Plan the project.".to_string());
+            
+        let tools_list_str = "['request_state', 'project_management', 'manage_team', 'send_message']";
+        let date = chrono::Utc::now().to_rfc3339();
         
-        let system_prompt = prompt_manager.get_prompt(
-            &self.id,
-            AgentState::Planning,
-            &prompt_context
-        ).await?;
+        system_prompt = system_prompt.replace("{agent_id}", &self.id.name);
+        system_prompt = system_prompt.replace("{personality_instructions}", "You are the central Admin AI of HAI-Net.");
+        system_prompt = system_prompt.replace("{session_name}", "admin_session");
+        system_prompt = system_prompt.replace("{current_time_utc}", &date);
+        system_prompt = system_prompt.replace("{tool_instructions}", tools_list_str);
+        system_prompt = system_prompt.replace("{address_book}", "pm, workers");
         
-        drop(prompt_manager);
-
-        // Select the best model for planning
         let selection_context = SelectionContext::for_admin();
         
         // Load user preference for Admin agent if available
@@ -1088,13 +1083,12 @@ impl AdminAgent {
             project_manager.assign_pm(project_id, pm_agent.id().clone()).await?;
         }
         
-        // Start PM agent (transitions to Planning → Managing)
-        pm_agent.initialize_and_plan().await?;
-        
-        // Spawn the PM agent to run in the background
+        // Spawn the PM agent's full autonomous lifecycle in the background.
+        // initialize_and_plan() now runs the complete TrippleEffect autonomous cycle
+        // (Startup → Planning → Managing → Auditing → Standby) — no separate manage_loop needed.
         tokio::spawn(async move {
-            if let Err(e) = pm_agent.manage_loop().await {
-                tracing::error!("PMAgent {} manage_loop failed: {:?}", pm_agent.id().name, e);
+            if let Err(e) = pm_agent.initialize_and_plan().await {
+                tracing::error!("PMAgent {} autonomous cycle failed: {:?}", pm_agent.id().name, e);
             }
         });
         
@@ -1167,12 +1161,6 @@ impl AdminAgent {
     ) -> Result<String> {
         tracing::info!("DEBUG: generate_conversational_response started");
         // Load conversation prompt
-        let mut prompt_manager = self.context.prompt_manager.write().await;
-        let mut prompt_context = PromptContext::default();
-        
-        // Set current_state so the renderer can find the correct state prompt
-        prompt_context.variables.insert("current_state".to_string(), serde_json::Value::String("conversation".to_string()));
-        
         // Retrieve context
         let history = self.memory.get_recent_context(10).await.unwrap_or_default();
         let goals = self.profile.get_goals().await.unwrap_or_default();
@@ -1221,27 +1209,25 @@ impl AdminAgent {
         memory_context.push_str("\n");
         memory_context.push_str(&project_context);
         
-        // Set prompt variables - use user_input for current_request since memory_context is injected separately
-        prompt_context.current_request = Some(user_input.to_string());
-        prompt_context.variables.insert("user_input".to_string(), serde_json::Value::String(user_input.to_string()));
-        prompt_context.variables.insert("memory_context".to_string(), serde_json::Value::String(memory_context));
+        let mut system_prompt = self.get_te_prompt("admin_ai_conversation_prompt")
+            .unwrap_or_else(|| "You are Admin AI. Respond conversationally.".to_string());
         
-        // Add system status variables
-        prompt_context.variables.insert("hub_status".to_string(), serde_json::Value::String("Online".to_string()));
-        prompt_context.variables.insert("device_count".to_string(), serde_json::json!(1)); // TODO: Get real device count
-        prompt_context.variables.insert("mesh_status".to_string(), serde_json::Value::String("Active".to_string()));
-        prompt_context.variables.insert("count".to_string(), serde_json::json!(self.active_project_count()));
+        let tools_list_str = "['request_state', 'project_management', 'manage_team', 'send_message']";
+        let date = chrono::Utc::now().to_rfc3339();
         
-        let system_prompt = prompt_manager.get_prompt(
-            &self.id,
-            AgentState::Conversation,
-            &prompt_context
-        ).await?;
+        system_prompt = system_prompt.replace("{agent_id}", &self.id.name);
+        system_prompt = system_prompt.replace("{personality_instructions}", "You are the central Admin AI of HAI-Net.");
+        system_prompt = system_prompt.replace("{session_name}", "admin_session");
+        system_prompt = system_prompt.replace("{current_time_utc}", &date);
+        system_prompt = system_prompt.replace("{tool_instructions}", tools_list_str);
+        system_prompt = system_prompt.replace("{address_book}", "pm, workers");
         
-        tracing::info!("DEBUG: Rendered system_prompt:\n{}", system_prompt);
+        // Append user_input and memory context
+        system_prompt.push_str("\n\n--- CURRENT CONVERSATION CONTEXT ---\n");
+        system_prompt.push_str(&memory_context);
         
-        drop(prompt_manager);
-
+        tracing::info!("DEBUG: Rendered system_prompt from TE YAML:\n{}", system_prompt);
+        
         // Select the best model for conversation
         let selection_context = SelectionContext::for_admin();
         
@@ -1313,6 +1299,52 @@ impl AdminAgent {
                 "Failed to retrieve project context.".to_string()
             }
         }
+    }
+    
+    /// Load a prompt template from TrippleEffect's prompts.yaml by key name.
+    /// Replaces {admin_standard_framework_instructions} automatically.
+    fn get_te_prompt(&self, prompt_name: &str) -> Option<String> {
+        let path = "/home/tom/hai/_workspace/TrippleEffect/prompts.yaml";
+        let content = std::fs::read_to_string(path).ok()?;
+        
+        let extract = |name: &str| -> Option<String> {
+            let marker1 = format!("{}: |", name);
+            let marker2 = format!("{}: |-", name);
+            let marker3 = format!("{}: |2", name);
+            let marker4 = format!("{}:", name);
+            let mut found = false;
+            let mut prompt_content = String::new();
+            
+            for line in content.lines() {
+                if line.starts_with(&marker1) || line.starts_with(&marker2) || line.starts_with(&marker3) || line.starts_with(&marker4) {
+                    found = true;
+                    continue;
+                }
+                
+                if found {
+                    if line.starts_with("--") || (line.chars().next().map_or(false, |c| c.is_alphabetic()) && !line.starts_with(' ')) {
+                        break;
+                    }
+                    prompt_content.push_str(line);
+                    prompt_content.push('\n');
+                }
+            }
+            if found {
+                Some(prompt_content.trim().to_string())
+            } else {
+                None
+            }
+        };
+
+        let mut prompt = extract(prompt_name)?;
+        
+        if prompt.contains("{admin_standard_framework_instructions}") {
+            if let Some(instructions) = extract("admin_standard_framework_instructions") {
+                prompt = prompt.replace("{admin_standard_framework_instructions}", &instructions);
+            }
+        }
+        
+        Some(prompt)
     }
     
     /// Monitor active projects for completion/failures

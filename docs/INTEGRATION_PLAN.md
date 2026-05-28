@@ -2,8 +2,9 @@
 # HAI-Net Grand Integration Plan v2
 
 > **Created**: 2026-05-17
-> **Status**: In Progress — Phases 1-4 Completed, Ready for Phase 5
+> **Status**: In Progress — Phases 1-4 Active, Phase 5 Completed
 > **Strategy**: Hybrid Progressive (Option C) — Python/JS sidecars first, progressive Rust port
+> **Last Updated**: 2026-05-28
 
 Merging **TrippleEffect**, **PPLPWR**, **NoSlop**, **TropoMesh**, and **gChat** into a unified HAI-Net framework.
 
@@ -77,12 +78,13 @@ hainet/
 | [DONE] Define gRPC/IPC contract | Protobuf schema for HAI-Net ↔ TrippleEffect communication |
 | [DONE] Create `hainet-persona/src/bridge/` | Rust gRPC client + sidecar lifecycle management |
 | [DONE] Port TE state machine patterns | Implement in `hainet-persona` Rust: state graphs, transition validation |
-| Port TE cycle handler patterns | AgentCycleHandler logic → Rust async tasks |
-| Port TE failover handler | Model failover chain → enhance `ai_providers` |
-| Port TE context management | Bounded workspace trees, auto-summarization |
+| [DONE] Port TE cycle handler patterns | AgentCycleHandler logic → Rust async tasks (execute_autonomous_cycle in pm.rs, worker.rs) |
+| [DONE] Port TE failover handler | Model failover chain → enhance `ai_providers` (failover.rs) |
+| [DONE] Port TE context management | Bounded workspace trees, auto-summarization (context_manager.rs) |
 | [DONE] Merge TE tool ecosystem | Map TE's 21 tools → HAI-Net MCP server equivalents |
 | Port TE Constitutional Guardian | Merge with existing guardian module |
-| Unify prompt systems | TE's YAML prompts + HAI-Net's Handlebars templates |
+| [DONE] Unify prompt systems | TE's YAML prompts loaded at runtime via `get_te_prompt()` in pm.rs/worker.rs |
+| **[NEXT] PM Startup Plan Interceptor** | **Detect structured kickoff plan JSON in Startup state, auto-create tasks in DB, inject MASTER KICKOFF PLAN SUMMARY into context, auto-transition to Planning. Required because pm_startup_prompt outputs a plan structure, not a tool-call JSON, causing small models to stall.** |
 
 **Key mapping — TrippleEffect Python → HAI-Net Rust**:
 

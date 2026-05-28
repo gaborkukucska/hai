@@ -68,9 +68,9 @@ pub struct DeploymentOrchestrator {
 /// Returns the systemd service names that should be deployed for a given role.
 pub fn services_for_role(role: &DeviceRole) -> Vec<&'static str> {
     match role {
-        DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge"],
+        DeviceRole::Master => vec!["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"],
         DeviceRole::Slave => vec!["hainet-core", "hainet-chain"],
-        DeviceRole::Standalone => vec!["hainet-core", "hainet-chain", "hainet-bridge"],
+        DeviceRole::Standalone => vec!["hainet-core", "hainet-chain", "hainet-bridge", "hainet-portal"],
         DeviceRole::UIOnly => vec!["hainet-portal"],
     }
 }
@@ -386,6 +386,9 @@ impl DeploymentOrchestrator {
         println!("📤 Transferring AI persona prompts...");
         self.transfer_prompts(&client, base)?;
         
+        println!("📤 Transferring system configs...");
+        self.transfer_configs(&client)?;
+        
         // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
         self.configure_device(&client, &assignment)?;
@@ -497,6 +500,10 @@ impl DeploymentOrchestrator {
             &self.shared_drive_path
         };
         self.copy_prompts_local(base)?;
+
+        // Step 3.6: Copy system configs
+        println!("📤 Copying system configs...");
+        self.copy_configs_local()?;
 
         // Step 4: Configure role-specific settings
         println!("⚙️  Configuring role settings...");
@@ -735,13 +742,14 @@ WantedBy=multi-user.target
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             
             // Check if service started successfully
-            let status_cmd = format!("sudo -n systemctl is-active {}.service 2>/dev/null", service);
+            let status_cmd = format!("sudo -n systemctl is-active {}.service 2>/dev/null || true", service);
             match client.execute_command(&status_cmd) {
                 Ok(output) => {
-                    if output.trim() == "active" {
+                    let status = output.trim();
+                    if status == "active" || status == "activating" {
                         println!("   ✓ {} started successfully", service);
                     } else {
-                        println!("   ⚠️  {} may not have started (status: {})", service, output.trim());
+                        println!("   ⚠️  {} may not have started (status: {})", service, status);
                     }
                 },
                 Err(e) => {
@@ -936,53 +944,52 @@ WantedBy=multi-user.target
         // Try apt-get (Debian/Ubuntu/Lubuntu/Mint)
         if Command::new("which").arg("apt-get").output().map_or(false, |o| o.status.success()) {
             println!("📦 Detected Debian/Ubuntu-based system. Installing dependencies via apt-get...");
-            println!("⚠️  You may be prompted for your sudo password.");
-            let _ = Command::new("sudo")
-                .args(&["apt-get", "update"])
-                .status()?;
-            
-            let base_deps = ["build-essential", "cmake", "gcc", "g++", "make", "pkg-config", "libssl-dev", "protobuf-compiler"];
-            let mut install_cmd = Command::new("sudo");
-            install_cmd.args(&["apt-get", "install", "-y"]).args(&base_deps);
-            
-            if install_cmd.status()?.success() {
-                println!("✓ Dependencies installed successfully.");
-                return Ok(());
-            } else {
-                bail!("Failed to install dependencies via apt-get.");
+            let mut update_cmd = Command::new("sudo");
+            update_cmd.args(&["-n", "apt-get", "update"]);
+            if let Ok(status) = update_cmd.status() {
+                if status.success() {
+                    let base_deps = ["build-essential", "cmake", "gcc", "g++", "make", "pkg-config", "libssl-dev", "protobuf-compiler"];
+                    let mut install_cmd = Command::new("sudo");
+                    install_cmd.args(&["-n", "apt-get", "install", "-y"]).args(&base_deps);
+                    
+                    if install_cmd.status().map(|s| s.success()).unwrap_or(false) {
+                        println!("✓ Dependencies installed successfully.");
+                        return Ok(());
+                    }
+                }
             }
+            println!("⚠️  Could not automatically install dependencies. If build fails, run: sudo apt-get install -y build-essential cmake gcc g++ make pkg-config libssl-dev protobuf-compiler");
+            return Ok(());
         }
         
         // Try dnf (Fedora/RHEL)
         if Command::new("which").arg("dnf").output().map_or(false, |o| o.status.success()) {
             println!("📦 Detected Fedora/RHEL-based system. Installing dependencies via dnf...");
-            println!("⚠️  You may be prompted for your sudo password.");
             let deps = ["cmake", "gcc", "gcc-c++", "make", "libsoup-devel", "webkit2gtk3-devel", "gtk3-devel", "openssl-devel", "pkgconf-pkg-config"];
             let mut install_cmd = Command::new("sudo");
-            install_cmd.args(&["dnf", "install", "-y"]).args(&deps);
+            install_cmd.args(&["-n", "dnf", "install", "-y"]).args(&deps);
             
-            if install_cmd.status()?.success() {
+            if install_cmd.status().map(|s| s.success()).unwrap_or(false) {
                 println!("✓ Dependencies installed successfully.");
                 return Ok(());
-            } else {
-                bail!("Failed to install dependencies via dnf.");
             }
+            println!("⚠️  Could not automatically install dependencies via dnf. Proceeding anyway.");
+            return Ok(());
         }
         
         // Try pacman (Arch/Manjaro)
         if Command::new("which").arg("pacman").output().map_or(false, |o| o.status.success()) {
             println!("📦 Detected Arch-based system. Installing dependencies via pacman...");
-            println!("⚠️  You may be prompted for your sudo password.");
             let deps = ["cmake", "gcc", "make", "libsoup", "webkit2gtk", "gtk3", "openssl", "pkgconf"];
             let mut install_cmd = Command::new("sudo");
-            install_cmd.args(&["pacman", "-S", "--noconfirm", "--needed"]).args(&deps);
+            install_cmd.args(&["-n", "pacman", "-S", "--noconfirm", "--needed"]).args(&deps);
             
-            if install_cmd.status()?.success() {
+            if install_cmd.status().map(|s| s.success()).unwrap_or(false) {
                 println!("✓ Dependencies installed successfully.");
                 return Ok(());
-            } else {
-                bail!("Failed to install dependencies via pacman.");
             }
+            println!("⚠️  Could not automatically install dependencies via pacman. Proceeding anyway.");
+            return Ok(());
         }
 
         println!("⚠️  Could not detect package manager. Please ensure libsoup, webkit2gtk, and gtk3 development headers are installed.");
@@ -998,6 +1005,7 @@ WantedBy=multi-user.target
                 "hainet-core",
                 "hainet-chain",
                 "hainet-bridge",
+                "hainet-portal",
             ],
             DeviceRole::Slave => vec![
                 "hainet-core",
@@ -1007,6 +1015,7 @@ WantedBy=multi-user.target
                 "hainet-core",
                 "hainet-chain",
                 "hainet-bridge",
+                "hainet-portal",
             ],
             DeviceRole::UIOnly => vec![
                 "hainet-portal",
@@ -1088,8 +1097,41 @@ WantedBy=multi-user.target
         Ok(())
     }
 
+    /// Transfer system configs to the remote device
+    #[cfg(not(test))]
+    fn transfer_configs<C: SSHClientTrait>(&self, client: &C) -> Result<()> {
+        let workspace_root = find_workspace_root().context("Failed to find workspace root for config transfer")?;
+        let persona_dir = workspace_root.join("hainet-persona");
+        
+        // Ensure destination dir exists
+        client.execute_command("sudo -n mkdir -p /var/lib/hainet/.hainet")?;
+        
+        for config_file in &["mcp-servers.toml", "ollama-endpoints.toml"] {
+            let src = persona_dir.join(config_file);
+            if src.exists() {
+                let remote_tmp = format!("/tmp/{}", config_file);
+                client.upload_file(&src, &remote_tmp)?;
+                client.execute_command(&format!(
+                    "cat {} | sudo -n tee /var/lib/hainet/.hainet/{} > /dev/null && rm {}", remote_tmp, config_file, remote_tmp
+                ))?;
+            } else {
+                println!("⚠️  Config file not found at {:?}, skipping", src);
+            }
+        }
+        
+        let _ = client.execute_command("sudo -n chown -R hainet:hainet /var/lib/hainet/.hainet 2>/dev/null || true");
+        
+        println!("✓ Installed system configs");
+        Ok(())
+    }
+
     #[cfg(test)]
     fn transfer_prompts<C: SSHClientTrait>(&self, _client: &C, _dest_base_path: &str) -> Result<()> {
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn transfer_configs<C: SSHClientTrait>(&self, _client: &C) -> Result<()> {
         Ok(())
     }
 
@@ -1117,6 +1159,34 @@ WantedBy=multi-user.target
             .status()?;
             
         println!("✓ Installed AI persona prompts to /var/lib/hainet/hainet-persona/prompts");
+        Ok(())
+    }
+    
+    /// Copy system configs to the local device
+    fn copy_configs_local(&self) -> Result<()> {
+        let workspace_root = find_workspace_root().context("Failed to find workspace root for config transfer")?;
+        let persona_dir = workspace_root.join("hainet-persona");
+        
+        std::process::Command::new("sudo")
+            .args(&["mkdir", "-p", "/var/lib/hainet/.hainet"])
+            .status()?;
+            
+        for config_file in &["mcp-servers.toml", "ollama-endpoints.toml"] {
+            let src = persona_dir.join(config_file);
+            if src.exists() {
+                std::process::Command::new("sudo")
+                    .args(&["cp", src.to_str().unwrap(), "/var/lib/hainet/.hainet/"])
+                    .status()?;
+            } else {
+                println!("⚠️  Config file not found at {:?}, skipping", src);
+            }
+        }
+        
+        std::process::Command::new("sudo")
+            .args(&["chown", "-R", "hainet:hainet", "/var/lib/hainet/.hainet"])
+            .status()?;
+            
+        println!("✓ Installed system configs to /var/lib/hainet/.hainet/");
         Ok(())
     }
     

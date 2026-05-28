@@ -318,109 +318,15 @@ impl WorkerAgent {
         // Mark task as in progress in session
         self.session_tasks.start_task(&task.title)
             .unwrap_or_else(|e| tracing::warn!("Failed to update session task: {}", e));
-        
-        // Adjust execution strategy based on task history
-        self.execution_strategy.adjust_for_task(&task.title, &mut self.learner);
-        tracing::info!(
-            "Worker {} adaptive strategy for '{}': timeout={}ms, retries={}",
-            self.id.name,
-            task.title,
-            self.execution_strategy.base_timeout_ms,
-            self.execution_strategy.max_retries
-        );
-        
-        // Transition to Planning
-        self.state_machine.transition(
-            AgentState::Planning,
-            "Planning task execution".to_string()
-        )?;
-        self.update_status(&format!("Planning task {}", task_id)).await;
-        
-        // Choose execution engine: bridge (opt-in) or native (default)
-        let use_bridge = std::env::var("AGENT_BRIDGE_URL").is_ok();
+            
         let start_time = SystemTime::now();
-        
-        let result = if use_bridge {
-            // Opt-in: delegate to Python TE Bridge if explicitly configured
-            tracing::info!("Worker {} using Python TE Bridge for task: {}", self.id.name, task.title);
-            
-            self.state_machine.transition(
-                AgentState::Working,
-                "Executing via TE Bridge".to_string()
-            )?;
-            self.update_status(&format!("Working on task {}", task_id)).await;
-            
-            self.execute_with_bridge(&task).await
-        } else {
-            // Default: native LLM + MCP tool execution
-            tracing::info!("Worker {} using native MCP+LLM execution for task: {}", self.id.name, task.title);
-            
-            // Plan execution using LLM with tool discovery
-            let execution_plan = match self.plan_task_execution_with_learning(&task).await {
-                Ok(plan) => plan,
-                Err(e) => {
-                    tracing::error!("Worker {} planning failed for task {}: {}", self.id.name, task_id, e);
-                    
-                    // Fail the task so it doesn't get stuck in InProgress
-                    let project_manager = self.project_manager.write().await;
-                    if let Err(fail_err) = project_manager.fail_task(&task_id, format!("Planning failed: {}", e)).await {
-                        tracing::error!("Failed to mark task as failed after planning error: {}", fail_err);
-                    }
-                    
-                    // Send error to PM
-                    let error_report = crate::messaging::MessageContent::ErrorReport(crate::messaging::ErrorReport {
-                        error_type: "PlanningError".to_string(),
-                        message: format!("Planning failed: {}", e),
-                        stack_trace: None,
-                        recoverable: true,
-                    });
-                    if let Err(send_err) = self.send_message_to_pm_with_retry(&task.project_id, error_report, 4).await {
-                        tracing::warn!("Worker {} failed to send planning error to PM: {:?}", self.id.name, send_err);
-                    }
-                    
-                    return Err(e);
-                }
-            };
-            
-            tracing::info!("Worker {} planned {} steps for task: {}", 
-                self.id.name, execution_plan.steps.len(), task.title);
-            
-            // Transition to Working
-            self.state_machine.transition(
-                AgentState::Working,
-                format!("Executing {} steps", execution_plan.steps.len())
-            )?;
-            self.update_status(&format!("Working on task {}", task_id)).await;
-            
-            // Execute with adaptive retry and self-correction
-            self.execute_with_learning(&execution_plan, &task).await
-        };
+        let result = self.execute_autonomous_cycle(&task).await;
         
         match result {
             Ok(deliverables) => {
                 // Mark task as complete in session
                 self.session_tasks.complete_task(&task.title)
                     .unwrap_or_else(|e| tracing::warn!("Failed to complete session task: {}", e));
-                
-                // Record success outcome for learning
-                self.record_success_outcome(&task, start_time, &ExecutionPlan { steps: vec![] });
-                
-                // Transition to Testing
-                let _ = self.state_machine.transition(
-                    AgentState::Testing,
-                    "Testing and verifying executed work".to_string()
-                );
-                self.update_status(&format!("Testing task {}", task_id)).await;
-                
-                // Wait briefly to represent testing time in UI
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                
-                // Transition to Reporting
-                let _ = self.state_machine.transition(
-                    AgentState::Reporting,
-                    "Task complete, reporting to PM".to_string()
-                );
-                self.update_status(&format!("Reporting task {}", task_id)).await;
                 
                 // Submit task for review
                 let project_manager = self.project_manager.write().await;
@@ -452,9 +358,6 @@ impl WorkerAgent {
                 // Mark task as failed in session
                 self.session_tasks.fail_task(&task.title)
                     .unwrap_or_else(|err| tracing::warn!("Failed to fail session task: {}", err));
-                
-                // Record failure outcome for learning
-                self.record_failure_outcome(&task, start_time, &ExecutionPlan { steps: vec![] }, &e);
                 
                 // Properly fail the task in project manager to prevent it from being stuck
                 tracing::error!(
@@ -490,6 +393,211 @@ impl WorkerAgent {
             }
         }
     }
+    
+    /// Executes the task using the continuous autonomous cycle engine (TE pattern).
+    async fn execute_autonomous_cycle(&mut self, task: &crate::projects::Task) -> Result<Vec<String>> {
+        tracing::info!("Worker {} starting autonomous cycle for task '{}'", self.id.name, task.title);
+        
+        let mut loop_count = 0;
+        let max_loops = 50; // max cycles
+        
+        let mut watchdog = crate::agents::cycle_engine::WatchdogState::new(AgentState::Planning);
+        let mut duplicate_tracker = crate::agents::cycle_engine::DuplicateToolTracker::new();
+        let mut deliverables = Vec::new();
+        let mut local_context: Vec<String> = Vec::new();
+        
+        self.state_machine.transition(AgentState::Planning, "Cycle started".to_string())?;
+        
+        local_context.push(format!(
+            "System/User: BEGIN TASK.\nTask Title: {}\nTask Description: {}\n\nAnalyze the task and request state transition to begin work.",
+            task.title, task.description
+        ));
+        
+        let available_tools = self.discover_tools().await?;
+        let tools_list_str = available_tools.join(", ");
+        
+        while loop_count < max_loops {
+            loop_count += 1;
+            
+            let current_state = self.state_machine.current_state().clone();
+            if current_state == AgentState::Idle {
+                tracing::info!("Worker {} reached Idle state, finishing task.", self.id.name);
+                break;
+            }
+            if current_state == AgentState::Reporting && deliverables.is_empty() {
+                deliverables.push("Task executed. See context summary.".to_string());
+                break;
+            }
+            
+            let prompt_name = match current_state {
+                AgentState::Startup => "worker_startup_prompt",
+                AgentState::Planning => "worker_decompose_prompt",
+                AgentState::Working => "worker_work_prompt",
+                AgentState::Testing => "worker_test_prompt",
+                AgentState::Reporting => "worker_report_prompt",
+                AgentState::Idle => "worker_wait_prompt",
+                _ => "worker_work_prompt",
+            };
+            
+            let mut system_prompt = self.get_te_prompt(prompt_name)
+                .unwrap_or_else(|| self.template.system_prompt.clone());
+            
+            if watchdog.check(current_state.clone()) {
+                system_prompt.push_str("\n\n");
+                system_prompt.push_str(&watchdog.intervention_message(crate::agents::cycle_engine::AgentType::Worker));
+            }
+            
+            let framework_instructions = self.get_te_prompt("worker_standard_framework_instructions")
+                .unwrap_or_default();
+            
+            system_prompt = system_prompt.replace("{worker_standard_framework_instructions}", &framework_instructions);
+            system_prompt = system_prompt.replace("{agent_id}", &self.id.name);
+            system_prompt = system_prompt.replace("{role}", &format!("{:?}", self.worker_type));
+            system_prompt = system_prompt.replace("{personality_instructions}", &self.template.system_prompt);
+            system_prompt = system_prompt.replace("{available_tools}", &tools_list_str);
+            system_prompt = system_prompt.replace("{task_description}", &task.description);
+            system_prompt = system_prompt.replace("{task_id}", &task.id.to_string());
+            
+            system_prompt.push_str("\n\nCRITICAL INSTRUCTION: You MUST respond with exactly ONE JSON object representing your action. Example: {\"tool\": \"tool_name\", \"params\": {\"key\": \"value\"}}");
+            
+            let options = crate::ai_providers::providers::GenerationOptions {
+                system: Some(system_prompt),
+                temperature: Some(0.4),
+                ..Default::default()
+            };
+            
+            let context_history = local_context.join("\n\n");
+            let user_prompt = format!("Current Context:\n{}\n\nWhat is your NEXT ACTION?", context_history);
+            
+            let response = match {
+                let preferred_family = if let Some(prefs) = &self.user_settings {
+                    prefs.read().await.get_model_preference("worker").await.unwrap_or(None)
+                } else {
+                    None
+                };
+                let selection_context = crate::ai_providers::SelectionContext::for_worker();
+                let selected_model = self.ai_provider_manager.select_model_for_agent_with_preferences(selection_context, preferred_family).await?;
+                let client = selected_model.get_client()?;
+                let model_name = if selected_model.model_id.contains("::") {
+                    selected_model.model_id.split("::").nth(1).unwrap_or(&selected_model.model_id)
+                } else {
+                    &selected_model.model_id
+                };
+                client.generate(model_name, &user_prompt, options).await
+            } {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("LLM Generation failed: {}", e);
+                    local_context.push(format!("System: Error generating response: {}", e));
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            
+            let action: serde_json::Value = match self.extract_from_markdown(&response.text) {
+                Ok(json) => json,
+                Err(_) => {
+                    let json_str = self.extract_json_from_response(&response.text);
+                    match serde_json::from_str(&json_str) {
+                        Ok(json) => json,
+                        Err(_) => {
+                            local_context.push("System: Error: Failed to parse output as JSON. Please try again and ensure you output exactly ONE JSON object.".to_string());
+                            continue;
+                        }
+                    }
+                }
+            };
+            
+            let tool_name = action.get("tool").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let params = action.get("params").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
+            
+            local_context.push(format!("Assistant: Executing tool: {} with params: {}", tool_name, params));
+            
+            let sig = crate::agents::cycle_engine::ToolCallSignature {
+                tool_name: tool_name.clone(),
+                args_hash: params.to_string(),
+            };
+            if duplicate_tracker.record_call(sig) {
+                local_context.push("System: Error: You are repeating the same action. Force transition required. Please execute request_state.".to_string());
+                continue;
+            }
+            
+            if tool_name == "framework::request_state" || tool_name == "request_state" {
+                if let Some(new_state_str) = params.get("state").and_then(|s| s.as_str()) {
+                    let new_state = match new_state_str {
+                        "worker_startup" => AgentState::Startup,
+                        "worker_decompose" => AgentState::Planning,
+                        "worker_work" => AgentState::Working,
+                        "worker_test" => AgentState::Testing,
+                        "worker_report" => AgentState::Reporting,
+                        "worker_wait" | "worker_standby" => AgentState::Idle,
+                        _ => {
+                            local_context.push(format!("System: Error: Invalid state requested '{}'", new_state_str));
+                            continue;
+                        }
+                    };
+                    
+                    if let Err(e) = self.state_machine.transition(new_state.clone(), format!("LLM requested state change to {}", new_state_str)) {
+                        local_context.push(format!("System: Error: State transition failed: {}", e));
+                    } else {
+                        duplicate_tracker.reset();
+                        self.update_status(&format!("Transitioned to {:?}", new_state)).await;
+                        local_context.push(format!("System: State successfully changed to {}", new_state_str));
+                    }
+                } else {
+                    local_context.push("System: Error: request_state tool requires 'state' parameter.".to_string());
+                }
+                continue;
+            }
+            
+            let (resolved_tool, extra_params, _was_aliased) = crate::agents::worker_discovery::resolve_tool_alias(&tool_name);
+            let mut final_params = params.clone();
+            if let Some(obj) = final_params.as_object_mut() {
+                for (k, v) in extra_params {
+                    obj.insert(k, serde_json::Value::String(v));
+                }
+            }
+            
+            tracing::info!("Worker {} executing tool: {}", self.id.name, resolved_tool);
+            
+            // Execute tool safely
+            let parts: Vec<&str> = resolved_tool.split("::").collect();
+            if parts.len() != 2 {
+                local_context.push(format!("System: Error: Invalid tool format '{}'", resolved_tool));
+                continue;
+            }
+            
+            let execution_result = {
+                let client = self.mcp_client.read().await;
+                client.call_tool(parts[0], parts[1], final_params.clone()).await
+            };
+            
+            match execution_result {
+                Ok(res) => {
+                    let result_str = if res.to_string().is_empty() || res.to_string() == "null" {
+                        "Tool executed successfully with no output".to_string()
+                    } else {
+                        res.to_string()
+                    };
+                    local_context.push(format!("System: Tool Result:\n{}", result_str));
+                    
+                    if resolved_tool.contains("file_write") {
+                        deliverables.push(format!("Wrote file: {}", final_params.get("path").or(final_params.get("filepath")).and_then(|v| v.as_str()).unwrap_or("unknown")));
+                    }
+                }
+                Err(e) => {
+                    local_context.push(format!("System: Tool Execution Error: {}", e));
+                }
+            }
+        }
+        
+        if loop_count >= max_loops {
+            tracing::warn!("Worker {} hit max cycles ({})", self.id.name, max_loops);
+        }
+        
+        Ok(deliverables)
+    }
+
     
     /// Delegate task execution to the Python gRPC Bridge
     async fn execute_with_bridge(&mut self, task: &crate::projects::Task) -> Result<Vec<String>> {
@@ -3626,6 +3734,35 @@ Return JSON with steps array:
         }
         
         tracing::info!("Worker {} run loop ended", self.id.name);
+    }
+    
+    fn get_te_prompt(&self, prompt_name: &str) -> Option<String> {
+        let path = "/home/tom/hai/_workspace/TrippleEffect/prompts.yaml";
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let marker = format!("{}: |", prompt_name);
+            let marker2 = format!("{}: |-", prompt_name);
+            let mut found = false;
+            let mut prompt_content = String::new();
+            
+            for line in content.lines() {
+                if line.starts_with(&marker) || line.starts_with(&marker2) || line.starts_with(&format!("{}:", prompt_name)) {
+                    found = true;
+                    continue;
+                }
+                
+                if found {
+                    if line.starts_with("--") || (line.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false) && !line.starts_with(' ')) {
+                        break;
+                    }
+                    prompt_content.push_str(line);
+                    prompt_content.push('\n');
+                }
+            }
+            if found {
+                return Some(prompt_content.trim().to_string());
+            }
+        }
+        None
     }
 }
 

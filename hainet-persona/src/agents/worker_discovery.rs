@@ -171,6 +171,9 @@ static TOOL_NAME_ALIASES: LazyLock<HashMap<&'static str, ToolNameAlias>> = LazyL
     m.insert("git_commit", ToolNameAlias { correct_tool: "hainet-dev::git_commit", extra_params: &[] });
     m.insert("git_diff", ToolNameAlias { correct_tool: "hainet-dev::git_diff", extra_params: &[] });
 
+    // Framework aliases (TE migration)
+    m.insert("request_state", ToolNameAlias { correct_tool: "framework::request_state", extra_params: &[] });
+
     m
 });
 

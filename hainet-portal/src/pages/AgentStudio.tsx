@@ -164,7 +164,7 @@ export default function AgentStudio() {
     visited.add(task.id);
 
     // Find tasks that depend on THIS task
-    const dependents = allTasks.filter(t => t.dependencies.includes(task.id));
+    const dependents = allTasks.filter(t => (t.dependencies || []).includes(task.id));
     
     // Find assigned worker name if possible
     let workerName = 'Unassigned';
@@ -199,7 +199,7 @@ export default function AgentStudio() {
             
             <div className="flex items-center justify-between mt-1.5">
               <span className="text-xs text-theme-text-muted truncate max-w-[70%]" title={task.description}>
-                {task.description.length > 60 ? task.description.substring(0, 60) + '...' : task.description}
+                {(task.description || '').length > 60 ? (task.description || '').substring(0, 60) + '...' : (task.description || '')}
               </span>
               {task.worker_agent_id && (
                 <span className="text-[10px] flex items-center gap-1 text-theme-accent-primary bg-theme-accent-primary/10 px-2 py-0.5 rounded">
