@@ -27,7 +27,7 @@ More info at [HAI-Net.com](https://hai-net.com) · [People Power Initiative](htt
 
 ## What is HAI-Net?
 
-HAI-Net is a **complete, decentralised replacement for the cloud-based internet** — built from the ground up to give people back ownership of their digital lives.
+HAI-Net is building up to be a **complete, decentralised replacement for the cloud-based internet** — built from the ground up to give people back ownership of their digital lives.
 
 Today's internet is a set of services you rent from corporations. You give them your data, your attention, and your social connections; they give you convenience and a feed tuned to keep you scrolling. HAI-Net inverts this entirely.
 
