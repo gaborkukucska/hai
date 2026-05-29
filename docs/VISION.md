@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://hai-net.com">🌐 hai-net.com</a> &nbsp;·&nbsp;
   <a href="https://pplpwr.me">✊ pplpwr.me</a> &nbsp;·&nbsp;
-  <a href="https://github.com/your-org/hai-net">💻 GitHub</a>
+  <a href="https://github.com/gaborkukucska/hai">💻 GitHub</a>
 </p>
 
 ---
@@ -248,7 +248,7 @@ The galley may be on top. But we are building the water.
   <strong>HAI-Net is free software. Fork it. Run it. Build on it. It belongs to everyone.</strong><br><br>
   <a href="https://hai-net.com">🌐 hai-net.com</a> &nbsp;·&nbsp;
   <a href="https://pplpwr.me">✊ pplpwr.me</a> &nbsp;·&nbsp;
-  <a href="https://github.com/your-org/hai-net">💻 GitHub</a> &nbsp;·&nbsp;
+  <a href="https://github.com/gaborkukucska/hai">💻 GitHub</a> &nbsp;·&nbsp;
   <a href="../hainet-vault/CONSTITUTION.md">📜 Constitution</a> &nbsp;·&nbsp;
   <a href="../hainet-vault/DECLARATION.md">📣 Declaration</a>
 </p>
