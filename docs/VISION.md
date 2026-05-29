@@ -38,22 +38,22 @@ HAI-Net didn't arrive fully formed. It's the synthesis of years of experimentati
 ### 🧠 TrippleEffect — The Agentic Brain
 The first project. The question: *can a local LLM actually be trusted to do real work autonomously?* The answer, after extensive iteration, is yes — but only with strict architecture. TrippleEffect developed the battle-tested Admin → PM → Worker agent hierarchy with state machine governance, loop detection, model failover chains, and constitutional oversight. It became the proven agentic core that now powers every HAI-Net Persona.
 
-→ **Now lives in**: [`hainet-persona/`](../hainet-persona/) — fully ported to Rust
+→ **Now lives in**: [`hainet-persona/`](../hainet-persona/) — W.I.P. to fully port it to Rust, 80% there.
 
 ### 💬 gChat — The Social Mesh
 The question: *can a truly serverless public social network exist?* Not federated — *serverless.* No Matrix, no ActivityPub, no relay servers. gChat proved it can. Using Tor v3 Hidden Services as node addresses, daisy-chain gossip propagation, Ed25519 identity without any central registry, and a novel streaming media proxy that protects both viewer and creator anonymity — gChat built a working global social network where no server exists to seize or subpoena.
 
-→ **Now lives in**: [`hainet-social/`](../hainet-social/) — ported to Rust, fully absorbed
+→ **Now lives in**: [`hainet-social/`](../hainet-social/) — porting it to Rust, to also fully absorb its functions.
 
 ### 🎬 NoSlop — The Creator Studio
 The question: *can everyday people make genuinely high-quality media without uploading it to YouTube or TikTok?* NoSlop built a local AI-powered media production system — ComfyUI for images and video, FFmpeg and OpenCV for editing and colour grading, Whisper for transcription, Piper for narration — all orchestrated by an agentic creative director that iterates until *you're* satisfied. Plus blockchain-verified media provenance and peer-to-peer sharing. No platform. No fees. No algorithm deciding who sees your work.
 
-→ **Now lives in**: [`mcp-servers/hainet-media-mcp/`](../mcp-servers/hainet-media-mcp/) and [`hainet-chain/`](../hainet-chain/)
+→ **Now lives in**: [`mcp-servers/hainet-media-mcp/`](../mcp-servers/hainet-media-mcp/) and [`hainet-chain/`](../hainet-chain/) W.I.P.
 
 ### ⚡ PPLPWR (People Power) — The Community Computer
 The question: *can idle consumer hardware become a community supercomputer for AI training and hosting?* PPLPWR built weighted compute scheduling, hardware profiling, thermal safety, idle detection, and AI-guided participation decisions. The insight: there is enormous latent compute in people's homes. Organised correctly, it can host, fine-tune, and eventually *train* LLMs aligned to the public interest — not corporate shareholders.
 
-→ **Now lives in**: [`hainet-collab/`](../hainet-collab/) — fully absorbed
+→ **Now lives in**: [`hainet-collab/`](../hainet-collab/) — W.I.P. to fully absorb it.
 
 ### 🌊 pplpwr.me — The Public Face
 The hub's public landing page and vision statement — the water, the galley, and the philosophy, presented to the world.
@@ -62,7 +62,7 @@ The hub's public landing page and vision statement — the water, the galley, an
 
 ---
 
-All of this research converged into one realisation: these weren't five separate tools. They were five modules of a single system. **HAI-Net is the integration.** 🌐
+🌐 **HAI-Net is the integration.** All of this was to research each segment of the full idea first, to then integrate them into the single HAI-Net system.
 
 ---
 
