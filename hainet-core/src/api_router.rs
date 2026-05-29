@@ -40,6 +40,25 @@ pub async fn handle_invoke(
             bridge.clear_history().await.map_err(|e| e.to_string())?;
             Ok(json!({}))
         },
+        "new_session" => {
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
+            let id = bridge.new_session().await.map_err(|e| e.to_string())?;
+            Ok(json!({ "session_id": id }))
+        },
+        "list_sessions" => {
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
+            let res = bridge.list_sessions().await.map_err(|e| e.to_string())?;
+            Ok(serde_json::to_value(res).unwrap())
+        },
+        "load_session" => {
+            let id = args.get("session_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
+            let bridge = bridge_arc.read().await;
+            bridge.load_session(id).await.map_err(|e| e.to_string())?;
+            Ok(json!({}))
+        },
         "get_agent_state" => {
             let bridge_arc = app_state.admin_bridge.as_ref().ok_or_else(|| "Admin Bridge not available on this node".to_string())?;
             let bridge = bridge_arc.read().await;

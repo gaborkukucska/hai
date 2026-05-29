@@ -31,6 +31,12 @@ interface ChatResponse {
   active_projects: number
 }
 
+interface ChatSessionInfo {
+  id: string
+  title: string
+  timestamp: number
+}
+
 export default function ChatInterface() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -43,6 +49,9 @@ export default function ChatInterface() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [isVideoVisible, setIsVideoVisible] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false); // TTS voice mode
+  const [sessions, setSessions] = useState<ChatSessionInfo[]>([])
+  const [currentSessionId, setCurrentSessionId] = useState<string>('')
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -55,10 +64,60 @@ export default function ChatInterface() {
     scrollToBottom()
   }, [messages])
 
-  // Load message history on mount
+  // Initialize session on mount
   useEffect(() => {
-    loadHistory()
+    initSession()
   }, [])
+
+  const initSession = async () => {
+    try {
+      // Create a clean session on startup
+      const res = await invoke<{ session_id: string }>('new_session')
+      setCurrentSessionId(res.session_id)
+      setMessages([])
+      
+      // Load available sessions for dropdown
+      await loadSessions()
+    } catch (error) {
+      console.error('Failed to init session:', error)
+    }
+  }
+
+  const loadSessions = async () => {
+    try {
+      const sessionList = await invoke<ChatSessionInfo[]>('list_sessions')
+      setSessions(sessionList)
+    } catch (error) {
+      console.error('Failed to load sessions:', error)
+    }
+  }
+
+  const createNewSession = async () => {
+    try {
+      const res = await invoke<{ session_id: string }>('new_session')
+      setCurrentSessionId(res.session_id)
+      setMessages([])
+      await loadSessions()
+    } catch (error) {
+      console.error('Failed to create new session:', error)
+    }
+  }
+
+  const handleSessionSelect = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const sid = e.target.value
+    if (!sid) return
+    
+    try {
+      await invoke('load_session', { sessionId: sid })
+      setCurrentSessionId(sid)
+      
+      // Reload history for this session
+      const history = await invoke<ChatMessage[]>('get_history')
+      setMessages(history)
+    } catch (error) {
+      console.error('Failed to load session:', error)
+    }
+  }
 
   const loadHistory = async () => {
     try {
@@ -249,6 +308,35 @@ export default function ChatInterface() {
           isVisible={isVideoVisible}
           onClose={closeVideoPlayer}
         />
+        
+        {/* Session Header */}
+        <div className="border-b border-gray-700 bg-gray-800 p-3 flex justify-between items-center">
+          <div className="flex items-center space-x-2 w-full max-w-md">
+            <label className="text-gray-400 text-sm whitespace-nowrap">Session:</label>
+            <select 
+              value={currentSessionId} 
+              onChange={handleSessionSelect}
+              className="bg-gray-700 text-white text-sm rounded px-2 py-1 w-full focus:outline-none focus:ring-1 focus:ring-hai-primary"
+            >
+              <option value="" disabled>Select a session...</option>
+              {currentSessionId && !sessions.find(s => s.id === currentSessionId) && (
+                <option value={currentSessionId}>New Session (Current)</option>
+              )}
+              {sessions.map(s => (
+                <option key={s.id} value={s.id}>
+                  {new Date(s.timestamp * 1000).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} - {s.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button 
+            onClick={createNewSession}
+            className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 text-sm rounded flex items-center transition-colors"
+          >
+            <span className="mr-1">＋</span> New Session
+          </button>
+        </div>
+
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 ? (

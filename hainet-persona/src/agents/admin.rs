@@ -204,8 +204,8 @@ impl AdminAgent {
     }
 
     /// Main entry point for user interaction
-    pub async fn process_user_input(&mut self, user_input: String) -> Result<String> {
-        tracing::info!("DEBUG: Admin process_user_input called with: {}", user_input);
+    pub async fn process_user_input(&mut self, user_input: String, session_id: &str) -> Result<String> {
+        tracing::info!("DEBUG: Admin process_user_input called with: {}, session_id: {}", user_input, session_id);
 
         if self.is_tool_execution_request(&user_input) {
             tracing::info!("DEBUG: Detected tool execution request");
@@ -247,13 +247,14 @@ impl AdminAgent {
             self.handle_complex_intent(&user_input, &intent).await
         } else {
             tracing::info!("DEBUG: Calling handle_simple_intent");
-            self.handle_simple_intent(&user_input, &intent).await
+            self.handle_simple_intent(&user_input, &intent, session_id).await
         };
         
         // Save to memory if successful
         if let Ok(ref response) = result {
             let entry = crate::agents::admin::memory::ConversationEntry {
                 id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
                 user_message: user_input.clone(),
                 admin_response: response.clone(),
                 timestamp: std::time::SystemTime::now()
@@ -848,6 +849,7 @@ impl AdminAgent {
         &mut self,
         user_input: &str,
         intent: &super::intent::Intent,
+        session_id: &str,
     ) -> Result<String> {
         tracing::info!("DEBUG: handle_simple_intent started");
         let start_time = Instant::now();
@@ -861,7 +863,7 @@ impl AdminAgent {
         }
 
         // 2. Generate conversational response
-        let result = self.generate_conversational_response(user_input, intent).await;
+        let result = self.generate_conversational_response(user_input, intent, session_id).await;
 
         // 3. Record metrics
         let response_time = start_time.elapsed();
@@ -904,11 +906,12 @@ impl AdminAgent {
         &self,
         user_input: &str,
         _intent: &super::intent::Intent,
+        session_id: &str,
     ) -> Result<String> {
         tracing::info!("DEBUG: generate_conversational_response started");
         // Load conversation prompt
         // Retrieve context
-        let history = self.memory.get_recent_context(10).await.unwrap_or_default();
+        let history = self.memory.get_recent_context(session_id, 10).await.unwrap_or_default();
         let goals = self.profile.get_goals().await.unwrap_or_default();
         let preferences = self.profile.get_preferences().await.unwrap_or_default();
         

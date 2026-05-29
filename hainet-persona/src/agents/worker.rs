@@ -580,7 +580,7 @@ impl WorkerAgent {
                                 tool_schemas.push(serde_json::to_string(&meta).unwrap_or_default());
                             } else {
                                 match tool_name_req {
-                                    "request_state" => tool_schemas.push(r#"{"name":"request_state","description":"Drive the Worker state machine","inputSchema":{"type":"object","properties":{"state":{"type":"string","enum":["worker_startup","worker_decompose","worker_work","worker_test","worker_report","worker_wait"]}},"required":["state"]}}"#.to_string()),
+                                    "request_state" => tool_schemas.push(r#"{"name":"request_state","description":"Drive the Worker state machine","inputSchema":{"type":"object","properties":{"state":{"type":"string","enum":["worker_startup","worker_decompose","worker_work","worker_test","worker_report","worker_wait"]},"task_id":{"type":"string","description":"Optional: ID of the task to switch to (e.g., after decomposition)"}},"required":["state"]}}"#.to_string()),
                                     "project_management" => tool_schemas.push(r#"{"name":"project_management","description":"CRUD operations on project sub-tasks","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["list_tasks","add_task","modify_task"]},"title":{"type":"string","description":"Task title (for add_task)"},"description":{"type":"string","description":"Task description"},"task_id":{"type":"string","description":"Required for modify_task"},"task_progress":{"type":"string","description":"Progress update for modify_task"}},"required":["action"]}}"#.to_string()),
                                     "send_message" => tool_schemas.push(r#"{"name":"send_message","description":"Inter-agent communication","inputSchema":{"type":"object","properties":{"target_agent_id":{"type":"string"},"message_content":{"type":"string"}},"required":["target_agent_id","message_content"]}}"#.to_string()),
                                     _ => tool_schemas.push(format!("Error: Could not find schema for tool '{}'. Note: Native tools like project_management and send_message are now documented via this tool.", tool_name_req))
@@ -610,12 +610,28 @@ impl WorkerAgent {
                         }
                     };
                     
+                    if *self.state_machine.current_state() == new_state {
+                        local_context.push(format!("System: Info: You are already in the '{}' state. No transition needed. Please execute a different action.", new_state_str));
+                        continue;
+                    }
+                    
                     if let Err(e) = self.state_machine.transition(new_state.clone(), format!("LLM requested state change to {}", new_state_str)) {
                         local_context.push(format!("System: Error: State transition failed: {}", e));
                     } else {
                         duplicate_tracker.reset();
                         self.update_status(&format!("Transitioned to {:?}", new_state)).await;
-                        local_context.push(format!("System: State successfully changed to {}", new_state_str));
+                        
+                        // If the worker provided a new task_id (e.g., after decomposition), update the active task
+                        if let Some(tid_str) = params.get("task_id").and_then(|t| t.as_str()) {
+                            if let Ok(uuid) = uuid::Uuid::parse_str(tid_str) {
+                                self.current_task = Some(crate::projects::TaskId::from_uuid(uuid));
+                                local_context.push(format!("System: State changed to {}. Active task switched to {}.", new_state_str, tid_str));
+                            } else {
+                                local_context.push(format!("System: State changed to {}. Warning: Invalid task_id format '{}'.", new_state_str, tid_str));
+                            }
+                        } else {
+                            local_context.push(format!("System: State successfully changed to {}", new_state_str));
+                        }
                     }
                 } else {
                     local_context.push("System: Error: request_state tool requires 'state' parameter.".to_string());
@@ -684,13 +700,22 @@ impl WorkerAgent {
                         let description = params.get("description")
                             .and_then(|d| d.as_str()).unwrap_or(&title).to_string();
                         
-                        let project_manager = self.project_manager.write().await;
-                        match project_manager.create_task(&task.project_id, title.clone(), description).await {
-                            Ok(task_id) => {
-                                local_context.push(format!("System: Sub-task created: ID={}, Title={}", task_id, title));
+                        let task_id_opt = {
+                            let project_manager = self.project_manager.write().await;
+                            match project_manager.create_task(&task.project_id, title.clone(), description).await {
+                                Ok(task_id) => Some(task_id),
+                                Err(e) => {
+                                    local_context.push(format!("System: Error creating sub-task: {}", e));
+                                    None
+                                }
                             }
-                            Err(e) => {
-                                local_context.push(format!("System: Error creating sub-task: {}", e));
+                        };
+
+                        if let Some(task_id) = task_id_opt {
+                            let project_manager = self.project_manager.write().await;
+                            match project_manager.assign_task(&task_id, self.id.clone()).await {
+                                Ok(_) => local_context.push(format!("System: Sub-task created and assigned to you: ID={}, Title={}", task_id, title)),
+                                Err(e) => local_context.push(format!("System: Sub-task created (ID={}) but failed to assign: {}", task_id, e)),
                             }
                         }
                     }

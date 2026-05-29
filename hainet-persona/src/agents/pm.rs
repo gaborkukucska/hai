@@ -2338,6 +2338,11 @@ CRITICAL: JSON only. No explanations.
                         }
                     };
 
+                    if self.te_state_name == new_state_str {
+                        local_context.push(format!("System: Info: You are already in the '{}' state. No transition needed. Please execute a different action.", new_state_str));
+                        continue;
+                    }
+
                     if let Err(e) = self.state_machine.transition(new_state.clone(), format!("LLM requested state change to {}", new_state_str)) {
                         local_context.push(format!("System: Error: State transition failed: {}", e));
                     } else {
@@ -2366,15 +2371,30 @@ CRITICAL: JSON only. No explanations.
                             .and_then(|t| t.as_str()).unwrap_or("Untitled Task").to_string();
                         let description = params.get("description")
                             .and_then(|d| d.as_str()).unwrap_or(&title).to_string();
+                        let assignee = params.get("assignee").or(params.get("assignee_agent_id")).and_then(|a| a.as_str());
                         
-                        let project_manager = self.project_manager.write().await;
-                        match project_manager.create_task(&self.project_id, title.clone(), description).await {
-                            Ok(task_id) => {
-                                self.session_tasks.add_task(title.clone(), None);
-                                local_context.push(format!("System: Task created successfully. ID: {}, Title: {}", task_id, title));
+                        let task_id_opt = {
+                            let project_manager = self.project_manager.write().await;
+                            match project_manager.create_task(&self.project_id, title.clone(), description).await {
+                                Ok(task_id) => {
+                                    self.session_tasks.add_task(title.clone(), None);
+                                    Some(task_id)
+                                }
+                                Err(e) => {
+                                    local_context.push(format!("System: Error creating task: {}", e));
+                                    None
+                                }
                             }
-                            Err(e) => {
-                                local_context.push(format!("System: Error creating task: {}", e));
+                        };
+                        
+                        if let Some(task_id) = task_id_opt {
+                            if assignee.is_some() {
+                                match self.assign_task_to_worker(&task_id).await {
+                                    Ok(()) => local_context.push(format!("System: Task created and assigned successfully. ID: {}, Title: {}", task_id, title)),
+                                    Err(e) => local_context.push(format!("System: Task created, but error assigning task: {}", e)),
+                                }
+                            } else {
+                                local_context.push(format!("System: Task created successfully. ID: {}, Title: {}", task_id, title));
                             }
                         }
                     }
@@ -2441,7 +2461,7 @@ CRITICAL: JSON only. No explanations.
                         
                         // Check if we already have a worker of this type
                         if self.active_workers.contains_key(&template_name) {
-                            local_context.push(format!("System: Worker of type '{}' already exists and is ready. You can now assign tasks to it using project_management. Transition to pm_activate_workers to begin.", template_name));
+                            local_context.push(format!("System: Worker of type '{}' already exists and is ready. If you need to create more workers for different roles, call manage_team again. If your entire team is complete, use request_state to transition to pm_activate_workers.", template_name));
                         } else {
                             // Create and spawn the worker
                             let mut worker = super::worker::WorkerAgent::from_template(
@@ -2471,7 +2491,7 @@ CRITICAL: JSON only. No explanations.
                             });
                             
                             local_context.push(format!(
-                                "System: Worker agent created successfully. ID: {}, Type: {}, Role: {}. Model selection is automatic. The agent is ready to receive tasks. Use request_state to transition to pm_activate_workers.",
+                                "System: Worker agent created successfully. ID: {}, Type: {}, Role: {}. Model selection is automatic. If you need to create more workers for the project, call manage_team again. If your entire team is complete, use request_state to transition to pm_activate_workers.",
                                 worker_id.name, template_name, role
                             ));
                         }

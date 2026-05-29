@@ -67,6 +67,14 @@ pub struct ChatResponse {
     pub active_projects: usize,
 }
 
+/// Information about a chat session
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatSessionInfo {
+    pub id: String,
+    pub title: String,
+    pub timestamp: i64,
+}
+
 /// Admin AI Bridge managing agent lifecycle
 pub struct AdminBridge {
     /// Admin AI agent
@@ -75,6 +83,10 @@ pub struct AdminBridge {
     message_history: Arc<RwLock<Vec<ChatMessage>>>,
     /// STT handler
     stt_handler: Arc<STTHandler>,
+    /// Directory to store session histories
+    sessions_dir: std::path::PathBuf,
+    /// Current active session ID
+    current_session_id: Arc<RwLock<String>>,
 }
 
 impl AdminBridge {
@@ -90,8 +102,11 @@ impl AdminBridge {
         info!("Prompts path: {:?}", prompts_path);
         info!("Data directory: {:?}", data_dir);
         
+        let sessions_dir = data_dir.join("sessions");
+        
         // Create directories with proper permissions
         std::fs::create_dir_all(&data_dir)?;
+        std::fs::create_dir_all(&sessions_dir)?;
 
         let user_settings = hainet_persona::UserSettingsManager::new(
             &format!("sqlite://{}?mode=rwc", data_dir.join("user_settings.db").display())
@@ -184,10 +199,14 @@ impl AdminBridge {
         
         info!("Admin AI Bridge initialized successfully");
         
+        let initial_session_id = uuid::Uuid::new_v4().to_string();
+        
         let bridge = Self {
             admin: Arc::new(RwLock::new(admin)),
             message_history: Arc::new(RwLock::new(Vec::new())),
             stt_handler,
+            sessions_dir,
+            current_session_id: Arc::new(RwLock::new(initial_session_id)),
         };
 
         // Spawn listener for Admin agent messages (e.g. error escalations)
@@ -221,6 +240,9 @@ impl AdminBridge {
         
         // Spawn listener for User agent messages
         let history_clone = bridge.message_history.clone();
+        let sessions_dir_clone = bridge.sessions_dir.clone();
+        let session_id_clone = bridge.current_session_id.clone();
+        
         tokio::spawn(async move {
             info!("User agent listener started");
             while let Some(msg) = user_rx.recv().await {
@@ -237,7 +259,14 @@ impl AdminBridge {
                         dynamic_component: None,
                     };
                     
-                    history_clone.write().await.push(chat_msg);
+                    let mut history = history_clone.write().await;
+                    history.push(chat_msg);
+                    
+                    // Save history asynchronously
+                    let session_id = session_id_clone.read().await.clone();
+                    let history_json = serde_json::to_string(&*history).unwrap_or_default();
+                    let file_path = sessions_dir_clone.join(format!("{}.json", session_id));
+                    let _ = tokio::fs::write(file_path, history_json).await;
                 }
             }
             warn!("User agent listener ended");
@@ -270,6 +299,9 @@ impl AdminBridge {
         // Process with Admin AI
         let mut admin = self.admin.write().await;
         
+        // Get active session id
+        let session_id = self.current_session_id.read().await.clone();
+        
         // Build input with attachment info if present
         let input = if attachments.is_empty() {
             content
@@ -281,7 +313,7 @@ impl AdminBridge {
             format!("{}\n\nAttached files:\n{}", content, attachment_info)
         };
         
-        let response_text = match admin.process_user_input(input).await {
+        let response_text = match admin.process_user_input(input, &session_id).await {
             Ok(text) => text,
             Err(e) => {
                 error!("Admin AI process_user_input failed: {:?}", e);
@@ -307,10 +339,11 @@ impl AdminBridge {
             dynamic_component: None,
         };
         
-        // Store in history
+        // Store in history and save to disk
         {
             let mut history = self.message_history.write().await;
             history.push(assistant_message.clone());
+            self.save_session(&session_id, &*history).await?;
         }
         
         Ok(ChatResponse {
@@ -318,6 +351,82 @@ impl AdminBridge {
             agent_state: state,
             active_projects: project_count,
         })
+    }
+    
+    /// Save current session to disk
+    async fn save_session(&self, session_id: &str, history: &[ChatMessage]) -> Result<()> {
+        let history_json = serde_json::to_string(history)?;
+        let file_path = self.sessions_dir.join(format!("{}.json", session_id));
+        tokio::fs::write(file_path, history_json).await?;
+        Ok(())
+    }
+    
+    /// List all saved sessions
+    pub async fn list_sessions(&self) -> Result<Vec<ChatSessionInfo>> {
+        let mut sessions = Vec::new();
+        
+        let mut entries = tokio::fs::read_dir(&self.sessions_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Some(id) = path.file_stem().and_then(|s| s.to_str()) {
+                    // Read file to get first message for title
+                    if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                        if let Ok(history) = serde_json::from_str::<Vec<ChatMessage>>(&content) {
+                            if let Some(first_msg) = history.first() {
+                                let mut title = first_msg.content.clone();
+                                if title.len() > 30 {
+                                    title = format!("{}...", &title[..27]);
+                                }
+                                
+                                sessions.push(ChatSessionInfo {
+                                    id: id.to_string(),
+                                    title,
+                                    timestamp: first_msg.timestamp,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Sort by timestamp descending
+        sessions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        Ok(sessions)
+    }
+    
+    /// Start a new session
+    pub async fn new_session(&self) -> Result<String> {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        
+        let mut history = self.message_history.write().await;
+        history.clear();
+        
+        let mut current_id = self.current_session_id.write().await;
+        *current_id = new_id.clone();
+        
+        Ok(new_id)
+    }
+    
+    /// Load a specific session
+    pub async fn load_session(&self, session_id: String) -> Result<()> {
+        let file_path = self.sessions_dir.join(format!("{}.json", session_id));
+        
+        if file_path.exists() {
+            let content = tokio::fs::read_to_string(file_path).await?;
+            let loaded_history: Vec<ChatMessage> = serde_json::from_str(&content)?;
+            
+            let mut history = self.message_history.write().await;
+            *history = loaded_history;
+            
+            let mut current_id = self.current_session_id.write().await;
+            *current_id = session_id;
+        } else {
+            return Err(anyhow::anyhow!("Session not found"));
+        }
+        
+        Ok(())
     }
     
     /// Get message history
