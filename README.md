@@ -57,6 +57,7 @@ HAI-Net replaces the services you currently depend on third parties to provide:
 | Google Photos / Dropbox | **HAI-Net Storage** — distributed across your own devices via CAS + CRDT mesh |
 | ChatGPT / Claude (cloud) | **HAI-Net Persona** — your local AI agent, privately yours, runs on your own hardware |
 | AWS / GCP compute | **HAI-Net Collab** — community compute sharing for LLM inference, training, and research |
+| Starlink / ISP infrastructure | **TropoMesh** *(community initiative)* — community-owned tropospheric internet via solar-powered airships and ground nodes |
 
 ---
 
@@ -146,6 +147,7 @@ Your agent can:
 - Proactively surface opportunities, reminders, and community developments
 - Participate in the global HAI-Net hivemind on your behalf — networking and organising with other users' AI agents while exposing zero metadata to third parties
 - Extend its own capabilities by creating new tools and workflows (pending your approval)
+- **Help grow community hardware initiatives** — including coordinating TropoMesh node builds, tracking ground station readiness, and supporting community hardware pooling projects
 
 The AI operates under the **HAI-Net Constitutional Framework** — a set of immutable principles enforced in code by the Guardian System, ensuring it always acts in your interest and in accordance with fundamental human rights.
 
@@ -163,6 +165,52 @@ HAI-Net Collab (absorbed from PPLPWR) turns idle hardware into a community compu
 - AI-assisted participation decisions — your local agent evaluates network announcements and decides whether to participate based on your preferences and hardware compatibility
 
 The network's collective compute is used for LLM hosting, fine-tuning, dataset creation, and training new models aligned to the public interest — outcomes 100% available to the community.
+
+---
+
+## 📡 TropoMesh: Community-Owned Physical Infrastructure
+
+HAI-Net's vision has always required a physical layer that matches its software principles — infrastructure no corporation owns and no government can simply switch off. **TropoMesh** is that layer: a community-built, tropospheric mesh network of solar-powered airships and ground nodes, running entirely on unlicensed spectrum and hydrogen produced from tap water and sunlight.
+
+This is a **community hardware initiative** — the first of several planned (others include automated community garden mesh networks and local small-scale multi-purpose manufacturing hubs). TropoMesh is not a HAI-Net product. It is an open hardware project that the HAI-Net AI entity is programmed to actively support as part of its community building, sustainability, and custodianship directives.
+
+### Phase Zero — Join Now, Ground-First
+
+TropoMesh begins on the ground. **Phase Zero nodes** connect via the existing internet from day one — forming a real working community, running the full software stack in production, and proving every hardware component before anything flies.
+
+A Phase Zero Seed Node costs ~$440 and takes a weekend to build. It immediately contributes:
+- 📻 LoRa emergency mesh relay (Meshtastic)
+- 📡 WiFi hotspot for the local community
+- 💻 Distributed compute for TropoMesh design simulation and model training
+- 💾 IPFS distributed storage for open hardware files
+- 🌡️ Weather and environment sensors feeding the community data network
+
+The HAI-Net Persona is designed to help you participate: tracking community build progress, coordinating with other nodes, surfacing relevant design discussions, and helping your node contribute its idle compute to TropoMesh simulation workloads.
+
+### Phase One — The Airship Network
+
+When the ground community is established and hardware is proven, Phase Zero ground stations become launch and docking infrastructure for **solar-powered airships** operating at 3–5 km altitude. Each airship provides:
+- 📡 WiFi 7 — 20–40 Gbps downward capacity per node
+- 🔗 Laser inter-airship backbone — up to 5 Gbps, unjammable from ground
+- 💾 Up to 92 TB distributed IPFS storage
+- 🧠 Up to 400 TOPS edge AI compute
+- 🌡️ Real-time tropospheric weather sensors
+- 📻 LoRa coverage — 250 km radius from altitude
+
+Lifting gas is **hydrogen** — produced locally on-site from tap water and solar electricity, with zero external supply chain. No helium. No deliveries. No dependency that can fail in a crisis.
+
+### The Entry Ladder
+
+```
+$440    P0.0 Seed Node       → Join today. LoRa relay, IPFS, software contributor.
+$1,350  P0.1 Proto-Payload   → WiFi 7 hotspot, 40 TOPS AI, HF radio.
+$3,200  P0.2 Full Ground     → Community hub, 240 TOPS, 7.68 TB, 60 GHz backhaul.
+$9,663  P0.3 Station Ready   → H₂ production live. Docking mast ready. First airship next.
+$13,763 First Flying Node    → Standard airship above proven ground station.
+$23,250 Full Edge Node       → 92 TB, 400 TOPS, 20–40 Gbps WiFi 7. The network is complete.
+```
+
+→ [TropoMesh Proposal (full technical specification)](https://github.com/gaborkukucska/hai) *(coming soon)*
 
 ---
 
@@ -218,7 +266,7 @@ hainet/
 ## 📚 Documentation
 
 ### Core
-- **[Vision & Principles](docs/VISION.md)** — The ideas behind HAI-Net, the Seed, the Local Hub, the Global Network
+- **[Vision & Principles](docs/VISION.md)** — The ideas behind HAI-Net, the Seed, the Local Hub, the Global Network, and community hardware initiatives
 - **[Architecture & Tech Stack](docs/ARCHITECTURE.md)** — How HAI-Net is built under the hood
 - **[Installation & Quick Start](docs/INSTALLATION_GUIDE.md)** — Deploy your first local hub
 - **[Integration Plan](docs/INTEGRATION_PLAN.md)** — Grand integration roadmap (TrippleEffect, gChat, NoSlop, PPLPWR)
@@ -253,6 +301,7 @@ hainet/
 | hainet-portal (unified web UI) | ✅ Phase 5 Complete |
 | Media creation (NoSlop/ComfyUI/FFmpeg integration) | 🔄 Phase 3 Pending |
 | Email (federated, encrypted node-to-node) | 📋 Roadmap |
+| TropoMesh Phase Zero (community initiative) | 🌱 Proposal — Recruiting |
 
 **Latest milestone:** TrippleEffect agentic core fully ported to Rust with strict PM/Worker state machine delegation, semantic tool aliasing, loop detection, model failover, and a live dependency-aware Task Tree UI in the Unified Portal.
 
@@ -265,6 +314,8 @@ The galley — today's centralised internet — sits on top. But the water is be
 HAI-Net doesn't ask for permission from the platforms that currently own your social graph, your media, your search history, and your communications. It simply builds the alternative: a network of hubs run by people, serving people, constitutionally protected from ever becoming what it replaces.
 
 Every hub you run is a vote for a different kind of internet. Every post you publish without a server is proof it can exist.
+
+And when the community is ready — when the ground network is built and the hardware is proven — the airships rise. 🌤️
 
 > *"Building a future where AI works with humanity, not corporations."*
 
