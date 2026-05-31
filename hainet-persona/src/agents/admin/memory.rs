@@ -37,7 +37,6 @@ impl ConversationStore {
                 intent TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_conversations_timestamp ON conversations(timestamp);
-            CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
             "#
         )
         .execute(&pool)
@@ -46,6 +45,11 @@ impl ConversationStore {
 
         // Add session_id column if it doesn't exist (migration for existing DBs)
         let _ = sqlx::query("ALTER TABLE conversations ADD COLUMN session_id TEXT DEFAULT 'default'")
+            .execute(&pool)
+            .await;
+
+        // Create index for session_id (now that we know the column exists)
+        let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);")
             .execute(&pool)
             .await;
 

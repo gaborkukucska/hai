@@ -34,23 +34,24 @@ pub const MAX_OUTPUT_CHARS: usize = 32_768;
 ///
 /// Returns the pattern length if detected, None otherwise.
 pub fn detect_autoregressive_loop(text: &str) -> Option<usize> {
-    let text_len = text.len();
+    let chars: Vec<char> = text.chars().collect();
+    let chars_len = chars.len();
 
     // Need at least min_pattern_length * min_repetitions chars
-    if text_len < MIN_PATTERN_LENGTH * MIN_REPETITIONS {
+    if chars_len < MIN_PATTERN_LENGTH * MIN_REPETITIONS {
         return None;
     }
 
-    let max_pattern = std::cmp::min(MAX_PATTERN_LENGTH, text_len / MIN_REPETITIONS);
+    let max_pattern = std::cmp::min(MAX_PATTERN_LENGTH, chars_len / MIN_REPETITIONS);
 
     for pattern_length in MIN_PATTERN_LENGTH..=max_pattern {
-        let pattern = &text[text_len - pattern_length..];
+        let pattern = &chars[chars_len - pattern_length..];
 
         let mut is_loop = true;
         for i in 1..MIN_REPETITIONS {
-            let start = text_len - (pattern_length * (i + 1));
-            let end = text_len - (pattern_length * i);
-            let segment = &text[start..end];
+            let start = chars_len - (pattern_length * (i + 1));
+            let end = chars_len - (pattern_length * i);
+            let segment = &chars[start..end];
 
             if segment != pattern {
                 is_loop = false;
