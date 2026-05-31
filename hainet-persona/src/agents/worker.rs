@@ -416,6 +416,10 @@ impl WorkerAgent {
         let available_tools = self.discover_tools().await?;
         let tools_list_str = available_tools.join(", ");
         
+        if available_tools.is_empty() {
+            local_context.push("System: WARNING - You have 0 MCP tools available. You CANNOT perform any file modifications, code execution, or external network requests. You must immediately use 'request_state' to go to 'worker_report' and inform the PM that you lack the necessary tools to complete this task.".to_string());
+        }
+        
         while loop_count < max_loops {
             loop_count += 1;
             
@@ -425,7 +429,11 @@ impl WorkerAgent {
                 break;
             }
             if current_state == AgentState::Reporting && deliverables.is_empty() {
-                deliverables.push("Task executed. See context summary.".to_string());
+                if available_tools.is_empty() {
+                    deliverables.push("Task failed: No MCP tools were available to perform the work.".to_string());
+                } else {
+                    deliverables.push("Task executed. See context summary.".to_string());
+                }
                 break;
             }
             
@@ -695,7 +703,7 @@ impl WorkerAgent {
                         }
                     }
                     "add_task" => {
-                        let title = params.get("title").or(params.get("description"))
+                        let title = params.get("title").or(params.get("task_name")).or(params.get("name")).or(params.get("description"))
                             .and_then(|t| t.as_str()).unwrap_or("Untitled Sub-Task").to_string();
                         let description = params.get("description")
                             .and_then(|d| d.as_str()).unwrap_or(&title).to_string();

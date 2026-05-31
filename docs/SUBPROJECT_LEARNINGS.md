@@ -225,9 +225,13 @@
 3. **Don't use 10s retry intervals over Tor** — 45s minimum to avoid ERR_CANCELED avalanche (gChat v1.4.0)
 4. **Don't give PM agents operational tools during startup** — They skip planning (TrippleEffect v2.50)
 5. **Don't trust LLM output length** — Hard-cap at 32K chars to prevent KV cache exhaustion (TrippleEffect)
-7. **Don't hardcode DHCP IP addresses in configuration files** — Use MAC addresses and Hostnames to dynamically heal mesh manifests when subnets change (HAI-Net Session 9).
-8. **Don't blind-loop SSH authentication prompts without an exit hatch** — Implement an explicit `skip` keyword during network discovery to bypass rogue IoT devices (HAI-Net Session 9).
-9. **Don't rely on 127.0.0.1 for Web UIs served from remote nodes** — Use `window.location.hostname` with port fallback polling to dynamically locate daemon endpoints (HAI-Net Session 9).
+6. **Don't hardcode DHCP IP addresses in configuration files** — Use MAC addresses and Hostnames to dynamically heal mesh manifests when subnets change (HAI-Net Session 9).
+7. **Don't blind-loop SSH authentication prompts without an exit hatch** — Implement an explicit `skip` keyword during network discovery to bypass rogue IoT devices (HAI-Net Session 9).
+8. **Don't rely on 127.0.0.1 for Web UIs served from remote nodes** — Use `window.location.hostname` with port fallback polling to dynamically locate daemon endpoints (HAI-Net Session 9).
+9. **Don't use raw byte indexing (`&text[start..end]`) for LLM output** — LLMs frequently generate multi-byte characters (e.g. Japanese or emojis). Use `chars().collect::<Vec<char>>()` to prevent character boundary panics (TrippleEffect Loop Detector).
+10. **Don't ignore explicit LLM parameters in favor of keyword matching** — When the LLM specifies a `task_name` or `assignee` in JSON, those should override fallback heuristic keyword searches.
+11. **Don't allow agents to claim task completion if they lack tools** — Workers discovering 0 MCP tools must fall back to a failure state and inform the PM, rather than hallucinating success.
+12. **Don't allow PMs to enter standby with unassigned tasks** — Validate the project task list status before allowing terminal state transitions.
 
 ### Shared Capability Scoring Formula
 

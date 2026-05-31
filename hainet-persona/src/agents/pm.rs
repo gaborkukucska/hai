@@ -490,7 +490,7 @@ impl PMAgent {
             
             // Spawn workers and assign tasks
             for task_id in executable_tasks {
-                self.assign_task_to_worker(&task_id).await?;
+                self.assign_task_to_worker(&task_id, None).await?;
             }
             
             // Check if all tasks are complete
@@ -1811,7 +1811,7 @@ CRITICAL: JSON only. No explanations.
     }
     
     /// Assign task to a worker (reusing existing or spawning new)
-    async fn assign_task_to_worker(&mut self, task_id: &TaskId) -> Result<()> {
+    async fn assign_task_to_worker(&mut self, task_id: &TaskId, preferred_template: Option<&str>) -> Result<()> {
         // Get task details - scope ends here, releasing lock
         let (task_title, task_description) = {
             let pm = self.project_manager.read().await;
@@ -1833,8 +1833,17 @@ CRITICAL: JSON only. No explanations.
         };
         let _ = self.session_tasks.update_status(&session_task_title, SessionTaskStatus::InProgress);
         
-        // Select appropriate worker template based on task description
-        let template = WorkerTemplate::select_for_task(&task_description);
+        // Select appropriate worker template based on task description or explicit preference
+        let template = if let Some(pref) = preferred_template {
+            let templates = WorkerTemplate::all_templates();
+            if let Some(t) = templates.into_iter().find(|t| t.name.to_lowercase() == pref.to_lowercase()) {
+                t
+            } else {
+                WorkerTemplate::select_for_task(&task_description)
+            }
+        } else {
+            WorkerTemplate::select_for_task(&task_description)
+        };
         let template_name = template.name.clone();
         
         tracing::info!("Assigning task '{}' to worker type '{}'", task_title, template_name);
@@ -1858,7 +1867,7 @@ CRITICAL: JSON only. No explanations.
             self.active_workers.remove(&template_name);
             // Recursively retry assignment (will spawn new worker)
             // We need to Box::pin because async recursion
-            return Box::pin(self.assign_task_to_worker(task_id)).await;
+            return Box::pin(self.assign_task_to_worker(task_id, preferred_template)).await;
         }
         
         return Ok(());
@@ -2245,7 +2254,7 @@ CRITICAL: JSON only. No explanations.
                 if let Some(tasks) = action.get("tasks").and_then(|t| t.as_array()) {
                     let project_manager = self.project_manager.write().await;
                     for task_val in tasks {
-                        let title = task_val.get("description").or(task_val.get("id")).and_then(|t| t.as_str()).unwrap_or("Untitled Task").to_string();
+                        let title = task_val.get("title").or(task_val.get("task_name")).or(task_val.get("name")).or(task_val.get("description")).or(task_val.get("id")).and_then(|t| t.as_str()).unwrap_or("Untitled Task").to_string();
                         let description = task_val.get("description").and_then(|d| d.as_str()).unwrap_or(&title).to_string();
                         
                         match project_manager.create_task(&self.project_id, title.clone(), description).await {
@@ -2331,7 +2340,15 @@ CRITICAL: JSON only. No explanations.
                         "pm_team_status"      => AgentState::Managing,
                         "pm_report_check"     => AgentState::Reviewing,
                         "pm_audit"            => AgentState::Auditing,
-                        "pm_standby"          => AgentState::Idle,
+                        "pm_standby" => {
+                            // Check for unfinished tasks before allowing standby
+                            let summary = self.build_task_status_summary().await;
+                            if summary.contains("todo") || summary.contains("pending") || summary.contains("UnderReview") || summary.contains("Failed") {
+                                local_context.push("System: BLOCKED — cannot standby with unfinished tasks. Use project_management list_tasks to review and assign remaining tasks.".to_string());
+                                continue;
+                            }
+                            AgentState::Idle
+                        },
                         _ => {
                             local_context.push(format!("System: Error: Invalid PM state requested '{}'. Valid states: pm_startup, pm_build_team_tasks, pm_activate_workers, pm_manage, pm_report_check, pm_audit, pm_standby", new_state_str));
                             continue;
@@ -2367,7 +2384,7 @@ CRITICAL: JSON only. No explanations.
                         local_context.push(format!("System: [list_tasks result]\n{}", summary));
                     }
                     "add_task" => {
-                        let title = params.get("title").or(params.get("description"))
+                        let title = params.get("title").or(params.get("task_name")).or(params.get("name")).or(params.get("description"))
                             .and_then(|t| t.as_str()).unwrap_or("Untitled Task").to_string();
                         let description = params.get("description")
                             .and_then(|d| d.as_str()).unwrap_or(&title).to_string();
@@ -2389,7 +2406,7 @@ CRITICAL: JSON only. No explanations.
                         
                         if let Some(task_id) = task_id_opt {
                             if assignee.is_some() {
-                                match self.assign_task_to_worker(&task_id).await {
+                                match self.assign_task_to_worker(&task_id, assignee).await {
                                     Ok(()) => local_context.push(format!("System: Task created and assigned successfully. ID: {}, Title: {}", task_id, title)),
                                     Err(e) => local_context.push(format!("System: Task created, but error assigning task: {}", e)),
                                 }
@@ -2410,7 +2427,7 @@ CRITICAL: JSON only. No explanations.
                             
                             if let Some(task) = tasks.iter().find(|t| t.id.to_string().contains(task_id_str) || t.title.contains(task_id_str)) {
                                 let real_task_id = task.id.clone();
-                                match self.assign_task_to_worker(&real_task_id).await {
+                                match self.assign_task_to_worker(&real_task_id, assignee).await {
                                     Ok(()) => {
                                         local_context.push(format!("System: Task '{}' assigned to worker successfully.", task.title));
                                     }
