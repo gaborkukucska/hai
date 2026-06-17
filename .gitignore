@@ -50,6 +50,7 @@ $RECYCLE.BIN/
 *.tmp
 *.temp
 .cache/
+.temp/
 
 # Local development
 /local/
