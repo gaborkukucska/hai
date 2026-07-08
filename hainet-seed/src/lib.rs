@@ -32,9 +32,35 @@ pub struct HubConfig {
     #[serde(default)]
     pub has_static_ip: bool,
 
-    /// Optional NoSlop identity public key to register this hub with.
+    /// Optional shared media folder path.
     #[serde(default)]
-    pub noslop_identity_pub: Option<String>,
+    pub shared_folder: Option<String>,
+
+    /// NoSlop identity to clone onto this Hub (Identity Clone model).
+    /// When present, the Hub becomes a permanent mirror of the mobile identity,
+    /// keeping the same .onion address online 24/7 and allowing the AI Persona
+    /// to sign posts on behalf of the user.
+    #[serde(default)]
+    pub identity: Option<HubIdentity>,
+}
+
+/// The user's NoSlop cryptographic identity, transferred during deployment.
+/// All fields are Base64-encoded. The Hub stores these in its own keychain
+/// and uses them for signing, encryption, and Tor hidden service registration.
+#[derive(Debug, Deserialize)]
+pub struct HubIdentity {
+    /// Ed25519 signing public key (Base64, X.509 wrapped)
+    pub public_key: String,
+    /// Ed25519 signing private key (Base64, PKCS#8 wrapped)
+    pub private_key: String,
+    /// X25519 encryption public key (Base64)
+    pub enc_public_key: String,
+    /// X25519 encryption private key (Base64)
+    pub enc_private_key: String,
+    /// Tor v3 .onion address derived from the Ed25519 key
+    pub onion_address: String,
+    /// Human-readable display name ("handle.tripcode")
+    pub display_name: String,
 }
 
 /// Initialize the seed system
@@ -95,8 +121,12 @@ impl SeedService {
         if config.has_static_ip {
             info!("🌐 Static IP mode: skipping Cloudflare tunnel setup");
         }
-        if let Some(ref pub_key) = config.noslop_identity_pub {
-            info!("🔑 NoSlop identity linked: {}...", &pub_key[..pub_key.len().min(16)]);
+        if let Some(ref identity) = config.identity {
+            info!("🔑 NoSlop identity clone: {} (onion: {}...)",
+                identity.display_name, &identity.onion_address[..identity.onion_address.len().min(20)]);
+        }
+        if let Some(ref folder) = config.shared_folder {
+            info!("📂 Shared media folder: {}", folder);
         }
 
         // Step 1: Run the standard local installation workflow non-interactively
@@ -115,7 +145,37 @@ impl SeedService {
             tracing::warn!("⚠️  No Cloudflare token and no static IP — remote mobile access will not work!");
         }
 
-        // Step 3: Write the hub config for hainet-core to pick up on startup
+        // Step 3: Import the NoSlop identity into the Hub's keychain
+        if let Some(ref identity) = config.identity {
+            info!("🔐 Importing NoSlop identity into Hub keychain...");
+            let keychain_dir = dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("/root"))
+                .join(".hainet")
+                .join("identity");
+            let _ = std::fs::create_dir_all(&keychain_dir);
+
+            // Write each key component to disk (the Hub's core services read from here)
+            std::fs::write(keychain_dir.join("ed25519_pub.b64"), &identity.public_key)?;
+            std::fs::write(keychain_dir.join("ed25519_priv.b64"), &identity.private_key)?;
+            std::fs::write(keychain_dir.join("x25519_pub.b64"), &identity.enc_public_key)?;
+            std::fs::write(keychain_dir.join("x25519_priv.b64"), &identity.enc_private_key)?;
+            std::fs::write(keychain_dir.join("onion_address"), &identity.onion_address)?;
+            std::fs::write(keychain_dir.join("display_name"), &identity.display_name)?;
+
+            // Restrict permissions to owner-only
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                for entry in std::fs::read_dir(&keychain_dir)? {
+                    let entry = entry?;
+                    std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(0o600))?;
+                }
+                std::fs::set_permissions(&keychain_dir, std::fs::Permissions::from_mode(0o700))?;
+            }
+            info!("✅ Identity imported: {} → {}", identity.display_name, keychain_dir.display());
+        }
+
+        // Step 4: Write the hub config for hainet-core to pick up on startup
         let hub_config_dir = "/etc/hainet";
         let _ = std::fs::create_dir_all(hub_config_dir);
         std::fs::write(

@@ -3,24 +3,48 @@
 ## Context & Architecture
 HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoSlop mobile application.
 - **The Hub (Rust)** handles 24/7 Tor connectivity, AI media processing (Whisper, Ollama, FFmpeg), and master data storage.
-- **NoSlop (Android)** is the client, holding the same Ed25519 private key. 
+- **NoSlop (Android)** is the client, holding the same Ed25519 private key (Identity Clone model).
 - The Hub must expose a secure API for the mobile app to sync data, push backups, and approve AI-processed media.
 
 **LLM INSTRUCTION:** When implementing these phases, do NOT leave placeholder, mock, or simulated code. All implementations must be fully functional. Ensure standard Rust testing practices are followed and `docs/PROJECT_STATUS.toml` is updated upon completion.
 
 ---
 
-### Phase 1: Headless Seed Deployment
+### Phase 1: Headless Seed Deployment ✅ IMPLEMENTED
+
 **Goal:** Allow `hainet-seed` to be deployed silently via NoSlop's mobile SSH connection.
 
-1. **CLI Argument Parsing (`hainet-seed/src/main.rs`)**
-   - Implement a `--config <file_path>` argument.
-2. **JSON Config Ingestion (`hainet-seed/src/installer/mod.rs`)**
-   - Define a Serde schema for the incoming config (Target Drive, IdentityKeys, Network preferences).
-   - If the `--config` flag is present, completely bypass the `dialoguer` terminal prompts.
-3. **Identity Bootstrapping (`hainet-social/src/identity.rs`)**
-   - Accept the injected Ed25519 and X25519 private keys from NoSlop.
-   - Initialize the `hainet-social` node using these exact keys, ensuring the Hub derives the same `.onion` address and `Handle.Tripcode` as the mobile app.
+**Status:** Fully operational. NoSlop deploys HAI-Net by cloning the repo and running `cargo run --package hainet-seed --bin hainet-seed install -- --config hub_config.json`.
+
+1. **CLI Argument Parsing (`hainet-seed/src/main.rs`)** ✅
+   - `--config <file_path>` argument implemented via `clap` on the `Install` subcommand.
+2. **JSON Config Ingestion (`hainet-seed/src/lib.rs`)** ✅
+   - `HubConfig` struct with Serde deserialization accepting:
+     - `cloudflare_token: Option<String>` — Cloudflare Tunnel token
+     - `has_static_ip: bool` — bypasses tunnel requirement
+     - `shared_folder: Option<String>` — user-specified media path
+     - `identity: Option<HubIdentity>` — full Identity Clone payload
+   - `HubIdentity` struct with 6 fields: `public_key`, `private_key`, `enc_public_key`, `enc_private_key`, `onion_address`, `display_name`
+   - When `--config` flag is present, all `dialoguer` terminal prompts are completely bypassed.
+3. **Identity Clone Import (`hainet-seed/src/lib.rs`)** ✅
+   - Receives Ed25519 and X25519 keypairs from NoSlop via the `identity` JSON block.
+   - Writes each key component to `~/.hainet/identity/`:
+     ```
+     ~/.hainet/identity/         (drwx------)
+     ├── ed25519_pub.b64         (-rw-------)
+     ├── ed25519_priv.b64        (-rw-------)
+     ├── x25519_pub.b64          (-rw-------)
+     ├── x25519_priv.b64         (-rw-------)
+     ├── onion_address           (-rw-------)
+     └── display_name            (-rw-------)
+     ```
+   - File permissions hardened to `chmod 600` per file, `chmod 700` on directory (Unix only).
+   - The Hub derives the same `.onion` address and `Handle.Tripcode` as the mobile app, enabling a true identity mirror.
+4. **Cloudflare Tunnel Setup (`hainet-seed/src/lib.rs`)** ✅
+   - `setup_cloudflared_tunnel()` installs `cloudflared` binary, creates a systemd service, and starts it automatically.
+   - Only triggered when `cloudflare_token` is provided and `has_static_ip` is false.
+5. **Config Persistence** ✅
+   - Full `hub_config.json` is written to `/etc/hainet/hub_config.json` for `hainet-core` to read on startup.
 
 ### Phase 2: Dual Hidden Services & Remote API
 **Goal:** Allow NoSlop to securely communicate with the Hub over Tor.
