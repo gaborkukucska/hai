@@ -80,7 +80,8 @@ pub fn encrypt_seed(seed_phrase: &str, passphrase: &str) -> Result<Vec<u8>> {
 
 pub fn verify_qr_signature(session_id: &str, public_key_b64: &str, signature_b64: &str) -> Result<bool> {
     use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
-    use ed25519_dalek::{PublicKey, Signature, Verifier};
+    use std::convert::TryFrom;
+    use ed25519_dalek::{VerifyingKey, Signature, Verifier};
 
     let owner_pub = std::fs::read_to_string(get_hainet_dir().join("identity/ed25519_pub.b64")).unwrap_or_default();
     if owner_pub.trim() != public_key_b64.trim() {
@@ -109,12 +110,12 @@ pub fn verify_qr_signature(session_id: &str, public_key_b64: &str, signature_b64
         return Ok(false);
     }
     
-    let public_key = match PublicKey::from_slice(raw_pub) {
+    let public_key = match VerifyingKey::try_from(raw_pub) {
         Ok(k) => k,
         Err(_) => return Ok(false),
     };
     
-    let signature = match Signature::from_slice(&sig_bytes) {
+    let signature = match Signature::try_from(sig_bytes.as_slice()) {
         Ok(s) => s,
         Err(_) => return Ok(false),
     };

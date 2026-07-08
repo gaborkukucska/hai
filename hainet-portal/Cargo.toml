@@ -10,6 +10,9 @@ authors.workspace = true
 description = "HAI-Net Portal - Chat interface for AI interaction"
 
 [dependencies]
+ed25519-dalek = "2.1.0"
+base64 = "0.22.1"
+
 dirs = "5.0"
 chrono = "0.4"
 tracing-appender = "0.2"
@@ -59,6 +62,3 @@ path = "src/main.rs"
 name = "hainet_portal"
 path = "src/lib.rs"
 
-ed25519-dalek = "2.1.0"
-base64 = "0.22.1"
-uuid = { version = "1.6.1", features = ["v4"] }
