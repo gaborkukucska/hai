@@ -162,6 +162,28 @@ impl SeedService {
         )?;
         info!("✅ Hub config written to {}/hub_config.json", hub_config_dir);
 
+        // Step 4: Restart hainet-core to pick up the new identity and config
+        // Check if systemctl is available and if hainet-core service exists
+        let has_systemctl = std::process::Command::new("which")
+            .arg("systemctl")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if has_systemctl {
+            info!("🔄 Restarting hainet-core service to apply new configuration...");
+            let restart_status = std::process::Command::new("sudo")
+                .args(["systemctl", "restart", "hainet-core.service"])
+                .status();
+            
+            match restart_status {
+                Ok(status) if status.success() => info!("✅ hainet-core restarted successfully"),
+                _ => tracing::warn!("⚠️ Failed to restart hainet-core service. A manual reboot may be required."),
+            }
+        } else {
+            info!("ℹ️ systemctl not found, skipping service restart. A manual restart of hainet-core is required.");
+        }
+
         info!("✅ Config-driven installation complete!");
         Ok(())
     }
