@@ -18,7 +18,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Install HAI-Net with AI-guided setup
-    Install,
+    Install {
+        /// Path to a JSON configuration file for non-interactive (mobile-assisted) installation.
+        /// When provided, the installer runs without user prompts, using the supplied config
+        /// for credentials, cloudflare token, and deployment target.
+        #[arg(long, value_name = "FILE")]
+        config: Option<String>,
+    },
     /// Uninstall HAI-Net from deployed devices
     Uninstall,
     /// Check system requirements
@@ -38,11 +44,18 @@ async fn main() -> Result<()> {
     info!("📋 Version: {}", env!("CARGO_PKG_VERSION"));
 
     match cli.command {
-        Commands::Install => {
-            info!("🚀 Starting AI-guided installation...");
-            
-            let mut service = SeedService::new().await?;
-            service.install().await?;
+        Commands::Install { config } => {
+            if let Some(config_path) = config {
+                info!("🚀 Starting config-driven (mobile-assisted) installation from {}...", config_path);
+                
+                let mut service = SeedService::new().await?;
+                service.install_from_config(&config_path).await?;
+            } else {
+                info!("🚀 Starting AI-guided installation...");
+                
+                let mut service = SeedService::new().await?;
+                service.install().await?;
+            }
             
             info!("✅ HAI-Net installation completed successfully!");
         }

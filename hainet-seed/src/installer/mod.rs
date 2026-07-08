@@ -134,6 +134,31 @@ impl Installer {
         Ok(())
     }
 
+    /// Non-interactive installation of core dependencies only.
+    /// Called by the mobile-assisted hub deployer (via `--config`).
+    /// Skips shared drive prompts and device scanning.
+    pub async fn install_core_deps_only(&mut self) -> Result<()> {
+        info!("🚀 Installing core dependencies (non-interactive)...");
+
+        self.install_ollama().await?;
+        self.download_default_model().await?;
+        self.install_whisper().await?;
+        self.download_whisper_model().await?;
+        self.install_piper().await?;
+        self.download_piper_model().await?;
+
+        if self.tier == SystemTier::Tier3 || self.tier == SystemTier::Tier4 {
+            self.install_comfyui().await?;
+        } else {
+            info!("⏭️  Skipping ComfyUI (requires Tier 3+ GPU).");
+        }
+
+        self.install_ffmpeg().await?;
+
+        info!("✅ Core dependencies installed!");
+        Ok(())
+    }
+
     /// Check for shared drive setup, automatically detecting if possible.
     /// Returns `Some((local_mount, host_ip, remote_path))` or `None` if not using a shared drive.
     fn check_shared_drive_setup(&self) -> Result<Option<(String, String, String)>> {

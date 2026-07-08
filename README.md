@@ -230,7 +230,7 @@ hainet/
 │   └── firewall          # Privacy-preserving ingress filtering
 ├── hainet-chain/         # Blockchain — media provenance, identity, governance
 ├── hainet-collab/        # Compute sharing — hardware profiling, idle detection, scheduling
-├── hainet-seed/          # Smart installer — LAN scan, hardware detection, mesh deployment
+├── hainet-seed/          # Smart installer — LAN scan, hardware detection, non-interactive mobile-assisted mesh deployment
 ├── hainet-portal/        # Headless web UI (React/Vite, embedded in binary via rust-embed)
 ├── hainet-bridge/        # External API gateway
 ├── hainet-vault/         # Constitution, Declaration of Rights, Governance
@@ -297,7 +297,7 @@ hainet/
 | hainet-social (gChat gossip mesh, E2EE, media relay) | ✅ Ported to Rust |
 | hainet-chain (blockchain, identity, governance) | ✅ Functional |
 | hainet-collab (compute sharing, PPLPWR integration) | 🔄 Phase 2 Active |
-| hainet-seed (smart installer, mesh deployment) | ✅ Operational |
+| hainet-seed (smart installer, mobile-assisted mesh deployment) | ✅ Operational |
 | hainet-portal (unified web UI) | ✅ Phase 5 Complete |
 | Media creation (NoSlop/ComfyUI/FFmpeg integration) | 🔄 Phase 3 Pending |
 | Email (federated, encrypted node-to-node) | 📋 Roadmap |
