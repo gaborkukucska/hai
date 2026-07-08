@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     
     // Generate a random JWT secret for the session (regenerated on restart)
     let jwt_secret = uuid::Uuid::new_v4().to_string();
-    let state = api::AppState { jwt_secret };
+    let state = api::AppState { jwt_secret, qr_sessions: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())) };
 
     // Build the Axum router
     let app = Router::new()

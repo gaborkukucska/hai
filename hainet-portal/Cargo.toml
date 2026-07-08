@@ -58,3 +58,7 @@ path = "src/main.rs"
 [lib]
 name = "hainet_portal"
 path = "src/lib.rs"
+
+ed25519-dalek = "2.1.0"
+base64 = "0.22.1"
+uuid = { version = "1.6.1", features = ["v4"] }

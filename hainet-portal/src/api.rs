@@ -11,6 +11,7 @@ use crate::auth::{get_hainet_dir, hash_password, verify_password, encrypt_seed, 
 #[derive(Clone)]
 pub struct AppState {
     pub jwt_secret: String,
+    pub qr_sessions: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, bool>>>,
 }
 
 #[derive(Serialize)]
@@ -36,6 +37,10 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/login", post(auth_login))
         .route("/generate-seed", get(generate_seed_route))
         .route("/verify", get(auth_verify))
+        
+        .route("/qr/init", post(qr_login_init))
+        .route("/qr/verify", post(qr_login_verify))
+        .route("/qr/status/:session_id", get(qr_login_status))
         .with_state(state)
 }
 
@@ -143,4 +148,53 @@ async fn auth_login(
     let cookie = format!("hainet_token={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400", token);
     
     ([(header::SET_COOKIE, cookie)], Json(serde_json::json!({"status": "success"}))).into_response()
+}
+
+#[derive(serde::Deserialize)]
+pub struct QrVerifyRequest {
+    pub session_id: String,
+    pub public_key: String,
+    pub signature: String,
+}
+
+async fn qr_login_init(axum::extract::State(state): axum::extract::State<AppState>) -> impl IntoResponse {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    state.qr_sessions.lock().await.insert(session_id.clone(), false);
+    axum::Json(serde_json::json!({ "session_id": session_id })).into_response()
+}
+
+async fn qr_login_verify(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::Json(payload): axum::Json<QrVerifyRequest>
+) -> impl IntoResponse {
+    match crate::auth::verify_qr_signature(&payload.session_id, &payload.public_key, &payload.signature) {
+        Ok(true) => {
+            let mut sessions = state.qr_sessions.lock().await;
+            if sessions.contains_key(&payload.session_id) {
+                sessions.insert(payload.session_id.clone(), true);
+                return (StatusCode::OK, axum::Json(serde_json::json!({"status": "verified"}))).into_response();
+            }
+            (StatusCode::NOT_FOUND, "Session not found").into_response()
+        },
+        _ => (StatusCode::UNAUTHORIZED, "Invalid signature").into_response()
+    }
+}
+
+async fn qr_login_status(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>
+) -> impl IntoResponse {
+    let is_verified = {
+        let sessions = state.qr_sessions.lock().await;
+        sessions.get(&session_id).copied().unwrap_or(false)
+    };
+
+    if is_verified {
+        let token = crate::auth::generate_jwt(&state.jwt_secret).unwrap_or_default();
+        let cookie = format!("hainet_token={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400", token);
+        state.qr_sessions.lock().await.remove(&session_id);
+        ([(axum::http::header::SET_COOKIE, cookie)], axum::Json(serde_json::json!({"status": "authenticated"}))).into_response()
+    } else {
+        (StatusCode::OK, axum::Json(serde_json::json!({"status": "pending"}))).into_response()
+    }
 }
