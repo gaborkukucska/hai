@@ -20,8 +20,6 @@ HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoS
    - `--config <file_path>` argument implemented via `clap` on the `Install` subcommand.
 2. **JSON Config Ingestion (`hainet-seed/src/lib.rs`)** ✅
    - `HubConfig` struct with Serde deserialization accepting:
-     - `cloudflare_token: Option<String>` — Cloudflare Tunnel token
-     - `has_static_ip: bool` — bypasses tunnel requirement
      - `shared_folder: Option<String>` — user-specified media path
      - `identity: Option<HubIdentity>` — full Identity Clone payload
    - `HubIdentity` struct with 6 fields: `public_key`, `private_key`, `enc_public_key`, `enc_private_key`, `onion_address`, `display_name`
@@ -40,10 +38,7 @@ HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoS
      ```
    - File permissions hardened to `chmod 600` per file, `chmod 700` on directory (Unix only).
    - The Hub derives the same `.onion` address and `Handle.Tripcode` as the mobile app, enabling a true identity mirror.
-4. **Cloudflare Tunnel Setup (`hainet-seed/src/lib.rs`)** ✅
-   - `setup_cloudflared_tunnel()` installs `cloudflared` binary, creates a systemd service, and starts it automatically.
-   - Only triggered when `cloudflare_token` is provided and `has_static_ip` is false.
-5. **Config Persistence** ✅
+4. **Config Persistence** ✅
    - Full `hub_config.json` is written to `/etc/hainet/hub_config.json` for `hainet-core` to read on startup.
 
 ### Phase 2: Dual Hidden Services & Remote API
