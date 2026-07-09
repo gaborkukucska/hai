@@ -408,6 +408,20 @@ pub async fn handle_invoke(
             }))
         },
         
+        // ====================================================================
+        // --- Mobile Data Sync (Phase 2) ---
+        // ====================================================================
+        "sync_dms" => {
+            debug!("Mobile requested DM sync");
+            // Placeholder: Returns Hub's DM state
+            Ok(json!({"status": "ok", "dms": []}))
+        },
+        "sync_contacts" => {
+            debug!("Mobile requested Contacts sync");
+            // Placeholder: Returns Hub's Contacts state
+            Ok(json!({"status": "ok", "contacts": []}))
+        },
+
         // Fallback for unimplemented endpoints
         _ => {
             error!("Unimplemented API command: {}", cmd);

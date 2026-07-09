@@ -10,12 +10,13 @@ HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoS
 
 ---
 
-### Phase 1: Headless Seed Deployment ✅ IMPLEMENTED
+### Phase 1: Headless Seed Deployment & Verification ✅ FULLY OPERATIONAL
 
 **Goal:** Allow `hainet-seed` to be deployed silently via NoSlop's mobile SSH connection.
 
 **Status:** Fully operational. NoSlop deploys HAI-Net by cloning the repo and running `cargo run --package hainet-seed --bin hainet-seed install -- --config hub_config.json`.
 
+0. **Smart Auth State**: `hainet-core` now detects 'Identity Clone' deployments and provides a `qr_login_only` status to the frontend, bypassing the need for manual seed entry.
 1. **CLI Argument Parsing (`hainet-seed/src/main.rs`)** ✅
    - `--config <file_path>` argument implemented via `clap` on the `Install` subcommand.
 2. **JSON Config Ingestion (`hainet-seed/src/lib.rs`)** ✅
