@@ -42,7 +42,8 @@ HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoS
 4. **Config Persistence** ✅
    - Full `hub_config.json` is written to `/etc/hainet/hub_config.json` for `hainet-core` to read on startup.
 
-### Phase 2: Dual Hidden Services & Remote API
+### Phase 2: Dual Hidden Services & Remote API ✅ FULLY OPERATIONAL
+**Status:** Mobile uses LAN IP locally, and falls back to SOCKS5 over Tor to hit the Hub's persistent `.onion` address on port 8080 globally.
 **Goal:** Allow NoSlop to securely communicate with the Hub over Tor.
 
 1. **Dual Tor Services (`hainet-core/src/networking/tor.rs`)**

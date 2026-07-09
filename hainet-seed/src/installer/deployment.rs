@@ -620,7 +620,89 @@ WantedBy=multi-user.target
             }
         }
 
+        // Step 7: Configure Tor Hidden Service
+        if let Err(e) = self.setup_tor_hidden_service() {
+            println!("⚠️  Failed to setup Tor Hidden Service: {}", e);
+        } else {
+            println!("✓ Tor Hidden Service configured successfully");
+        }
+
         println!("✓ Deployment to localhost complete");
+
+        Ok(())
+    }
+
+    fn setup_tor_hidden_service(&self) -> Result<()> {
+        use std::process::Command;
+        use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
+        use sha2::{Sha512, Digest};
+        use std::io::Write;
+
+        println!("🧅 Installing and configuring Tor Hidden Service...");
+
+        if Command::new("which").arg("tor").output().map_or(true, |o| !o.status.success()) {
+            let _ = Command::new("sudo").args(&["apt-get", "update", "-qq"]).status();
+            let _ = Command::new("sudo").args(&["apt-get", "install", "-y", "tor"]).status();
+        }
+
+        let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+        let priv_file = ident_dir.join("ed25519_priv.b64");
+        
+        if priv_file.exists() {
+            let priv_b64 = std::fs::read_to_string(&priv_file)?;
+            let pkcs8 = b64.decode(priv_b64.trim()).context("Failed to decode base64")?;
+            
+            if pkcs8.len() >= 32 {
+                // Extract 32-byte seed from PKCS#8
+                let seed = &pkcs8[pkcs8.len() - 32..];
+                
+                // Expand to 64 bytes via SHA-512 and clamp
+                let mut hasher = Sha512::new();
+                hasher.update(seed);
+                let mut expanded = hasher.finalize();
+                expanded[0] &= 248;
+                expanded[31] &= 127;
+                expanded[31] |= 64;
+
+                let mut hs_key = Vec::new();
+                hs_key.extend_from_slice(b"== ed25519v1-secret: type0 ==\0\0\0");
+                hs_key.extend_from_slice(&expanded);
+
+                let tmp_key_path = "/tmp/hs_ed25519_secret_key";
+                let mut f = std::fs::File::create(tmp_key_path)?;
+                f.write_all(&hs_key)?;
+
+                let setup_script = "
+TOR_USER=$(id -u debian-tor >/dev/null 2>&1 && echo 'debian-tor' || echo 'tor')
+mkdir -p /var/lib/tor/hainet/
+mv /tmp/hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
+chown -R $TOR_USER:$TOR_USER /var/lib/tor/hainet/
+chmod 700 /var/lib/tor/hainet/
+chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
+";
+                let tmp_script = "/tmp/setup_tor.sh";
+                std::fs::write(tmp_script, setup_script)?;
+                Command::new("sudo").args(&["bash", tmp_script]).status()?;
+                let _ = std::fs::remove_file(tmp_script);
+            }
+        }
+
+        let check_torrc = Command::new("grep").args(&["HAI-Net Hidden Service", "/etc/tor/torrc"]).status();
+        if check_torrc.map_or(true, |s| !s.success()) {
+            let append_script = "
+echo '' >> /etc/tor/torrc
+echo '# HAI-Net Hidden Service' >> /etc/tor/torrc
+echo 'HiddenServiceDir /var/lib/tor/hainet/' >> /etc/tor/torrc
+echo 'HiddenServicePort 8080 127.0.0.1:8080' >> /etc/tor/torrc
+echo 'HiddenServicePort 9999 127.0.0.1:9999' >> /etc/tor/torrc
+";
+            let tmp_script = "/tmp/append_torrc.sh";
+            std::fs::write(tmp_script, append_script)?;
+            Command::new("sudo").args(&["bash", tmp_script]).status()?;
+            let _ = std::fs::remove_file(tmp_script);
+        }
+
+        let _ = Command::new("sudo").args(&["systemctl", "restart", "tor"]).status();
 
         Ok(())
     }

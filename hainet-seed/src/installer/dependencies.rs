@@ -36,6 +36,11 @@ impl DependencyChecker {
             warn!("Git not found - some features may be limited");
         }
         
+        // Check tor
+        if !self.has_command("tor").await {
+            missing.push("tor".to_string());
+        }
+        
         Ok(missing)
     }
     
