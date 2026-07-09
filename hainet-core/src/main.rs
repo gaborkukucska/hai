@@ -341,8 +341,11 @@ async fn run_health_server(
                     }
                 },
                 ("GET", "/api/auth/status") => {
+                    let has_identity = get_hainet_dir().join("identity/ed25519_pub.b64").exists();
                     if is_setup() {
                         ("200 OK".to_string(), r#"{"status":"login_required"}"#.to_string())
+                    } else if has_identity {
+                        ("200 OK".to_string(), r#"{"status":"qr_login_only"}"#.to_string())
                     } else {
                         ("200 OK".to_string(), r#"{"status":"setup_required"}"#.to_string())
                     }

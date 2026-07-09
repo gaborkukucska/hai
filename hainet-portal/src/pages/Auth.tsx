@@ -31,6 +31,9 @@ export default function Auth() {
         if (data.status === 'setup_required') {
           setAuthState('setup');
           generateSeed();
+        } else if (data.status === 'qr_login_only') {
+          setAuthState('login');
+          initQrLogin();
         } else {
           setAuthState('login');
         }
