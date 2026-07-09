@@ -166,6 +166,7 @@ async fn main() -> Result<()> {
     let metrics_state: MetricsState = Arc::new(RwLock::new(metrics_collector));
     let metrics_storage_state: MetricsStorageState = Arc::new(RwLock::new(metrics_storage));
     let settings_state: SettingsState = Arc::new(RwLock::new(settings_storage));
+    let qr_sessions = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
     let tts_handler = TTSHandler::new();
     
     let app_state = Arc::new(AppState {
@@ -183,6 +184,7 @@ async fn main() -> Result<()> {
     let health_metrics_state = metrics_state.clone();
     let health_metrics_storage = metrics_storage_state.clone();
     let health_settings_state = settings_state.clone();
+    let health_qr_sessions = qr_sessions.clone();
     let health_handle = tokio::spawn(async move {
         if let Err(e) = run_health_server(
             health_port, 
@@ -190,7 +192,8 @@ async fn main() -> Result<()> {
             health_app_state, 
             health_metrics_state, 
             health_metrics_storage, 
-            health_settings_state
+            health_settings_state,
+            health_qr_sessions
         ).await {
             warn!("⚠  Health endpoint failed: {}", e);
         }
@@ -280,7 +283,8 @@ async fn run_health_server(
     app_state: Arc<AppState>,
     metrics_state: MetricsState,
     metrics_storage: MetricsStorageState,
-    settings_state: SettingsState
+    settings_state: SettingsState,
+    qr_sessions: Arc<tokio::sync::Mutex<std::collections::HashMap<String, bool>>>
 ) -> Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -299,6 +303,7 @@ async fn run_health_server(
         let metrics_state = metrics_state.clone();
         let metrics_storage = metrics_storage.clone();
         let settings_state = settings_state.clone();
+        let qr_sessions = qr_sessions.clone();
         
         tokio::spawn(async move {
             let mut buf = [0u8; 8192];
@@ -340,6 +345,48 @@ async fn run_health_server(
                         ("200 OK".to_string(), r#"{"status":"login_required"}"#.to_string())
                     } else {
                         ("200 OK".to_string(), r#"{"status":"setup_required"}"#.to_string())
+                    }
+                },
+                ("POST", "/api/auth/qr/init") => {
+                    let session_id = uuid::Uuid::new_v4().to_string();
+                    let mut sessions = qr_sessions.lock().await;
+                    sessions.insert(session_id.clone(), false);
+                    ("200 OK".to_string(), format!(r#"{{"session_id":"{}"}}"#, session_id))
+                },
+                ("POST", "/api/auth/qr/verify") => {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body_str) {
+                        let session_id = json.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let public_key = json.get("public_key").and_then(|v| v.as_str()).unwrap_or("");
+                        let signature = json.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+                        
+                        if verify_qr_signature(session_id, public_key, signature) {
+                            let mut sessions = qr_sessions.lock().await;
+                            if sessions.contains_key(session_id) {
+                                sessions.insert(session_id.to_string(), true);
+                                ("200 OK".to_string(), r#"{"status":"verified"}"#.to_string())
+                            } else {
+                                ("404 Not Found".to_string(), r#"{"error":"Session not found"}"#.to_string())
+                            }
+                        } else {
+                            ("401 Unauthorized".to_string(), r#"{"error":"Invalid signature"}"#.to_string())
+                        }
+                    } else {
+                        ("400 Bad Request".to_string(), r#"{"error":"invalid_json"}"#.to_string())
+                    }
+                },
+                ("GET", p) if p.starts_with("/api/auth/qr/status/") => {
+                    let session_id = p.trim_start_matches("/api/auth/qr/status/");
+                    let is_verified = {
+                        let sessions = qr_sessions.lock().await;
+                        sessions.get(session_id).copied().unwrap_or(false)
+                    };
+                    
+                    if is_verified {
+                        IS_LOGGED_IN.store(true, Ordering::SeqCst);
+                        qr_sessions.lock().await.remove(session_id);
+                        ("200 OK".to_string(), r#"{"status":"authenticated"}"#.to_string())
+                    } else {
+                        ("200 OK".to_string(), r#"{"status":"pending"}"#.to_string())
                     }
                 },
                 ("GET", "/api/auth/generate-seed") => (
@@ -535,4 +582,52 @@ fn serve_static_asset(path: &str) -> (String, String) {
             }
         }
     }
+}
+
+fn verify_qr_signature(session_id: &str, public_key_b64: &str, signature_b64: &str) -> bool {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
+    use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+    
+    let owner_pub = std::fs::read_to_string(get_hainet_dir().join("identity/ed25519_pub.b64")).unwrap_or_default();
+    if owner_pub.trim() != public_key_b64.trim() {
+        return false;
+    }
+    
+    let pub_bytes = match b64.decode(public_key_b64) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    
+    let raw_pub = if pub_bytes.len() == 44 {
+        &pub_bytes[12..44]
+    } else if pub_bytes.len() == 32 {
+        &pub_bytes[..]
+    } else {
+        return false;
+    };
+    
+    let sig_bytes = match b64.decode(signature_b64) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    
+    if sig_bytes.len() != 64 {
+        return false;
+    }
+    
+    let public_key = match VerifyingKey::try_from(raw_pub) {
+        Ok(k) => k,
+        Err(_) => return false,
+    };
+    
+    let signature = match Signature::try_from(sig_bytes.as_slice()) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    
+    public_key.verify(session_id.as_bytes(), &signature).is_ok()
+}
+
+fn get_hainet_dir() -> std::path::PathBuf {
+    dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet")
 }
