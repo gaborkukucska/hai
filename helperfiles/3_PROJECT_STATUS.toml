@@ -3,9 +3,26 @@
 # Last Updated: 2026-05-28T12:30:00+08:00
 
 [meta]
-last_updated = "2026-05-28T12:30:00.000000+08:00"
+last_updated = "2026-07-10T15:52:00.000000+08:00"
 project_name = "HAI-Net"
 version = "0.57"
+
+[[completed_cycles]]
+id = "NoSlop-Hub-Ph1-Ph2"
+date = "2026-07-10"
+phase = "NoSlop Hub Integration"
+session = "Active-Passive Identity & Global Tor Connectivity"
+changes = [
+    "Deployed headless HAI-Net Hub via SSH from NoSlop Android app",
+    "Implemented QR-code-based NoSlop identity authentication bridging",
+    "Updated Mobile TorService to skip local hidden service broadcast when Hub is linked",
+    "Implemented Native Tor Hidden Service configuration in hainet-seed using PKCS#8 Ed25519 expansion",
+    "Routed mobile API calls through Tor to the Hub's .onion address on port 8080"
+]
+status = "success"
+next_session = "Phase 3: Deep Data Sync (Contacts, DMs, Feeds)"
+current_phase = "Grand Integration — NoSlop Active-Passive Mode"
+current_cycle = "Phase 2 — Global Tor Connectivity"
 
 [[completed_cycles]]
 id = "12.3"
