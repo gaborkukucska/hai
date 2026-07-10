@@ -44,6 +44,14 @@ HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoS
 
 ### Phase 2: Dual Hidden Services & Remote API ✅ FULLY OPERATIONAL
 **Status:** Mobile uses LAN IP locally, and falls back to SOCKS5 over Tor to hit the Hub's persistent `.onion` address on port 8080 globally.
+
+1. **Dual Tor Services** ✅
+   - Hub dynamically generates `hs_ed25519_secret_key` via SHA-512 expansion of the PKCS#8 mobile identity.
+   - Configures `/etc/tor/torrc` to expose both Port 9999 (Mesh Gossip) and Port 8080 (REST API) on the same persistent `.onion`.
+2. **Smart Firewall Integration** ✅
+   - Hub listens on TCP 9999.
+   - Mobile pushes its Contacts list (`sync_push_peers`) to populate the Hub's `TrustFirewall`.
+   - Hub drops spam/untrusted packets at the edge and buffers valid packets in memory for mobile to pull (`sync_pull_packets`).
 **Goal:** Allow NoSlop to securely communicate with the Hub over Tor.
 
 1. **Dual Tor Services (`hainet-core/src/networking/tor.rs`)**
@@ -55,8 +63,18 @@ HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoS
    - Implement `/api/backup/pull` (Serve the latest ZIP to NoSlop for mnemonic restoration).
    - Implement `/api/sync/clearnet` (Merge liked/saved RSS items).
 
-### Phase 3: Creator Media Ingestion Pipeline
-**Goal:** Automatically process existing media dropped into the Hub, preparing it for NoSlop approval.
+### Phase 3: Deep Data Sync & Portal Population (NEXT)
+**Goal:** Transition the Hub from an in-memory relay into a persistent database to populate the Web UI and offload mobile processing.
+
+1. **Rust SQLite Persistence**
+   - Replicate NoSlop's Room database schema (Posts, Comments, Reactions, DMs) in `hainet-social`.
+   - When the Hub's firewall accepts a packet, persist it to disk *before* making it available for mobile sync.
+   - Wire the React `hainet-portal` to this database so the Web UI displays the user's social feed and chats.
+2. **Heavy Media Offloading**
+   - Port NoSlop's AIMD chunk-downloading algorithm (`MediaManager.kt`) to Rust.
+   - Allow the Hub to download 50MB video files over Tor 24/7. Mobile app will request the fully assembled MP4 over the LAN/Tor API instead of handling chunks itself.
+3. **Creator Media Ingestion Pipeline**
+   - Use `notify` to monitor `/media/hai-drive/uploads`. Trigger Whisper/Ollama metadata generation and queue for NoSlop approval.
 
 1. **Directory Watcher (`hainet-media-mcp` or `hainet-core`)**
    - Use the `notify` crate to monitor `/media/hai-drive/uploads` for new video/audio/image files.

@@ -3,9 +3,26 @@
 # Last Updated: 2026-05-28T12:30:00+08:00
 
 [meta]
-last_updated = "2026-07-10T15:52:00.000000+08:00"
+last_updated = "2026-07-10T17:55:00.000000+08:00"
 project_name = "HAI-Net"
 version = "0.57"
+
+[[completed_cycles]]
+id = "NoSlop-Hub-Ph2-Firewall"
+date = "2026-07-10"
+phase = "NoSlop Hub Integration"
+session = "Smart Firewall Relay & Notification Cleanup"
+changes = [
+    "Implemented TCP 9999 mesh listener on the Hub",
+    "Wired Hub listener into native GossipEngine and TrustFirewall",
+    "Added sync_push_peers API so Mobile can populate the Hub's firewall with trusted contacts",
+    "Added sync_pull_packets API for Mobile to securely poll buffered, pre-validated mesh packets",
+    "Fixed NoSlop Android ghost notification bug upon UI handshake resolution"
+]
+status = "success"
+next_session = "Phase 3: Deep Data Sync & Portal Population (Rust SQLite)"
+current_phase = "Grand Integration — NoSlop Active-Passive Mode"
+current_cycle = "Phase 2 — Smart Firewall Relay"
 
 [[completed_cycles]]
 id = "NoSlop-Hub-Ph1-Ph2"
