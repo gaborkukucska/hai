@@ -211,8 +211,18 @@ async fn main() -> Result<()> {
     let data_dir = std::path::PathBuf::from(&config.storage.data_dir);
     let _ = std::fs::create_dir_all(&data_dir);
     
-    // Determine prompts directory (sibling to data_dir)
-    let prompts_dir = data_dir.parent().unwrap_or(&data_dir).join("prompts");
+    // Determine prompts directory (sibling to data_dir or from repo)
+    let mut prompts_dir = data_dir.parent().unwrap_or(&data_dir).join("prompts");
+    let repo_prompts = std::path::PathBuf::from("/home/tom/hai/hainet-persona/prompts");
+    let cwd_prompts = std::env::current_dir().unwrap_or_default().join("hainet-persona/prompts");
+    
+    if !prompts_dir.exists() {
+        if repo_prompts.exists() {
+            prompts_dir = repo_prompts;
+        } else if cwd_prompts.exists() {
+            prompts_dir = cwd_prompts;
+        }
+    }
     
     // --- Integration: Detect local hardware (PPLPWR port) ---
     info!("🖥️  Detecting local hardware profile (hainet-collab)...");
