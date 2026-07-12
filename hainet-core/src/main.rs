@@ -528,11 +528,34 @@ async fn run_health_server(
         let qr_sessions = qr_sessions.clone();
         
         tokio::spawn(async move {
-            let mut buf = [0u8; 8192];
+            let mut raw_req = Vec::new();
+            let mut buf = vec![0u8; 8192];
+            
             let n = stream.read(&mut buf).await.unwrap_or(0);
             if n == 0 { return; }
+            raw_req.extend_from_slice(&buf[..n]);
             
-            let request = String::from_utf8_lossy(&buf[..n]);
+            let mut req_str = String::from_utf8_lossy(&raw_req).into_owned();
+            
+            // Check Content-Length to ensure we read the full JSON payload
+            if let Some(cl_idx) = req_str.find("Content-Length: ") {
+                let cl_line = &req_str[cl_idx..];
+                if let Some(end_idx) = cl_line.find("\r\n") {
+                    if let Ok(cl) = cl_line[16..end_idx].trim().parse::<usize>() {
+                        if let Some(header_end) = req_str.find("\r\n\r\n") {
+                            let header_len = header_end + 4;
+                            while raw_req.len() < header_len + cl {
+                                let n = stream.read(&mut buf).await.unwrap_or(0);
+                                if n == 0 { break; }
+                                raw_req.extend_from_slice(&buf[..n]);
+                            }
+                            req_str = String::from_utf8_lossy(&raw_req).into_owned();
+                        }
+                    }
+                }
+            }
+            
+            let request = req_str;
             
             // Parse headers and body
             let body_str = if let Some(idx) = request.find("\r\n\r\n") {
