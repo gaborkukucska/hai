@@ -9,7 +9,7 @@ use crate::{
 pub async fn handle_invoke(
     cmd: &str,
     args: Value,
-    app_state: &AppState,
+    app_state: std::sync::Arc<AppState>,
     metrics_state: &MetricsState,
     metrics_storage: &MetricsStorageState,
     settings_state: &SettingsState,
@@ -509,6 +509,19 @@ pub async fn handle_invoke(
                                         timestamp,
                                     });
                                 }
+                            }
+                        } else if ptype == "MESSAGE" {
+                            let target_id = packet_json.get("target_user_id").and_then(|v| v.as_str()).unwrap_or_default();
+                            let sender_id = packet_json.get("sender_id").and_then(|v| v.as_str()).unwrap_or_default();
+                            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+                            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                            
+                            if target_id == my_node_id && sender_id == my_node_id {
+                                let state_clone = app_state.clone();
+                                let pjson_clone = packet_json.clone();
+                                tokio::spawn(async move {
+                                    crate::handle_incoming_dm(state_clone, pjson_clone).await;
+                                });
                             }
                         }
                     }

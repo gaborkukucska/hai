@@ -78,7 +78,7 @@ pub type MetricsState = Arc<RwLock<MetricsCollector>>;
 pub type MetricsStorageState = Arc<RwLock<MetricsStorage>>;
 pub type SettingsState = Arc<RwLock<SettingsStorage>>;
 
-async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::Value) {
+pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::Value) {
     tracing::info!("Intercepted DM to Admin AI! Attempting decryption...");
     use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
     use x25519_dalek::{StaticSecret, PublicKey};
@@ -651,7 +651,7 @@ async fn run_health_server(
                                 match api_router::handle_invoke(
                                     cmd, 
                                     args, 
-                                    &app_state, 
+                                    app_state.clone(), 
                                     &metrics_state, 
                                     &metrics_storage, 
                                     &settings_state
