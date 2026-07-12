@@ -157,8 +157,11 @@ async fn main() -> Result<()> {
 
 
     // --- Integration: Initialize gossip engine (gChat port) ---
-    let node_id = uuid::Uuid::new_v4().to_string();
-    info!("🗣️  Initializing gossip engine (hainet-social), node_id={}", &node_id[..8]);
+    let pub_key_path = get_hainet_dir().join("identity/ed25519_pub.b64");
+    let node_id = std::fs::read_to_string(&pub_key_path)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    info!("🗣️  Initializing gossip engine (hainet-social), node_id={}", &node_id[..std::cmp::min(8, node_id.len())]);
     let gossip_engine = GossipEngine::new(node_id);
     debug!("Gossip engine created with {} max hops", hainet_social::gossip::DEFAULT_MAX_HOPS);
     
@@ -175,7 +178,47 @@ async fn main() -> Result<()> {
         hardware_profile: Arc::new(RwLock::new(hardware_profile)),
         gossip_engine: Arc::new(RwLock::new(gossip_engine)),
         social_posts: Arc::new(RwLock::new(vec![])),
+        incoming_mesh_packets: Arc::new(RwLock::new(vec![])),
         log_dir: config.effective_log_dir(),
+    });
+
+    // Step 3.5: Start Smart Mesh Gossip Listener on Port 9999
+    let mesh_app_state = app_state.clone();
+    tokio::spawn(async move {
+        match tokio::net::TcpListener::bind("0.0.0.0:9999").await {
+            Ok(listener) => {
+                info!("🕸️  Smart Mesh gossip listener running on port 9999");
+                loop {
+                    if let Ok((mut stream, _)) = listener.accept().await {
+                        let state = mesh_app_state.clone();
+                        tokio::spawn(async move {
+                            use tokio::io::{AsyncBufReadExt, BufReader};
+                            let mut reader = BufReader::new(stream);
+                            let mut line = String::new();
+                            while let Ok(n) = reader.read_line(&mut line).await {
+                                if n == 0 { break; }
+                                if let Ok(packet_json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                    // Parse into native Rust NetworkPacket
+                                    if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
+                                        let engine = state.gossip_engine.read().await;
+                                        // The Hub's native firewall rejects untrusted/spam packets!
+                                        if let Ok(_) = engine.process_incoming(&packet).await {
+                                            debug!("Hub Firewall passed packet from: {}", packet.header.sender_id);
+                                            let mut buffer = state.incoming_mesh_packets.write().await;
+                                            buffer.push(packet_json);
+                                        } else {
+                                            warn!("Hub Firewall rejected packet from: {}", packet.header.sender_id);
+                                        }
+                                    }
+                                }
+                                line.clear();
+                            }
+                        });
+                    }
+                }
+            },
+            Err(e) => warn!("Failed to bind mesh port 9999: {}", e),
+        }
     });
 
     // Step 4: Start minimal TCP-based health/API endpoint

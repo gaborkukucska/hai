@@ -422,6 +422,34 @@ pub async fn handle_invoke(
             Ok(json!({"status": "ok", "contacts": []}))
         },
 
+        // ====================================================================
+        // --- Mobile Data Sync (Phase 3) ---
+        // ====================================================================
+        "sync_push_peers" => {
+            debug!("Mobile pushing Contacts/Peers to Hub Firewall");
+            if let Some(peers) = args.get("peers").and_then(|p| p.as_array()) {
+                let engine = app_state.gossip_engine.read().await;
+                for peer in peers {
+                    if let (Some(pub_key), Some(is_trusted)) = (peer.get("public_key").and_then(|v| v.as_str()), peer.get("is_trusted").and_then(|v| v.as_bool())) {
+                        if is_trusted {
+                            engine.trust_peer(pub_key.to_string()).await;
+                        } else {
+                            engine.untrust_peer(pub_key).await;
+                        }
+                    }
+                }
+                Ok(json!({"status": "ok", "peers_processed": peers.len()}))
+            } else {
+                Err("Missing 'peers' array".to_string())
+            }
+        },
+        "sync_pull_packets" => {
+            let mut buffer = app_state.incoming_mesh_packets.write().await;
+            let packets = buffer.clone();
+            buffer.clear();
+            Ok(json!({"status": "ok", "packets": packets}))
+        },
+
         // Fallback for unimplemented endpoints
         _ => {
             error!("Unimplemented API command: {}", cmd);
