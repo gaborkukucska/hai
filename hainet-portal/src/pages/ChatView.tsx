@@ -1,6 +1,6 @@
 // <!-- # START OF FILE hainet-portal/src/pages/ChatView.tsx -->
 // Chat & Comms page — wired to hainet-core Admin AI bridge via invoke().
-// Loads conversation history on mount and sends messages through the real backend.
+// Loads conversation history on mount and syncs DMs from mobile.
 
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '../lib/tauri';
@@ -14,10 +14,18 @@ interface DynamicComponent {
 
 /** Shape of a single chat message */
 interface ChatMessage {
-  id: number;
+  id: string | number;
   role: 'user' | 'assistant' | 'system';
   content: string;
   dynamicComponent?: DynamicComponent;
+}
+
+interface PeerDM {
+  id: string;
+  peer: string;
+  sender: string;
+  content: string;
+  timestamp: number;
 }
 
 const DynamicRenderer = ({ comp }: { comp: DynamicComponent | string }) => {
@@ -56,50 +64,59 @@ const DynamicRenderer = ({ comp }: { comp: DynamicComponent | string }) => {
 };
 
 export default function ChatView() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [adminMessages, setAdminMessages] = useState<ChatMessage[]>([]);
+  const [dms, setDms] = useState<PeerDM[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [peers, setPeers] = useState<any[]>([]);
+  
   const [activeTab, setActiveTab] = useState<'All' | 'Agents' | 'Peers'>('All');
+  const [selectedPeerId, setSelectedPeerId] = useState<string>('AdminAI');
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [adminMessages, dms, selectedPeerId]);
 
+  // Polling loop for Peers and DMs
   useEffect(() => {
-    const fetchPeers = async () => {
+    const fetchSyncData = async () => {
       try {
-        const res = await invoke<{peers: any[]}>('get_mesh_peers');
-        if (res?.peers) setPeers(res.peers);
+        const peerRes = await invoke<{peers: any[]}>('get_mesh_peers');
+        if (peerRes?.peers) {
+          // Filter out Admin AI from the generic synced peers list to avoid duplicates
+          setPeers(peerRes.peers.filter((p: any) => p.handle !== "Admin AI"));
+        }
+        
+        const dmRes = await invoke<{dms: PeerDM[]}>('get_dms');
+        if (dmRes?.dms) {
+          setDms(dmRes.dms);
+        }
       } catch (e) {}
     };
-    fetchPeers();
-    const interval = setInterval(fetchPeers, 5000);
+    fetchSyncData();
+    const interval = setInterval(fetchSyncData, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // Load conversation history from backend on mount
+  // Load Admin AI conversation history from backend on mount
   useEffect(() => {
     const loadHistory = async () => {
       try {
         const history = await invoke<any>('get_history');
         if (history && Array.isArray(history)) {
-          // Map backend history format to our ChatMessage format
           const mapped: ChatMessage[] = history.map((msg: any, idx: number) => ({
             id: idx,
             role: msg.role || 'assistant',
             content: msg.content || '',
           }));
-          setMessages(mapped);
-          console.debug('[ChatView] Loaded', mapped.length, 'messages from history');
+          setAdminMessages(mapped);
         }
       } catch (e) {
-        // No history yet — show welcome message
-        console.debug('[ChatView] No history found, showing welcome message');
-        setMessages([{
+        setAdminMessages([{
           id: 1,
           role: 'assistant',
           content: 'Hello! I am your HAI-Net Admin AI. How can I help you today?'
@@ -111,22 +128,20 @@ export default function ChatView() {
 
   /** Send a message to the Admin AI via the backend bridge */
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || selectedPeerId !== 'AdminAI') return;
 
     const userMsg: ChatMessage = { id: Date.now(), role: 'user', content: input };
-    setMessages(prev => [...prev, userMsg]);
+    setAdminMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
     setError(null);
 
     try {
-      // Call the real send_message endpoint on hainet-core
       const response = await invoke<any>('send_message', {
         content: input,
         attachments: [],
       });
 
-      // Parse the response — the backend returns the assistant's reply
       let assistantContent = "";
       let dynamicComponent = undefined;
 
@@ -150,14 +165,11 @@ export default function ChatView() {
         dynamicComponent,
       };
 
-      setMessages(prev => [...prev, assistantMsg]);
-      console.debug('[ChatView] Received response from Admin AI');
+      setAdminMessages(prev => [...prev, assistantMsg]);
     } catch (e: any) {
       console.error('[ChatView] Error sending message:', e);
       setError(e.message || 'Failed to reach Admin AI');
-
-      // Show error as a system message so the user knows what happened
-      setMessages(prev => [...prev, {
+      setAdminMessages(prev => [...prev, {
         id: Date.now() + 1,
         role: 'assistant',
         content: `⚠️ Error: ${e.message || 'Failed to reach the Admin AI backend. Is hainet-persona running?'}`,
@@ -167,20 +179,39 @@ export default function ChatView() {
     }
   };
 
-  /** Clear the chat history */
+  /** Clear the Admin AI chat history */
   const handleClear = async () => {
+    if (selectedPeerId !== 'AdminAI') return;
     try {
       await invoke('clear_history');
-      setMessages([{
+      setAdminMessages([{
         id: Date.now(),
         role: 'assistant',
         content: 'Chat history cleared. How can I help you?'
       }]);
-      console.debug('[ChatView] History cleared');
     } catch (e) {
       console.error('[ChatView] Failed to clear history:', e);
     }
   };
+
+  // Resolve current view context
+  const isPeerChat = selectedPeerId !== 'AdminAI';
+  const currentPeerName = isPeerChat 
+    ? peers.find(p => p.public_key === selectedPeerId)?.handle || "Unknown Peer"
+    : "Admin AI";
+
+  // Compute messages to display based on selected context
+  const displayMessages: ChatMessage[] = isPeerChat
+    ? dms.filter(dm => dm.peer === selectedPeerId)
+         .sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
+         .map(dm => ({
+           id: dm.id,
+           // If the sender is the peer, they are the "assistant" (left side)
+           // If the sender is NOT the peer, it must be the local mobile user (right side)
+           role: dm.sender === selectedPeerId ? 'assistant' : 'user',
+           content: dm.content
+         }))
+    : adminMessages;
 
   return (
     <div className="flex h-full text-theme-text-primary bg-theme-bg-primary">
@@ -195,36 +226,56 @@ export default function ChatView() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {/* Admin AI Thread */}
           {(activeTab === 'All' || activeTab === 'Agents') && (
-            <div className="p-3 rounded-md bg-theme-bg-tertiary/50 cursor-pointer border-l-2 border-theme-accent-primary">
+            <div 
+              onClick={() => setSelectedPeerId('AdminAI')}
+              className={`p-3 rounded-md cursor-pointer border-l-2 transition-colors ${selectedPeerId === 'AdminAI' ? 'bg-theme-bg-tertiary/50 border-theme-accent-primary' : 'hover:bg-theme-bg-tertiary/30 border-transparent hover:border-theme-border'}`}
+            >
               <h3 className="text-sm font-semibold">Admin AI</h3>
               <p className="text-xs text-theme-text-muted truncate mt-1">
-                {messages.length > 0 ? messages[messages.length - 1].content.slice(0, 50) + '...' : 'Ready for the next task.'}
+                {adminMessages.length > 0 ? adminMessages[adminMessages.length - 1].content.slice(0, 50) + '...' : 'Ready for the next task.'}
               </p>
             </div>
           )}
-          {(activeTab === 'All' || activeTab === 'Peers') && peers.map((p, i) => (
-            <div key={i} className="p-3 rounded-md hover:bg-theme-bg-tertiary/30 cursor-pointer border-l-2 border-transparent hover:border-theme-border transition-colors">
-              <h3 className="text-sm font-semibold">{p.handle || "Unknown Peer"}</h3>
-              <p className="text-xs text-theme-text-muted truncate mt-1">
-                {p.public_key ? p.public_key.slice(0, 16) + '...' : ''}
-              </p>
-            </div>
-          ))}
+          
+          {/* Synced Mobile Peers Threads */}
+          {(activeTab === 'All' || activeTab === 'Peers') && peers.map((p, i) => {
+            const peerDMs = dms.filter(dm => dm.peer === p.public_key);
+            // Get last message content or fallback
+            const lastDm = peerDMs.length > 0 
+                ? peerDMs.reduce((prev, curr) => (Number(curr.timestamp) > Number(prev.timestamp) ? curr : prev)).content 
+                : 'No messages yet';
+                
+            return (
+              <div 
+                key={i} 
+                onClick={() => setSelectedPeerId(p.public_key)}
+                className={`p-3 rounded-md cursor-pointer border-l-2 transition-colors ${selectedPeerId === p.public_key ? 'bg-theme-bg-tertiary/50 border-theme-accent-primary' : 'hover:bg-theme-bg-tertiary/30 border-transparent hover:border-theme-border'}`}
+              >
+                <h3 className="text-sm font-semibold">{p.handle || "Unknown Peer"}</h3>
+                <p className="text-xs text-theme-text-muted truncate mt-1">
+                  {lastDm.slice(0, 50) + (lastDm.length > 50 ? '...' : '')}
+                </p>
+              </div>
+            );
+          })}
         </div>
       </div>
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
         <div className="p-4 border-b border-theme-border flex items-center justify-between bg-theme-bg-secondary">
-          <h2 className="text-lg font-semibold">Admin AI</h2>
+          <h2 className="text-lg font-semibold">{currentPeerName}</h2>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleClear}
-              className="text-xs px-2 py-1 bg-theme-bg-tertiary rounded hover:bg-theme-border transition-colors"
-            >
-              Clear History
-            </button>
+            {!isPeerChat && (
+              <button
+                onClick={handleClear}
+                className="text-xs px-2 py-1 bg-theme-bg-tertiary rounded hover:bg-theme-border transition-colors"
+              >
+                Clear History
+              </button>
+            )}
             <span className={`text-xs px-2 py-1 rounded-full border ${
               isLoading
                 ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
@@ -237,14 +288,20 @@ export default function ChatView() {
 
         {/* Messages area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col">
-          {messages.map(msg => (
+          {displayMessages.length === 0 && isPeerChat && (
+            <div className="text-center py-8 text-theme-text-muted text-sm">
+              No synced messages found for this contact.
+            </div>
+          )}
+
+          {displayMessages.map(msg => (
             <div key={msg.id} className={`flex items-start gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-xs font-bold ${
                  msg.role === 'user'
                    ? 'bg-theme-bg-tertiary text-theme-text-secondary'
                    : 'bg-theme-accent-primary text-theme-bg-primary'
                }`}>
-                 {msg.role === 'user' ? 'U' : 'AI'}
+                 {msg.role === 'user' ? 'U' : currentPeerName.charAt(0).toUpperCase()}
                </div>
                <div className={`bg-theme-bg-secondary border border-theme-border p-3 rounded-2xl max-w-[80%] ${
                  msg.role === 'user'
@@ -292,18 +349,18 @@ export default function ChatView() {
             <input
               type="text"
               id="chat-message-input"
-              placeholder="Message Admin AI..."
+              placeholder={isPeerChat ? "Read-only mode (Reply via mobile app)" : "Message Admin AI..."}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              disabled={isLoading}
+              disabled={isLoading || isPeerChat}
               className="flex-1 bg-theme-bg-tertiary border border-theme-border rounded-md px-4 py-2 focus:outline-none focus:border-theme-accent-primary disabled:opacity-50"
             />
             <button
               id="chat-send-button"
               onClick={handleSend}
-              disabled={!input.trim() || isLoading}
-              className="px-4 py-2 bg-theme-accent-primary text-theme-bg-primary font-bold rounded-md hover:bg-theme-accent-secondary transition-colors disabled:opacity-50"
+              disabled={!input.trim() || isLoading || isPeerChat}
+              className="px-4 py-2 bg-theme-accent-primary text-theme-bg-primary font-bold rounded-md hover:bg-theme-accent-secondary transition-colors disabled:opacity-50 disabled:bg-theme-bg-tertiary disabled:text-theme-text-muted"
             >
               Send
             </button>

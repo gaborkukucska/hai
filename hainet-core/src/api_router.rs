@@ -467,6 +467,25 @@ pub async fn handle_invoke(
                 Err("Missing 'peers' array".to_string())
             }
         },
+        
+        "sync_push_dms" => {
+            debug!("Mobile pushing DMs to Hub");
+            if let Some(dms) = args.get("dms").and_then(|d| d.as_array()) {
+                let mut stored_dms = app_state.dms.write().await;
+                stored_dms.clear();
+                for dm in dms {
+                    stored_dms.push(dm.clone());
+                }
+                Ok(json!({"status": "ok", "dms_processed": dms.len()}))
+            } else {
+                Err("Missing 'dms' array".to_string())
+            }
+        },
+        "get_dms" => {
+            let stored_dms = app_state.dms.read().await;
+            Ok(json!({ "dms": *stored_dms }))
+        },
+
         "sync_push_packets" => {
             debug!("Mobile pushing packets to Hub Firewall");
             if let Some(packets) = args.get("packets").and_then(|p| p.as_array()) {

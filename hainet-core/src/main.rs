@@ -59,6 +59,8 @@ pub struct AppState {
     pub social_posts: Arc<RwLock<Vec<SocialPost>>>,
     /// Synchronized peers from mobile
     pub mesh_peers: Arc<RwLock<Vec<serde_json::Value>>>,
+    /// Synchronized decrypted DMs from mobile
+    pub dms: Arc<RwLock<Vec<serde_json::Value>>>,
     /// Configured log directory
     pub log_dir: std::path::PathBuf,
 }
@@ -77,6 +79,7 @@ pub type MetricsStorageState = Arc<RwLock<MetricsStorage>>;
 pub type SettingsState = Arc<RwLock<SettingsStorage>>;
 
 async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::Value) {
+    tracing::info!("Intercepted DM to Admin AI! Attempting decryption...");
     use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
     use x25519_dalek::{StaticSecret, PublicKey};
     use hainet_social::crypto::{decrypt_from_sender, encrypt_for_recipient};
@@ -138,6 +141,7 @@ async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::V
     nonce_bytes.copy_from_slice(&nonce_vec);
     
     if let Ok(decrypted) = decrypt_from_sender(&ciphertext, &nonce_bytes, &recipient_secret, &sender_public) {
+        tracing::info!("DM Decrypted successfully! Sending to AdminBridge...");
         if let Ok(plaintext) = String::from_utf8(decrypted) {
             let mut message_content = plaintext.clone();
             if let Ok(json_obj) = serde_json::from_str::<serde_json::Value>(&plaintext) {
@@ -149,6 +153,7 @@ async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::V
             if let Some(bridge_arc) = &app_state.admin_bridge {
                 let bridge = bridge_arc.read().await;
                 if let Ok(response) = bridge.send_message(message_content, vec![]).await {
+                    tracing::info!("Admin AI responded. Encrypting reply...");
                     let response_json = json!({"content": response.message.content}).to_string();
                     if let Ok((resp_ciphertext, resp_nonce)) = encrypt_for_recipient(response_json.as_bytes(), &recipient_secret, &sender_public) {
                         
@@ -171,6 +176,7 @@ async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::V
                         
                         let mut buffer = app_state.incoming_mesh_packets.write().await;
                         buffer.push(reply_packet);
+                        tracing::info!("Reply encrypted and pushed to mobile sync buffer!");
                     }
                 }
             }
@@ -301,6 +307,7 @@ async fn main() -> Result<()> {
         gossip_engine: Arc::new(RwLock::new(gossip_engine)),
         social_posts: Arc::new(RwLock::new(vec![])),
         mesh_peers: Arc::new(RwLock::new(vec![])),
+        dms: Arc::new(RwLock::new(vec![])),
         incoming_mesh_packets: Arc::new(RwLock::new(vec![])),
         log_dir: config.effective_log_dir(),
     });
