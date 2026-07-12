@@ -45,6 +45,8 @@ struct PortalAssets;
 
 /// Shared application state passed to every API handler.
 pub struct AppState {
+    /// Buffered mesh packets for mobile to pull
+    pub incoming_mesh_packets: Arc<RwLock<Vec<serde_json::Value>>>,
     /// Bridge to the Admin AI agent system
     pub admin_bridge: Option<Arc<RwLock<AdminBridge>>>,
     /// Text-to-speech handler
@@ -145,7 +147,7 @@ async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::V
             if let Some(bridge_arc) = &app_state.admin_bridge {
                 let bridge = bridge_arc.read().await;
                 if let Ok(response) = bridge.send_message(message_content, vec![]).await {
-                    let response_json = json!({"content": response.content}).to_string();
+                    let response_json = json!({"content": response.message.content}).to_string();
                     if let Ok((resp_ciphertext, resp_nonce)) = encrypt_for_recipient(response_json.as_bytes(), &recipient_secret, &sender_public) {
                         
                         let msg_id = uuid::Uuid::new_v4().to_string();
