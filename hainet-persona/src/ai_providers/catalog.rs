@@ -195,19 +195,19 @@ impl ModelCatalog {
             capabilities.push(ModelCapability::MathematicalReasoning);
         }
 
-        if name_lower.contains("gemma") {
-            capabilities.push(ModelCapability::SafetyAnalysis);
-            capabilities.push(ModelCapability::ConstitutionalCompliance);
-            // Gemma 3 is capable of reasoning and planning
+        // All major open LLM families in Ollama are instruction-tuned chat models by default
+        if name_lower.contains("gemma") || name_lower.contains("llama") || name_lower.contains("qwen")
+           || name_lower.contains("mistral") || name_lower.contains("phi") || name_lower.contains("deepseek")
+           || name_lower.contains("it") || name_lower.contains("instruct") || name_lower.contains("chat") {
+            capabilities.push(ModelCapability::GeneralConversation);
+            capabilities.push(ModelCapability::InstructionFollowing);
             capabilities.push(ModelCapability::LogicalReasoning);
             capabilities.push(ModelCapability::TaskPlanning);
         }
 
-        if name_lower.contains("llama") || name_lower.contains("qwen") {
-            capabilities.push(ModelCapability::GeneralConversation);
-            capabilities.push(ModelCapability::LogicalReasoning);
-            // Llama 3 and Qwen 2.5 are capable planners
-            capabilities.push(ModelCapability::TaskPlanning);
+        if name_lower.contains("gemma") {
+            capabilities.push(ModelCapability::SafetyAnalysis);
+            capabilities.push(ModelCapability::ConstitutionalCompliance);
         }
         
         // Explicit tool use models
