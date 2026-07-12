@@ -68,7 +68,8 @@ export default function SocialFeed() {
   /** Format a timestamp into a human-readable relative time */
   const formatTime = (timestamp: string) => {
     try {
-      const date = new Date(timestamp);
+      const numTime = Number(timestamp);
+      const date = new Date(numTime > 0 ? numTime : timestamp);
       const now = new Date();
       const diffMs = now.getTime() - date.getTime();
       const diffMins = Math.floor(diffMs / 60000);
@@ -138,22 +139,28 @@ export default function SocialFeed() {
               <p className="text-theme-text-muted">No posts yet. Be the first to share with the mesh! 🚀</p>
             </div>
           ) : (
-            posts.map(post => (
+            posts.map(post => {
+              // Extract data correctly whether it's our simplified format or a raw gossip payload
+              const content = post.content || post.payload?.content || '';
+              const author = post.author || post.payload?.author_name || 'Unknown';
+              const time = post.timestamp || post.payload?.timestamp || Date.now().toString();
+              
+              return (
               <div key={post.id} className="bg-theme-bg-secondary border border-theme-border rounded-xl p-5">
                 <div className="flex items-center gap-3 mb-3">
                    <div className="w-10 h-10 rounded-full bg-theme-bg-tertiary flex items-center justify-center text-lg font-bold">
-                     {post.author.charAt(0).toUpperCase()}
+                     {author.charAt(0).toUpperCase()}
                    </div>
                    <div>
-                     <p className="font-semibold text-sm">{post.author}</p>
-                     <p className="text-xs text-theme-text-muted">{formatTime(post.timestamp)} via P2P</p>
+                     <p className="font-semibold text-sm">{author}</p>
+                     <p className="text-xs text-theme-text-muted">{formatTime(time)} via P2P</p>
                    </div>
                 </div>
                 <p className="text-theme-text-secondary text-sm whitespace-pre-wrap">
-                  {post.content}
+                  {content}
                 </p>
               </div>
-            ))
+            )})
           )}
         </div>
 

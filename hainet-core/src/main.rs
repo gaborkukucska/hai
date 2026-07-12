@@ -285,6 +285,7 @@ async fn main() -> Result<()> {
         hardware_profile: Arc::new(RwLock::new(hardware_profile)),
         gossip_engine: Arc::new(RwLock::new(gossip_engine)),
         social_posts: Arc::new(RwLock::new(vec![])),
+        mesh_peers: Arc::new(RwLock::new(vec![])),
         incoming_mesh_packets: Arc::new(RwLock::new(vec![])),
         log_dir: config.effective_log_dir(),
     });
