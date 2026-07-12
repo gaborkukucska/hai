@@ -27,6 +27,9 @@ export default function NetworkSettings() {
   // Provider configuration — persisted to settings.db
   const [ollamaUrl, setOllamaUrl] = useState('http://127.0.0.1:11434');
   const [openrouterKey, setOpenrouterKey] = useState('');
+  const [isDiscoverable, setIsDiscoverable] = useState(false);
+  const [isCreator, setIsCreator] = useState(false);
+  const [fundMeLink, setFundMeLink] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
 
@@ -78,6 +81,17 @@ export default function NetworkSettings() {
         console.debug('[NetworkSettings] Could not load provider config:', e.message);
       }
     };
+    const loadMeshSettings = async () => {
+      try {
+        const mesh = await invoke<{is_discoverable: boolean, is_creator: boolean, fund_me_link: string}>('get_mesh_settings');
+        if (mesh) {
+          setIsDiscoverable(mesh.is_discoverable);
+          setIsCreator(mesh.is_creator);
+          setFundMeLink(mesh.fund_me_link || '');
+        }
+      } catch (e) {}
+    };
+    loadMeshSettings();
     loadConfig();
   }, []);
 
@@ -105,6 +119,11 @@ export default function NetworkSettings() {
       await invoke('save_provider_config', {
         ollama_url: ollamaUrl,
         openrouter_key: openrouterKey,
+      });
+      await invoke('save_mesh_settings', {
+        is_discoverable: isDiscoverable,
+        is_creator: isCreator,
+        fund_me_link: fundMeLink
       });
       setSaveStatus('saved');
       console.debug('[NetworkSettings] Provider config saved to settings.db');
@@ -223,6 +242,32 @@ export default function NetworkSettings() {
              >
                {isSaving ? 'Saving...' : saveStatus === 'saved' ? '✓ Saved!' : saveStatus === 'error' ? '✗ Error' : 'Save Providers'}
              </button>
+          </div>
+        </section>
+
+        {/* === Mesh Discoverability & Creator Node === */}
+        <section className="bg-theme-bg-secondary border border-theme-border rounded-xl p-5">
+          <h2 className="text-lg font-semibold mb-4 border-b border-theme-border pb-2">Mesh Discoverability</h2>
+          <div className="space-y-4">
+             <label className="flex items-center gap-3 text-sm text-theme-text-primary cursor-pointer">
+               <input type="checkbox" checked={isDiscoverable} onChange={e => setIsDiscoverable(e.target.checked)} className="w-4 h-4 rounded border-theme-border bg-theme-bg-tertiary text-theme-accent-primary" />
+               Enable Discoverable Mode (broadcast burnable identity)
+             </label>
+             <label className="flex items-center gap-3 text-sm text-theme-text-primary cursor-pointer">
+               <input type="checkbox" checked={isCreator} onChange={e => setIsCreator(e.target.checked)} disabled={!isDiscoverable} className="w-4 h-4 rounded border-theme-border bg-theme-bg-tertiary text-theme-accent-primary disabled:opacity-50" />
+               Enable Creator Node (auto-accept connections)
+             </label>
+             <div>
+               <label className="block text-sm font-medium text-theme-text-secondary mb-1">Fund Me Link (Optional)</label>
+               <input
+                 type="text"
+                 placeholder="https://donate.stripe.com/..."
+                 value={fundMeLink}
+                 disabled={!isCreator}
+                 onChange={(e) => setFundMeLink(e.target.value)}
+                 className="w-full bg-theme-bg-tertiary border border-theme-border rounded-md px-3 py-2 text-theme-text-primary focus:outline-none focus:border-theme-accent-primary disabled:opacity-50"
+               />
+             </div>
           </div>
         </section>
 

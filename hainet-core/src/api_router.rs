@@ -352,15 +352,35 @@ pub async fn handle_invoke(
         // Returns the list of mesh peers known to the gossip engine.
         // In Phase 4, this will be populated by actual P2P connections.
         "get_mesh_peers" => {
-            debug!("Fetching mesh peers from gossip engine");
-            let gossip = app_state.gossip_engine.read().await;
-            let count = gossip.peer_count().await;
-            // For now, return the count. Full peer list will come from
-            // libp2p integration in Phase 4.
+            debug!("Fetching mesh peers");
+            let peers = app_state.mesh_peers.read().await;
             Ok(json!({
-                "peers": [],
-                "total": count,
+                "peers": *peers,
+                "total": peers.len(),
             }))
+        },
+        "get_mesh_settings" => {
+            let storage = settings_state.read().await;
+            let is_discoverable = storage.get_setting("mesh.is_discoverable").await.ok().flatten().unwrap_or_else(|| "false".to_string()) == "true";
+            let is_creator = storage.get_setting("mesh.is_creator").await.ok().flatten().unwrap_or_else(|| "false".to_string()) == "true";
+            let fund_me_link = storage.get_setting("mesh.fund_me_link").await.ok().flatten().unwrap_or_default();
+            Ok(json!({
+                "is_discoverable": is_discoverable,
+                "is_creator": is_creator,
+                "fund_me_link": fund_me_link
+            }))
+        },
+        "save_mesh_settings" => {
+            let is_discoverable = args.get("is_discoverable").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_creator = args.get("is_creator").and_then(|v| v.as_bool()).unwrap_or(false);
+            let fund_me_link = args.get("fund_me_link").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let storage = settings_state.write().await;
+            storage.save_setting("mesh.is_discoverable", &is_discoverable.to_string()).await.unwrap();
+            storage.save_setting("mesh.is_creator", &is_creator.to_string()).await.unwrap();
+            storage.save_setting("mesh.fund_me_link", &fund_me_link).await.unwrap();
+            
+            Ok(json!({"status": "saved"}))
         },
 
         // ====================================================================
@@ -429,7 +449,11 @@ pub async fn handle_invoke(
             debug!("Mobile pushing Contacts/Peers to Hub Firewall");
             if let Some(peers) = args.get("peers").and_then(|p| p.as_array()) {
                 let engine = app_state.gossip_engine.read().await;
+                let mut stored_peers = app_state.mesh_peers.write().await;
+                stored_peers.clear();
+                
                 for peer in peers {
+                    stored_peers.push(peer.clone());
                     if let (Some(pub_key), Some(is_trusted)) = (peer.get("public_key").and_then(|v| v.as_str()), peer.get("is_trusted").and_then(|v| v.as_bool())) {
                         if is_trusted {
                             engine.trust_peer(pub_key.to_string()).await;
@@ -448,30 +472,31 @@ pub async fn handle_invoke(
             if let Some(packets) = args.get("packets").and_then(|p| p.as_array()) {
                 let engine = app_state.gossip_engine.read().await;
                 for packet_json in packets {
-                    if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
-                        let _ = engine.process_incoming(&packet).await;
-                        
-                        // If it's a POST packet, add it to social_posts so it appears in the Portal
-                        if let Some(ptype) = packet_json.get("type").and_then(|v| v.as_str()) {
-                            if ptype == "POST" {
-                                if let Some(payload) = packet_json.get("payload") {
-                                    let id = packet_json.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                                    let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or_default();
-                                    let timestamp = payload.get("timestamp").and_then(|v| v.as_u64()).unwrap_or_default();
-                                    let author = payload.get("author_name").and_then(|v| v.as_str()).unwrap_or("Unknown");
-                                    
-                                    let mut posts = app_state.social_posts.write().await;
-                                    if !posts.iter().any(|p| p.id == id) {
-                                        posts.push(crate::SocialPost {
-                                            id: id.to_string(),
-                                            author: author.to_string(),
-                                            content: content.to_string(),
-                                            timestamp: timestamp.to_string(),
-                                        });
-                                    }
+                    // Extract POST directly to bypass strict parsing failures
+                    if let Some(ptype) = packet_json.get("type").and_then(|v| v.as_str()) {
+                        if ptype == "POST" {
+                            if let Some(payload) = packet_json.get("payload") {
+                                let id = payload.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                                let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+                                let timestamp = payload.get("timestamp").and_then(|v| v.as_u64()).map(|t| t.to_string()).unwrap_or_else(|| payload.get("timestamp").and_then(|v| v.as_str()).unwrap_or_default().to_string());
+                                let author = payload.get("author_name").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                
+                                let mut posts = app_state.social_posts.write().await;
+                                if !posts.iter().any(|p| p.id == id) && !id.is_empty() {
+                                    posts.push(crate::SocialPost {
+                                        id: id.to_string(),
+                                        author: author.to_string(),
+                                        content: content.to_string(),
+                                        timestamp,
+                                    });
                                 }
                             }
                         }
+                    }
+
+                    // Attempt strict routing for the engine
+                    if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
+                        let _ = engine.process_incoming(&packet).await;
                     }
                 }
                 Ok(json!({"status": "ok", "packets_processed": packets.len()}))

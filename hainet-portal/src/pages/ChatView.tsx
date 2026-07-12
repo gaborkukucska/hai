@@ -60,12 +60,26 @@ export default function ChatView() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [peers, setPeers] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'All' | 'Agents' | 'Peers'>('All');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    const fetchPeers = async () => {
+      try {
+        const res = await invoke<{peers: any[]}>('get_mesh_peers');
+        if (res?.peers) setPeers(res.peers);
+      } catch (e) {}
+    };
+    fetchPeers();
+    const interval = setInterval(fetchPeers, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Load conversation history from backend on mount
   useEffect(() => {
@@ -175,18 +189,28 @@ export default function ChatView() {
         <div className="p-4 border-b border-theme-border">
           <h2 className="text-lg font-bold text-theme-text-primary">Chat & Comms</h2>
           <div className="mt-2 flex gap-2">
-             <button className="text-xs bg-theme-bg-tertiary px-2 py-1 rounded text-theme-text-secondary hover:text-theme-text-primary">All</button>
-             <button className="text-xs bg-theme-bg-tertiary px-2 py-1 rounded text-theme-text-secondary hover:text-theme-text-primary">Agents</button>
-             <button className="text-xs bg-theme-bg-tertiary px-2 py-1 rounded text-theme-text-secondary hover:text-theme-text-primary">Peers</button>
+             <button onClick={() => setActiveTab('All')} className={`text-xs px-2 py-1 rounded transition-colors ${activeTab === 'All' ? 'bg-theme-accent-primary text-theme-bg-primary' : 'bg-theme-bg-tertiary text-theme-text-secondary hover:text-theme-text-primary'}`}>All</button>
+             <button onClick={() => setActiveTab('Agents')} className={`text-xs px-2 py-1 rounded transition-colors ${activeTab === 'Agents' ? 'bg-theme-accent-primary text-theme-bg-primary' : 'bg-theme-bg-tertiary text-theme-text-secondary hover:text-theme-text-primary'}`}>Agents</button>
+             <button onClick={() => setActiveTab('Peers')} className={`text-xs px-2 py-1 rounded transition-colors ${activeTab === 'Peers' ? 'bg-theme-accent-primary text-theme-bg-primary' : 'bg-theme-bg-tertiary text-theme-text-secondary hover:text-theme-text-primary'}`}>Peers</button>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          <div className="p-3 rounded-md bg-theme-bg-tertiary/50 cursor-pointer border-l-2 border-theme-accent-primary">
-            <h3 className="text-sm font-semibold">Admin AI</h3>
-            <p className="text-xs text-theme-text-muted truncate mt-1">
-              {messages.length > 0 ? messages[messages.length - 1].content.slice(0, 50) + '...' : 'Ready for the next task.'}
-            </p>
-          </div>
+          {(activeTab === 'All' || activeTab === 'Agents') && (
+            <div className="p-3 rounded-md bg-theme-bg-tertiary/50 cursor-pointer border-l-2 border-theme-accent-primary">
+              <h3 className="text-sm font-semibold">Admin AI</h3>
+              <p className="text-xs text-theme-text-muted truncate mt-1">
+                {messages.length > 0 ? messages[messages.length - 1].content.slice(0, 50) + '...' : 'Ready for the next task.'}
+              </p>
+            </div>
+          )}
+          {(activeTab === 'All' || activeTab === 'Peers') && peers.map((p, i) => (
+            <div key={i} className="p-3 rounded-md hover:bg-theme-bg-tertiary/30 cursor-pointer border-l-2 border-transparent hover:border-theme-border transition-colors">
+              <h3 className="text-sm font-semibold">{p.handle || "Unknown Peer"}</h3>
+              <p className="text-xs text-theme-text-muted truncate mt-1">
+                {p.public_key ? p.public_key.slice(0, 16) + '...' : ''}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
 

@@ -57,6 +57,8 @@ pub struct AppState {
     pub gossip_engine: Arc<RwLock<GossipEngine>>,
     /// In-memory social feed posts (bridged to gossip later)
     pub social_posts: Arc<RwLock<Vec<SocialPost>>>,
+    /// Synchronized peers from mobile
+    pub mesh_peers: Arc<RwLock<Vec<serde_json::Value>>>,
     /// Configured log directory
     pub log_dir: std::path::PathBuf,
 }
@@ -224,7 +226,8 @@ async fn main() -> Result<()> {
     );
 
     // Initialize Admin AI Bridge only on master nodes
-    let admin_bridge = if config.network.role.to_lowercase() == "master" {
+    let role_lower = config.network.role.to_lowercase();
+    let admin_bridge = if role_lower == "master" || role_lower == "standalone" {
         let max_ctx = hardware_profile.max_safe_context_length();
         Some(AdminBridge::new(data_dir.clone(), prompts_dir, config.network.role.clone(), max_ctx).await
             .expect("Failed to initialize Admin AI Bridge"))
@@ -302,27 +305,27 @@ async fn main() -> Result<()> {
                             while let Ok(n) = reader.read_line(&mut line).await {
                                 if n == 0 { break; }
                                 if let Ok(packet_json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                    let ptype = packet_json.get("type").and_then(|v| v.as_str()).unwrap_or_default();
+                                    let target_id = packet_json.get("target_user_id").and_then(|v| v.as_str()).unwrap_or_default();
+                                    let sender_id = packet_json.get("sender_id").and_then(|v| v.as_str()).unwrap_or_default();
+                                    let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+                                    let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                                    
+                                    // Intercept DMs sent to ourselves (AI Persona Chat)
+                                    if ptype == "MESSAGE" && target_id == my_node_id && sender_id == my_node_id {
+                                        let state_clone = state.clone();
+                                        let pjson_clone = packet_json.clone();
+                                        tokio::spawn(async move {
+                                            handle_incoming_dm(state_clone, pjson_clone).await;
+                                        });
+                                    }
+
                                     // Parse into native Rust NetworkPacket
                                     if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
                                         let engine = state.gossip_engine.read().await;
                                         // The Hub's native firewall rejects untrusted/spam packets!
                                         if let Ok(_) = engine.process_incoming(&packet).await {
                                             debug!("Hub Firewall passed packet from: {}", packet.header.sender_id);
-                                            
-                                            let ptype = packet_json.get("type").and_then(|v| v.as_str()).unwrap_or_default();
-                                            let target_id = packet_json.get("target_user_id").and_then(|v| v.as_str()).unwrap_or_default();
-                                            let sender_id = packet_json.get("sender_id").and_then(|v| v.as_str()).unwrap_or_default();
-                                            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-                                            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                                            
-                                            // Intercept DMs sent to ourselves (AI Persona Chat)
-                                            if ptype == "MESSAGE" && target_id == my_node_id && sender_id == my_node_id {
-                                                let state_clone = state.clone();
-                                                let pjson_clone = packet_json.clone();
-                                                tokio::spawn(async move {
-                                                    handle_incoming_dm(state_clone, pjson_clone).await;
-                                                });
-                                            }
                                             
                                             let mut buffer = state.incoming_mesh_packets.write().await;
                                             buffer.push(packet_json);
