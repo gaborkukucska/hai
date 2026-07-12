@@ -72,6 +72,108 @@ pub type MetricsState = Arc<RwLock<MetricsCollector>>;
 pub type MetricsStorageState = Arc<RwLock<MetricsStorage>>;
 pub type SettingsState = Arc<RwLock<SettingsStorage>>;
 
+async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::Value) {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
+    use x25519_dalek::{StaticSecret, PublicKey};
+    use hainet_social::crypto::{decrypt_from_sender, encrypt_for_recipient};
+    use serde_json::json;
+
+    let payload = match packet_json.get("payload") {
+        Some(p) => p,
+        None => return,
+    };
+    
+    let ciphertext_b64 = payload.get("ciphertext").and_then(|v| v.as_str()).unwrap_or_default();
+    let nonce_b64 = payload.get("nonce").and_then(|v| v.as_str()).unwrap_or_default();
+    
+    let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+    let priv_key_str = std::fs::read_to_string(ident_dir.join("x25519_priv.b64")).unwrap_or_default();
+    
+    let priv_bytes = match b64.decode(priv_key_str.trim()) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    
+    let secret_bytes = if priv_bytes.len() == 48 {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&priv_bytes[16..48]);
+        arr
+    } else if priv_bytes.len() == 32 {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&priv_bytes);
+        arr
+    } else {
+        return;
+    };
+    
+    let recipient_secret = StaticSecret::from(secret_bytes);
+    
+    let pub_key_str = std::fs::read_to_string(ident_dir.join("x25519_pub.b64")).unwrap_or_default();
+    let pub_bytes = match b64.decode(pub_key_str.trim()) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    
+    let sender_raw = if pub_bytes.len() == 44 {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&pub_bytes[12..44]);
+        arr
+    } else if pub_bytes.len() == 32 {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&pub_bytes);
+        arr
+    } else {
+        return;
+    };
+    let sender_public = PublicKey::from(sender_raw);
+    
+    let ciphertext = b64.decode(ciphertext_b64).unwrap_or_default();
+    let nonce_vec = b64.decode(nonce_b64).unwrap_or_default();
+    if nonce_vec.len() != 12 { return; }
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&nonce_vec);
+    
+    if let Ok(decrypted) = decrypt_from_sender(&ciphertext, &nonce_bytes, &recipient_secret, &sender_public) {
+        if let Ok(plaintext) = String::from_utf8(decrypted) {
+            let mut message_content = plaintext.clone();
+            if let Ok(json_obj) = serde_json::from_str::<serde_json::Value>(&plaintext) {
+                if let Some(content) = json_obj.get("content").and_then(|v| v.as_str()) {
+                    message_content = content.to_string();
+                }
+            }
+            
+            if let Some(bridge_arc) = &app_state.admin_bridge {
+                let bridge = bridge_arc.read().await;
+                if let Ok(response) = bridge.send_message(message_content, vec![]).await {
+                    let response_json = json!({"content": response.content}).to_string();
+                    if let Ok((resp_ciphertext, resp_nonce)) = encrypt_for_recipient(response_json.as_bytes(), &recipient_secret, &sender_public) {
+                        
+                        let msg_id = uuid::Uuid::new_v4().to_string();
+                        let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                        
+                        let reply_packet = json!({
+                            "id": uuid::Uuid::new_v4().to_string(),
+                            "hops": 1,
+                            "sender_id": my_node_id,
+                            "target_user_id": my_node_id,
+                            "type": "MESSAGE",
+                            "payload": {
+                                "id": msg_id,
+                                "nonce": b64.encode(resp_nonce),
+                                "ciphertext": b64.encode(resp_ciphertext),
+                                "timestamp": chrono::Utc::now().timestamp_millis()
+                            }
+                        });
+                        
+                        let mut buffer = app_state.incoming_mesh_packets.write().await;
+                        buffer.push(reply_packet);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Step 1: Load configuration (before logging, so we know the log dir)
@@ -204,6 +306,22 @@ async fn main() -> Result<()> {
                                         // The Hub's native firewall rejects untrusted/spam packets!
                                         if let Ok(_) = engine.process_incoming(&packet).await {
                                             debug!("Hub Firewall passed packet from: {}", packet.header.sender_id);
+                                            
+                                            let ptype = packet_json.get("type").and_then(|v| v.as_str()).unwrap_or_default();
+                                            let target_id = packet_json.get("target_user_id").and_then(|v| v.as_str()).unwrap_or_default();
+                                            let sender_id = packet_json.get("sender_id").and_then(|v| v.as_str()).unwrap_or_default();
+                                            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+                                            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                                            
+                                            // Intercept DMs sent to ourselves (AI Persona Chat)
+                                            if ptype == "MESSAGE" && target_id == my_node_id && sender_id == my_node_id {
+                                                let state_clone = state.clone();
+                                                let pjson_clone = packet_json.clone();
+                                                tokio::spawn(async move {
+                                                    handle_incoming_dm(state_clone, pjson_clone).await;
+                                                });
+                                            }
+                                            
                                             let mut buffer = state.incoming_mesh_packets.write().await;
                                             buffer.push(packet_json);
                                         } else {

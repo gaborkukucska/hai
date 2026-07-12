@@ -443,6 +443,42 @@ pub async fn handle_invoke(
                 Err("Missing 'peers' array".to_string())
             }
         },
+        "sync_push_packets" => {
+            debug!("Mobile pushing packets to Hub Firewall");
+            if let Some(packets) = args.get("packets").and_then(|p| p.as_array()) {
+                let engine = app_state.gossip_engine.read().await;
+                for packet_json in packets {
+                    if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
+                        let _ = engine.process_incoming(&packet).await;
+                        
+                        // If it's a POST packet, add it to social_posts so it appears in the Portal
+                        if let Some(ptype) = packet_json.get("type").and_then(|v| v.as_str()) {
+                            if ptype == "POST" {
+                                if let Some(payload) = packet_json.get("payload") {
+                                    let id = packet_json.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                                    let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+                                    let timestamp = payload.get("timestamp").and_then(|v| v.as_u64()).unwrap_or_default();
+                                    let author = payload.get("author_name").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                    
+                                    let mut posts = app_state.social_posts.write().await;
+                                    if !posts.iter().any(|p| p.id == id) {
+                                        posts.push(crate::SocialPost {
+                                            id: id.to_string(),
+                                            author: author.to_string(),
+                                            content: content.to_string(),
+                                            timestamp: timestamp.to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(json!({"status": "ok", "packets_processed": packets.len()}))
+            } else {
+                Err("Missing 'packets' array".to_string())
+            }
+        },
         "sync_pull_packets" => {
             let mut buffer = app_state.incoming_mesh_packets.write().await;
             let packets = buffer.clone();
