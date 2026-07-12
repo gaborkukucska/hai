@@ -163,7 +163,7 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
                         let reply_packet = json!({
                             "id": uuid::Uuid::new_v4().to_string(),
                             "hops": 1,
-                            "sender_id": my_node_id,
+                            "sender_id": format!("admin_{}", my_node_id),
                             "target_user_id": my_node_id,
                             "type": "MESSAGE",
                             "payload": {
@@ -335,7 +335,8 @@ async fn main() -> Result<()> {
                                     let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                                     
                                     // Intercept DMs sent to ourselves (AI Persona Chat)
-                                    if ptype == "MESSAGE" && target_id == my_node_id && sender_id == my_node_id {
+                                    let admin_id = format!("admin_{}", my_node_id);
+                                    if ptype == "MESSAGE" && target_id == admin_id && sender_id == my_node_id {
                                         let state_clone = state.clone();
                                         let pjson_clone = packet_json.clone();
                                         tokio::spawn(async move {

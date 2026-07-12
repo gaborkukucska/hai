@@ -516,7 +516,8 @@ pub async fn handle_invoke(
                             let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
                             let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                             
-                            if target_id == my_node_id && sender_id == my_node_id {
+                            let admin_id = format!("admin_{}", my_node_id);
+                            if target_id == admin_id && sender_id == my_node_id {
                                 let state_clone = app_state.clone();
                                 let pjson_clone = packet_json.clone();
                                 tokio::spawn(async move {

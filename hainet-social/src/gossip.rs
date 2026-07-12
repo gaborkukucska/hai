@@ -80,7 +80,7 @@ impl GossipEngine {
             PacketPayload::ConnectionRequestPacket { .. }
         );
 
-        if !is_connection_request {
+        if !is_connection_request && sender != &self.local_node_id {
             let firewall = self.firewall.read().await;
             if !firewall.is_trusted(sender) {
                 warn!(sender, packet_id, "Dropping packet from untrusted peer");
