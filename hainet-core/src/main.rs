@@ -229,8 +229,13 @@ async fn main() -> Result<()> {
     let role_lower = config.network.role.to_lowercase();
     let admin_bridge = if role_lower == "master" || role_lower == "standalone" {
         let max_ctx = hardware_profile.max_safe_context_length();
-        Some(AdminBridge::new(data_dir.clone(), prompts_dir, config.network.role.clone(), max_ctx).await
-            .expect("Failed to initialize Admin AI Bridge"))
+        match AdminBridge::new(data_dir.clone(), prompts_dir, config.network.role.clone(), max_ctx).await {
+            Ok(bridge) => Some(bridge),
+            Err(e) => {
+                tracing::error!("Failed to initialize Admin AI Bridge: {}", e);
+                None
+            }
+        }
     } else {
         info!("Skipping Admin AI Bridge initialization on non-master node");
         None

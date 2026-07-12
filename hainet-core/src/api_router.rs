@@ -376,9 +376,9 @@ pub async fn handle_invoke(
             let fund_me_link = args.get("fund_me_link").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
             let storage = settings_state.write().await;
-            storage.save_setting("mesh.is_discoverable", &is_discoverable.to_string()).await.unwrap();
-            storage.save_setting("mesh.is_creator", &is_creator.to_string()).await.unwrap();
-            storage.save_setting("mesh.fund_me_link", &fund_me_link).await.unwrap();
+            let _ = storage.save_setting("mesh.is_discoverable", &is_discoverable.to_string()).await;
+            let _ = storage.save_setting("mesh.is_creator", &is_creator.to_string()).await;
+            let _ = storage.save_setting("mesh.fund_me_link", &fund_me_link).await;
             
             Ok(json!({"status": "saved"}))
         },
