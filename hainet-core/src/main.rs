@@ -152,32 +152,64 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
             
             if let Some(bridge_arc) = &app_state.admin_bridge {
                 let bridge = bridge_arc.read().await;
-                if let Ok(response) = bridge.send_message(message_content, vec![]).await {
-                    tracing::info!("Admin AI responded. Encrypting reply...");
-                    let response_json = json!({"content": response.message.content}).to_string();
-                    if let Ok((resp_ciphertext, resp_nonce)) = encrypt_for_recipient(response_json.as_bytes(), &recipient_secret, &sender_public) {
-                        
-                        let msg_id = uuid::Uuid::new_v4().to_string();
-                        let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                        
-                        let reply_packet = json!({
-                            "id": uuid::Uuid::new_v4().to_string(),
-                            "hops": 1,
-                            "sender_id": format!("admin_{}", my_node_id),
-                            "target_user_id": my_node_id,
-                            "type": "MESSAGE",
-                            "payload": {
-                                "id": msg_id,
-                                "nonce": b64.encode(resp_nonce),
-                                "ciphertext": b64.encode(resp_ciphertext),
-                                "timestamp": chrono::Utc::now().timestamp_millis()
-                            }
-                        });
-                        
-                        let mut buffer = app_state.incoming_mesh_packets.write().await;
-                        buffer.push(reply_packet);
-                        tracing::info!("Reply encrypted and pushed to mobile sync buffer!");
+                let reply_text = match bridge.send_message(message_content, vec![]).await {
+                    Ok(response) => {
+                        tracing::info!("Admin AI responded successfully.");
+                        response.message.content
+                    },
+                    Err(e) => {
+                        tracing::error!("Admin AI Error: {}", e);
+                        format!("⚠️ Admin AI Error: {}\n\n(Check your Hub logs, MCP servers or persona config might have failed to start)", e)
                     }
+                };
+                
+                let response_json = json!({"content": reply_text}).to_string();
+                if let Ok((resp_ciphertext, resp_nonce)) = encrypt_for_recipient(response_json.as_bytes(), &recipient_secret, &sender_public) {
+                    let msg_id = uuid::Uuid::new_v4().to_string();
+                    let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                    
+                    let reply_packet = json!({
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "hops": 1,
+                        "sender_id": format!("admin_{}", my_node_id),
+                        "target_user_id": my_node_id,
+                        "type": "MESSAGE",
+                        "payload": {
+                            "id": msg_id,
+                            "nonce": b64.encode(resp_nonce),
+                            "ciphertext": b64.encode(resp_ciphertext),
+                            "timestamp": chrono::Utc::now().timestamp_millis()
+                        }
+                    });
+                    
+                    let mut buffer = app_state.incoming_mesh_packets.write().await;
+                    buffer.push(reply_packet);
+                    tracing::info!("Reply encrypted and pushed to mobile sync buffer!");
+                } else {
+                    tracing::error!("Failed to encrypt reply for Admin AI");
+                }
+            } else {
+                tracing::error!("AdminBridge is None. Is this a master node?");
+                let reply_text = "⚠️ Admin AI is disabled on this node (not a Master node or failed to init).".to_string();
+                let response_json = json!({"content": reply_text}).to_string();
+                if let Ok((resp_ciphertext, resp_nonce)) = encrypt_for_recipient(response_json.as_bytes(), &recipient_secret, &sender_public) {
+                    let msg_id = uuid::Uuid::new_v4().to_string();
+                    let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                    let reply_packet = json!({
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "hops": 1,
+                        "sender_id": format!("admin_{}", my_node_id),
+                        "target_user_id": my_node_id,
+                        "type": "MESSAGE",
+                        "payload": {
+                            "id": msg_id,
+                            "nonce": b64.encode(resp_nonce),
+                            "ciphertext": b64.encode(resp_ciphertext),
+                            "timestamp": chrono::Utc::now().timestamp_millis()
+                        }
+                    });
+                    let mut buffer = app_state.incoming_mesh_packets.write().await;
+                    buffer.push(reply_packet);
                 }
             }
         }
