@@ -511,8 +511,8 @@ pub async fn handle_invoke(
                                 }
                             }
                         } else if ptype == "MESSAGE" {
-                            let target_id = packet_json.get("target_user_id").and_then(|v| v.as_str()).unwrap_or_default();
-                            let sender_id = packet_json.get("sender_id").and_then(|v| v.as_str()).unwrap_or_default();
+                            let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default();
+                            let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default();
                             let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
                             let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                             

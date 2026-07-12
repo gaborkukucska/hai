@@ -140,7 +140,11 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
     let mut nonce_bytes = [0u8; 12];
     nonce_bytes.copy_from_slice(&nonce_vec);
     
-    if let Ok(decrypted) = decrypt_from_sender(&ciphertext, &nonce_bytes, &recipient_secret, &sender_public) {
+    let decrypt_result = decrypt_from_sender(&ciphertext, &nonce_bytes, &recipient_secret, &sender_public);
+    if let Err(e) = &decrypt_result {
+        tracing::error!("DM Decryption failed: {}", e);
+    }
+    if let Ok(decrypted) = decrypt_result {
         tracing::info!("DM Decrypted successfully! Sending to AdminBridge...");
         if let Ok(plaintext) = String::from_utf8(decrypted) {
             let mut message_content = plaintext.clone();
@@ -361,8 +365,8 @@ async fn main() -> Result<()> {
                                 if n == 0 { break; }
                                 if let Ok(packet_json) = serde_json::from_str::<serde_json::Value>(&line) {
                                     let ptype = packet_json.get("type").and_then(|v| v.as_str()).unwrap_or_default();
-                                    let target_id = packet_json.get("target_user_id").and_then(|v| v.as_str()).unwrap_or_default();
-                                    let sender_id = packet_json.get("sender_id").and_then(|v| v.as_str()).unwrap_or_default();
+                                    let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default();
+                                    let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default();
                                     let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
                                     let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                                     
@@ -697,7 +701,14 @@ async fn run_health_server(
                     }
                 },
                 ("POST", "/api/invoke") => {
-                    if !IS_LOGGED_IN.load(Ordering::SeqCst) {
+                    let mut is_sync = false;
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body_str) {
+                        if let Some(cmd) = json.get("cmd").and_then(|v| v.as_str()) {
+                            is_sync = cmd.starts_with("sync_") || cmd.starts_with("get_dms") || cmd.starts_with("get_mesh_peers");
+                        }
+                    }
+                    
+                    if !IS_LOGGED_IN.load(Ordering::SeqCst) && !is_sync {
                         ("401 Unauthorized".to_string(), r#"{"error":"unauthorized"}"#.to_string())
                     } else {
                         // Parse invoke JSON body: { "cmd": "foo", "args": { ... } }
