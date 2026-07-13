@@ -44,24 +44,27 @@ use rust_embed::RustEmbed;
 struct PortalAssets;
 
 /// Shared application state passed to every API handler.
+#[derive(Clone)]
+pub struct SocialDb {
+    pub pool: sqlx::SqlitePool,
+}
+impl SocialDb {
+    pub async fn new(db_path: &str) -> anyhow::Result<Self> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(5).connect(db_path).await?;
+        sqlx::query("CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, author TEXT, content TEXT, timestamp TEXT, media_id TEXT, media_type TEXT);").execute(&pool).await?;
+        sqlx::query("CREATE TABLE IF NOT EXISTS dms (id TEXT PRIMARY KEY, peer TEXT, sender TEXT, content TEXT, timestamp INTEGER, media_id TEXT, media_type TEXT);").execute(&pool).await?;
+        sqlx::query("CREATE TABLE IF NOT EXISTS mesh_peers (public_key TEXT PRIMARY KEY, is_trusted BOOLEAN, handle TEXT);").execute(&pool).await?;
+        Ok(Self { pool })
+    }
+}
+
 pub struct AppState {
-    /// Buffered mesh packets for mobile to pull
     pub incoming_mesh_packets: Arc<RwLock<Vec<serde_json::Value>>>,
-    /// Bridge to the Admin AI agent system
     pub admin_bridge: Option<Arc<RwLock<AdminBridge>>>,
-    /// Text-to-speech handler
     pub tts_handler: Arc<RwLock<TTSHandler>>,
-    /// Live hardware profile from hainet-collab (PPLPWR port)
     pub hardware_profile: Arc<RwLock<HardwareProfile>>,
-    /// Gossip engine from hainet-social (gChat port)
     pub gossip_engine: Arc<RwLock<GossipEngine>>,
-    /// In-memory social feed posts (bridged to gossip later)
-    pub social_posts: Arc<RwLock<Vec<SocialPost>>>,
-    /// Synchronized peers from mobile
-    pub mesh_peers: Arc<RwLock<Vec<serde_json::Value>>>,
-    /// Synchronized decrypted DMs from mobile
-    pub dms: Arc<RwLock<Vec<serde_json::Value>>>,
-    /// Configured log directory
+    pub social_db: Arc<SocialDb>,
     pub log_dir: std::path::PathBuf,
 }
 
@@ -103,7 +106,7 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
         tracing::error!("DM Decrypt FATAL: x25519_priv.b64 is MISSING from {}! The Hub cannot decrypt DMs.", ident_dir.display());
         return;
     }
-    let priv_key_str = std::fs::read_to_string(priv_key_path).unwrap_or_default();
+    let priv_key_str = std::fs::read_to_string(priv_key_path).unwrap_or_default().replace("\n", "").replace("\r", "");
     
     let priv_bytes = match b64.decode(priv_key_str.trim()) {
         Ok(b) => b,
@@ -122,12 +125,13 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
         arr.copy_from_slice(&priv_bytes);
         arr
     } else {
+        tracing::error!("DM Decrypt FATAL: Invalid x25519_priv length: {} (expected 32 or 48)", priv_bytes.len());
         return;
     };
     
     let recipient_secret = StaticSecret::from(secret_bytes);
     
-    let pub_key_str = std::fs::read_to_string(ident_dir.join("x25519_pub.b64")).unwrap_or_default();
+    let pub_key_str = std::fs::read_to_string(ident_dir.join("x25519_pub.b64")).unwrap_or_default().replace("\n", "").replace("\r", "");
     let pub_bytes = match b64.decode(pub_key_str.trim()) {
         Ok(b) => b,
         Err(e) => {
@@ -145,6 +149,7 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
         arr.copy_from_slice(&pub_bytes);
         arr
     } else {
+        tracing::error!("DM Decrypt FATAL: Invalid x25519_pub length: {} (expected 32 or 44)", pub_bytes.len());
         return;
     };
     let sender_public = PublicKey::from(sender_raw);
@@ -360,28 +365,18 @@ async fn main() -> Result<()> {
     let qr_sessions = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
     let tts_handler = TTSHandler::new();
     
-    let social_posts_file = data_dir.join("social_posts.json");
-    let dms_file = data_dir.join("dms.json");
-    let peers_file = data_dir.join("mesh_peers.json");
-    
-    let social_posts: Vec<crate::SocialPost> = std::fs::read_to_string(&social_posts_file)
-        .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    let dms: Vec<serde_json::Value> = std::fs::read_to_string(&dms_file)
-        .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    let mesh_peers: Vec<serde_json::Value> = std::fs::read_to_string(&peers_file)
-        .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-
-    info!("💾 Loaded persistent state: {} posts, {} DMs, {} peers", social_posts.len(), dms.len(), mesh_peers.len());
+    let social_db_path = data_dir.join("social.db");
+    let social_db = SocialDb::new(&format!("sqlite://{}?mode=rwc", social_db_path.display()))
+        .await
+        .expect("Failed to initialize SocialDb");
 
     let app_state = Arc::new(AppState {
         admin_bridge: admin_bridge.map(|b| Arc::new(RwLock::new(b))),
         tts_handler: Arc::new(RwLock::new(tts_handler)),
         hardware_profile: Arc::new(RwLock::new(hardware_profile)),
         gossip_engine: Arc::new(RwLock::new(gossip_engine)),
-        social_posts: Arc::new(RwLock::new(social_posts)),
-        mesh_peers: Arc::new(RwLock::new(mesh_peers)),
-        dms: Arc::new(RwLock::new(dms)),
-        incoming_mesh_packets: Arc::new(RwLock::new(vec![])),
+        social_db: Arc::new(social_db),
+        incoming_mesh_packets: Arc<RwLock<Vec<serde_json::Value>>>,
         log_dir: config.effective_log_dir(),
     });
 

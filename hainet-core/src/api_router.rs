@@ -301,12 +301,22 @@ pub async fn handle_invoke(
         // Returns the in-memory social feed posts.
         // In Phase 4 completion, these will come from the gossip engine.
         "get_social_feed" => {
-            debug!("Fetching social feed");
-            let posts = app_state.social_posts.read().await;
-            Ok(json!({
-                "posts": *posts,
-                "total": posts.len(),
-            }))
+            debug!("Fetching social feed from SQLite");
+            let rows = sqlx::query("SELECT * FROM posts ORDER BY timestamp DESC")
+                .fetch_all(&app_state.social_db.pool).await.unwrap_or_default();
+            let mut posts = Vec::new();
+            for row in rows {
+                use sqlx::Row;
+                posts.push(json!({
+                    "id": row.try_get::<String, _>("id").unwrap_or_default(),
+                    "author": row.try_get::<String, _>("author").unwrap_or_default(),
+                    "content": row.try_get::<String, _>("content").unwrap_or_default(),
+                    "timestamp": row.try_get::<String, _>("timestamp").unwrap_or_default(),
+                    "media_id": row.try_get::<Option<String>, _>("media_id").unwrap_or_default(),
+                    "media_type": row.try_get::<Option<String>, _>("media_type").unwrap_or_default(),
+                }));
+            }
+            Ok(json!({ "posts": posts, "total": posts.len() }))
         },
 
         // Creates a new local post and adds it to the social feed.
@@ -332,16 +342,11 @@ pub async fn handle_invoke(
                 media_type: None,
             };
 
-            let mut posts = app_state.social_posts.write().await;
-            posts.insert(0, post.clone()); // Newest first
+            let _ = sqlx::query("INSERT INTO posts (id, author, content, timestamp) VALUES (?, ?, ?, ?)")
+                .bind(&post.id).bind(&post.author).bind(&post.content).bind(&post.timestamp)
+                .execute(&app_state.social_db.pool).await;
 
-            // TODO Phase 4: Broadcast via gossip engine
-            // let gossip = app_state.gossip_engine.read().await;
-            // gossip.create_packet(PacketPayload::Post { ... });
-
-            let path = std::path::PathBuf::from("/var/lib/hainet/data/social_posts.json");
-            let _ = std::fs::write(&path, serde_json::to_string(&*posts).unwrap_or_default());
-            debug!("Social feed now has {} posts", posts.len());
+            debug!("Social post created and saved to SQLite");
             Ok(json!({"status": "posted", "post": post}))
         },
 
@@ -356,12 +361,19 @@ pub async fn handle_invoke(
         // Returns the list of mesh peers known to the gossip engine.
         // In Phase 4, this will be populated by actual P2P connections.
         "get_mesh_peers" => {
-            debug!("Fetching mesh peers");
-            let peers = app_state.mesh_peers.read().await;
-            Ok(json!({
-                "peers": *peers,
-                "total": peers.len(),
-            }))
+            debug!("Fetching mesh peers from SQLite");
+            let rows = sqlx::query("SELECT * FROM mesh_peers")
+                .fetch_all(&app_state.social_db.pool).await.unwrap_or_default();
+            let mut peers = Vec::new();
+            for row in rows {
+                use sqlx::Row;
+                peers.push(json!({
+                    "public_key": row.try_get::<String, _>("public_key").unwrap_or_default(),
+                    "is_trusted": row.try_get::<bool, _>("is_trusted").unwrap_or_default(),
+                    "handle": row.try_get::<String, _>("handle").unwrap_or_default(),
+                }));
+            }
+            Ok(json!({ "peers": peers, "total": peers.len() }))
         },
         "get_mesh_settings" => {
             let storage = settings_state.read().await;
@@ -453,21 +465,21 @@ pub async fn handle_invoke(
             debug!("Mobile pushing Contacts/Peers to Hub Firewall");
             if let Some(peers) = args.get("peers").and_then(|p| p.as_array()) {
                 let engine = app_state.gossip_engine.read().await;
-                let mut stored_peers = app_state.mesh_peers.write().await;
-                stored_peers.clear();
-                
                 for peer in peers {
-                    stored_peers.push(peer.clone());
-                    if let (Some(pub_key), Some(is_trusted)) = (peer.get("public_key").and_then(|v| v.as_str()), peer.get("is_trusted").and_then(|v| v.as_bool())) {
-                        if is_trusted {
-                            engine.trust_peer(pub_key.to_string()).await;
-                        } else {
-                            engine.untrust_peer(pub_key).await;
-                        }
+                    let pub_key = peer.get("public_key").and_then(|v| v.as_str()).unwrap_or_default();
+                    let handle = peer.get("handle").and_then(|v| v.as_str()).unwrap_or_default();
+                    let is_trusted = peer.get("is_trusted").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                    let _ = sqlx::query("INSERT OR REPLACE INTO mesh_peers (public_key, is_trusted, handle) VALUES (?, ?, ?)")
+                        .bind(pub_key).bind(is_trusted).bind(handle)
+                        .execute(&app_state.social_db.pool).await;
+
+                    if is_trusted {
+                        engine.trust_peer(pub_key.to_string()).await;
+                    } else {
+                        engine.untrust_peer(pub_key).await;
                     }
                 }
-                let path = std::path::PathBuf::from("/var/lib/hainet/data/mesh_peers.json");
-                let _ = std::fs::write(&path, serde_json::to_string(&*stored_peers).unwrap_or_default());
                 Ok(json!({"status": "ok", "peers_processed": peers.len()}))
             } else {
                 Err("Missing 'peers' array".to_string())
@@ -475,23 +487,43 @@ pub async fn handle_invoke(
         },
         
         "sync_push_dms" => {
-            tracing::warn!("API_ROUTER: sync_push_dms called");
+            tracing::info!("API_ROUTER: sync_push_dms called, updating SQLite");
             if let Some(dms) = args.get("dms").and_then(|d| d.as_array()) {
-                let mut stored_dms = app_state.dms.write().await;
-                stored_dms.clear();
                 for dm in dms {
-                    stored_dms.push(dm.clone());
+                    let id = dm.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+                    let peer = dm.get("peer").and_then(|v| v.as_str()).unwrap_or_default();
+                    let sender = dm.get("sender").and_then(|v| v.as_str()).unwrap_or_default();
+                    let content = dm.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+                    let timestamp = dm.get("timestamp").and_then(|v| v.as_i64()).unwrap_or_default();
+                    let media_id = dm.get("mediaId").and_then(|v| v.as_str());
+                    let media_type = dm.get("mediaType").and_then(|v| v.as_str());
+
+                    let _ = sqlx::query("INSERT OR REPLACE INTO dms (id, peer, sender, content, timestamp, media_id, media_type) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                        .bind(id).bind(peer).bind(sender).bind(content).bind(timestamp).bind(media_id).bind(media_type)
+                        .execute(&app_state.social_db.pool).await;
                 }
-                let path = std::path::PathBuf::from("/var/lib/hainet/data/dms.json");
-                let _ = std::fs::write(&path, serde_json::to_string(&*stored_dms).unwrap_or_default());
                 Ok(json!({"status": "ok", "dms_processed": dms.len()}))
             } else {
                 Err("Missing 'dms' array".to_string())
             }
         },
         "get_dms" => {
-            let stored_dms = app_state.dms.read().await;
-            Ok(json!({ "dms": *stored_dms }))
+            let rows = sqlx::query("SELECT * FROM dms ORDER BY timestamp ASC")
+                .fetch_all(&app_state.social_db.pool).await.unwrap_or_default();
+            let mut dms = Vec::new();
+            for row in rows {
+                use sqlx::Row;
+                dms.push(json!({
+                    "id": row.try_get::<String, _>("id").unwrap_or_default(),
+                    "peer": row.try_get::<String, _>("peer").unwrap_or_default(),
+                    "sender": row.try_get::<String, _>("sender").unwrap_or_default(),
+                    "content": row.try_get::<String, _>("content").unwrap_or_default(),
+                    "timestamp": row.try_get::<i64, _>("timestamp").unwrap_or_default(),
+                    "mediaId": row.try_get::<Option<String>, _>("media_id").unwrap_or_default(),
+                    "mediaType": row.try_get::<Option<String>, _>("media_type").unwrap_or_default(),
+                }));
+            }
+            Ok(json!({ "dms": dms }))
         },
 
         "sync_push_packets" => {
@@ -510,16 +542,10 @@ pub async fn handle_invoke(
                                 let media_id = payload.get("media_id").and_then(|v| v.as_str()).map(|s| s.to_string());
                                 let media_type = payload.get("media_metadata").and_then(|m| m.get("type")).and_then(|v| v.as_str()).map(|s| s.to_string());
                                 
-                                let mut posts = app_state.social_posts.write().await;
-                                if !posts.iter().any(|p| p.id == id) && !id.is_empty() {
-                                    posts.push(crate::SocialPost {
-                                        id: id.to_string(),
-                                        author: author.to_string(),
-                                        content: content.to_string(),
-                                        timestamp,
-                                        media_id,
-                                        media_type,
-                                    });
+                                if !id.is_empty() {
+                                    let _ = sqlx::query("INSERT OR REPLACE INTO posts (id, author, content, timestamp, media_id, media_type) VALUES (?, ?, ?, ?, ?, ?)")
+                                        .bind(id).bind(author).bind(content).bind(timestamp).bind(media_id).bind(media_type)
+                                        .execute(&app_state.social_db.pool).await;
                                 }
                             }
                         } else if ptype == "MESSAGE" {
