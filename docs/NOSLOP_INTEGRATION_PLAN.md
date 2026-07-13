@@ -63,13 +63,13 @@ HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoS
    - Implement `/api/backup/pull` (Serve the latest ZIP to NoSlop for mnemonic restoration).
    - Implement `/api/sync/clearnet` (Merge liked/saved RSS items).
 
-### Phase 3: Deep Data Sync & Portal Population (NEXT)
+### Phase 3: Deep Data Sync & Portal Population (ACTIVE)
 **Goal:** Transition the Hub from an in-memory relay into a persistent database to populate the Web UI and offload mobile processing.
 
-1. **Rust SQLite Persistence**
+1. **Rust SQLite Persistence** ✅
    - Replicate NoSlop's Room database schema (Posts, Comments, Reactions, DMs) in `hainet-social`.
    - When the Hub's firewall accepts a packet, persist it to disk *before* making it available for mobile sync.
-   - Wire the React `hainet-portal` to this database so the Web UI displays the user's social feed and chats.
+   - Wire the React `hainet-portal` to this database so the Web UI displays the user's social feed and chats. (Completed: `social.db` active and synced with mobile app).
 2. **Heavy Media Offloading**
    - Port NoSlop's AIMD chunk-downloading algorithm (`MediaManager.kt`) to Rust.
    - Allow the Hub to download 50MB video files over Tor 24/7. Mobile app will request the fully assembled MP4 over the LAN/Tor API instead of handling chunks itself.

@@ -83,6 +83,7 @@ You → Sign → Encrypt → Your Node (.onion) → Peer Mesh → World
 
 - **Public feed** — chronological, no algorithm, no shadow-banning. You see what the mesh broadcasts. Period.
 - **Direct messages** — E2EE, Tor-routed, your IP never revealed even to your contacts
+- **Admin AI Integration** — Chat securely with your Hub's local AI agent via standard E2EE DMs
 - **Group chats** — encrypted group channels, gossip-synced across the mesh
 - **Handle.Tripcode identity** — human-readable names (`Alice.x7z9`) mathematically immune to impersonation, no central registry
 - **Rich media** — photos, audio, and video shared via a daisy-chain streaming proxy so media from unknown authors streams to you without ever revealing your address to them
@@ -294,7 +295,7 @@ hainet/
 |---|---|
 | hainet-core (networking, multimodal, storage) | ✅ Stable |
 | hainet-persona (TrippleEffect agentic core) | ✅ Phase 1 Complete |
-| hainet-social (gChat gossip mesh, E2EE, media relay) | ✅ Ported to Rust |
+| hainet-social (gChat gossip mesh, E2EE, media relay) | ✅ Ported to Rust (SQLite synced w/ NoSlop) |
 | hainet-chain (blockchain, identity, governance) | ✅ Functional |
 | hainet-collab (compute sharing, PPLPWR integration) | 🔄 Phase 2 Active |
 | hainet-seed (smart installer, mobile-assisted mesh deployment) | ✅ Operational |
