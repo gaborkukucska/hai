@@ -339,6 +339,8 @@ pub async fn handle_invoke(
             // let gossip = app_state.gossip_engine.read().await;
             // gossip.create_packet(PacketPayload::Post { ... });
 
+            let path = std::path::PathBuf::from("/var/lib/hainet/data/social_posts.json");
+            let _ = std::fs::write(&path, serde_json::to_string(&*posts).unwrap_or_default());
             debug!("Social feed now has {} posts", posts.len());
             Ok(json!({"status": "posted", "post": post}))
         },
@@ -464,6 +466,8 @@ pub async fn handle_invoke(
                         }
                     }
                 }
+                let path = std::path::PathBuf::from("/var/lib/hainet/data/mesh_peers.json");
+                let _ = std::fs::write(&path, serde_json::to_string(&*stored_peers).unwrap_or_default());
                 Ok(json!({"status": "ok", "peers_processed": peers.len()}))
             } else {
                 Err("Missing 'peers' array".to_string())
@@ -478,6 +482,8 @@ pub async fn handle_invoke(
                 for dm in dms {
                     stored_dms.push(dm.clone());
                 }
+                let path = std::path::PathBuf::from("/var/lib/hainet/data/dms.json");
+                let _ = std::fs::write(&path, serde_json::to_string(&*stored_dms).unwrap_or_default());
                 Ok(json!({"status": "ok", "dms_processed": dms.len()}))
             } else {
                 Err("Missing 'dms' array".to_string())
@@ -539,6 +545,9 @@ pub async fn handle_invoke(
                         let _ = engine.process_incoming(&packet).await;
                     }
                 }
+                let posts = app_state.social_posts.read().await;
+                let path = std::path::PathBuf::from("/var/lib/hainet/data/social_posts.json");
+                let _ = std::fs::write(&path, serde_json::to_string(&*posts).unwrap_or_default());
                 Ok(json!({"status": "ok", "packets_processed": packets.len()}))
             } else {
                 Err("Missing 'packets' array".to_string())

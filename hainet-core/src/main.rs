@@ -91,14 +91,19 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
 
     let payload = match packet_json.get("payload") {
         Some(p) => p,
-        None => return,
+        None => { tracing::error!("DM Decrypt FATAL: Packet missing payload!"); return; },
     };
     
     let ciphertext_b64 = payload.get("ciphertext").and_then(|v| v.as_str()).unwrap_or_default();
     let nonce_b64 = payload.get("nonce").and_then(|v| v.as_str()).unwrap_or_default();
     
     let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-    let priv_key_str = std::fs::read_to_string(ident_dir.join("x25519_priv.b64")).unwrap_or_default();
+    let priv_key_path = ident_dir.join("x25519_priv.b64");
+    if !priv_key_path.exists() {
+        tracing::error!("DM Decrypt FATAL: x25519_priv.b64 is MISSING from {}! The Hub cannot decrypt DMs.", ident_dir.display());
+        return;
+    }
+    let priv_key_str = std::fs::read_to_string(priv_key_path).unwrap_or_default();
     
     let priv_bytes = match b64.decode(priv_key_str.trim()) {
         Ok(b) => b,
@@ -355,14 +360,27 @@ async fn main() -> Result<()> {
     let qr_sessions = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
     let tts_handler = TTSHandler::new();
     
+    let social_posts_file = data_dir.join("social_posts.json");
+    let dms_file = data_dir.join("dms.json");
+    let peers_file = data_dir.join("mesh_peers.json");
+    
+    let social_posts: Vec<crate::SocialPost> = std::fs::read_to_string(&social_posts_file)
+        .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let dms: Vec<serde_json::Value> = std::fs::read_to_string(&dms_file)
+        .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let mesh_peers: Vec<serde_json::Value> = std::fs::read_to_string(&peers_file)
+        .ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+
+    info!("💾 Loaded persistent state: {} posts, {} DMs, {} peers", social_posts.len(), dms.len(), mesh_peers.len());
+
     let app_state = Arc::new(AppState {
         admin_bridge: admin_bridge.map(|b| Arc::new(RwLock::new(b))),
         tts_handler: Arc::new(RwLock::new(tts_handler)),
         hardware_profile: Arc::new(RwLock::new(hardware_profile)),
         gossip_engine: Arc::new(RwLock::new(gossip_engine)),
-        social_posts: Arc::new(RwLock::new(vec![])),
-        mesh_peers: Arc::new(RwLock::new(vec![])),
-        dms: Arc::new(RwLock::new(vec![])),
+        social_posts: Arc::new(RwLock::new(social_posts)),
+        mesh_peers: Arc::new(RwLock::new(mesh_peers)),
+        dms: Arc::new(RwLock::new(dms)),
         incoming_mesh_packets: Arc::new(RwLock::new(vec![])),
         log_dir: config.effective_log_dir(),
     });

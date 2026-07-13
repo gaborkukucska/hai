@@ -145,6 +145,11 @@ export default function SocialFeed() {
               const author = post.author || post.payload?.author_name || 'Unknown';
               const time = post.timestamp || post.payload?.timestamp || Date.now().toString();
               
+              const mediaId = post.media_id || post.payload?.media_id || post.payload?.mediaId;
+              const mediaType = post.media_type || post.payload?.media_type || post.payload?.mediaType;
+              const clearnetUrl = post.payload?.clearnet_url || post.payload?.clearnetUrl;
+              const clearnetTitle = post.payload?.clearnet_title || post.payload?.clearnetTitle;
+              
               return (
               <div key={post.id} className="bg-theme-bg-secondary border border-theme-border rounded-xl p-5">
                 <div className="flex items-center gap-3 mb-3">
@@ -159,6 +164,22 @@ export default function SocialFeed() {
                 <p className="text-theme-text-secondary text-sm whitespace-pre-wrap">
                   {content}
                 </p>
+                {clearnetUrl && (
+                  <div className="mt-3 p-3 bg-gray-700/50 rounded-lg border border-gray-600">
+                    <a href={clearnetUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 font-medium hover:underline break-all">
+                      🔗 {clearnetTitle || clearnetUrl}
+                    </a>
+                  </div>
+                )}
+                {mediaId && (
+                  <div className="mt-3 p-3 bg-gray-700/50 rounded-lg border border-gray-600 flex items-center gap-3">
+                    <div className="text-2xl">{mediaType?.includes('video') ? '🎥' : mediaType?.includes('audio') ? '🎵' : '🖼️'}</div>
+                    <div>
+                      <p className="font-medium text-sm text-gray-200">Media Attachment</p>
+                      <p className="text-xs text-gray-400 truncate max-w-xs" title={mediaId}>{mediaId}</p>
+                    </div>
+                  </div>
+                )}
               </div>
             )})
           )}
