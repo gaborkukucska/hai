@@ -116,17 +116,26 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
         }
     };
     
-    let secret_bytes = if priv_bytes.len() == 48 {
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&priv_bytes[16..48]);
-        arr
-    } else if priv_bytes.len() == 32 {
+    let secret_bytes = if priv_bytes.len() == 32 {
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&priv_bytes);
         arr
     } else {
-        tracing::error!("DM Decrypt FATAL: Invalid x25519_priv length: {} (expected 32 or 48)", priv_bytes.len());
-        return;
+        let mut found = None;
+        for i in 0..priv_bytes.len().saturating_sub(33) {
+            if priv_bytes[i] == 0x04 && priv_bytes[i+1] == 0x20 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&priv_bytes[i+2..i+34]);
+                found = Some(arr);
+                break;
+            }
+        }
+        if let Some(arr) = found {
+            arr
+        } else {
+            tracing::error!("DM Decrypt FATAL: Invalid x25519_priv length: {}", priv_bytes.len());
+            return;
+        }
     };
     
     let recipient_secret = StaticSecret::from(secret_bytes);
@@ -140,17 +149,26 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
         }
     };
     
-    let sender_raw = if pub_bytes.len() == 44 {
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&pub_bytes[12..44]);
-        arr
-    } else if pub_bytes.len() == 32 {
+    let sender_raw = if pub_bytes.len() == 32 {
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&pub_bytes);
         arr
     } else {
-        tracing::error!("DM Decrypt FATAL: Invalid x25519_pub length: {} (expected 32 or 44)", pub_bytes.len());
-        return;
+        let mut found = None;
+        for i in 0..pub_bytes.len().saturating_sub(33) {
+            if pub_bytes[i] == 0x03 && pub_bytes[i+1] == 0x21 && pub_bytes[i+2] == 0x00 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&pub_bytes[i+3..i+35]);
+                found = Some(arr);
+                break;
+            }
+        }
+        if let Some(arr) = found {
+            arr
+        } else {
+            tracing::error!("DM Decrypt FATAL: Invalid x25519_pub length: {}", pub_bytes.len());
+            return;
+        }
     };
     let sender_public = PublicKey::from(sender_raw);
     
