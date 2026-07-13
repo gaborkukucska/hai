@@ -328,6 +328,8 @@ pub async fn handle_invoke(
                 author,
                 content,
                 timestamp: chrono::Utc::now().to_rfc3339(),
+                media_id: None,
+                media_type: None,
             };
 
             let mut posts = app_state.social_posts.write().await;
@@ -469,7 +471,7 @@ pub async fn handle_invoke(
         },
         
         "sync_push_dms" => {
-            debug!("Mobile pushing DMs to Hub");
+            tracing::warn!("API_ROUTER: sync_push_dms called");
             if let Some(dms) = args.get("dms").and_then(|d| d.as_array()) {
                 let mut stored_dms = app_state.dms.write().await;
                 stored_dms.clear();
@@ -499,6 +501,8 @@ pub async fn handle_invoke(
                                 let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or_default();
                                 let timestamp = payload.get("timestamp").and_then(|v| v.as_u64()).map(|t| t.to_string()).unwrap_or_else(|| payload.get("timestamp").and_then(|v| v.as_str()).unwrap_or_default().to_string());
                                 let author = payload.get("author_name").and_then(|v| v.as_str()).unwrap_or("Unknown");
+                                let media_id = payload.get("media_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                let media_type = payload.get("media_metadata").and_then(|m| m.get("type")).and_then(|v| v.as_str()).map(|s| s.to_string());
                                 
                                 let mut posts = app_state.social_posts.write().await;
                                 if !posts.iter().any(|p| p.id == id) && !id.is_empty() {
@@ -507,6 +511,8 @@ pub async fn handle_invoke(
                                         author: author.to_string(),
                                         content: content.to_string(),
                                         timestamp,
+                                        media_id,
+                                        media_type,
                                     });
                                 }
                             }
@@ -517,6 +523,7 @@ pub async fn handle_invoke(
                             let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                             
                             let admin_id = format!("admin_{}", my_node_id);
+                            tracing::warn!("API_ROUTER MESSAGE CHECK: sender=[{}], target=[{}], my_node=[{}], admin=[{}]", sender_id, target_id, my_node_id, admin_id);
                             if target_id == admin_id && sender_id == my_node_id {
                                 let state_clone = app_state.clone();
                                 let pjson_clone = packet_json.clone();

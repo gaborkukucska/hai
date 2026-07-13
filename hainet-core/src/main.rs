@@ -72,6 +72,10 @@ pub struct SocialPost {
     pub author: String,
     pub content: String,
     pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
 }
 
 pub type MetricsState = Arc<RwLock<MetricsCollector>>;
@@ -98,7 +102,10 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
     
     let priv_bytes = match b64.decode(priv_key_str.trim()) {
         Ok(b) => b,
-        Err(_) => return,
+        Err(e) => {
+            tracing::error!("DM Decrypt: Failed to decode private key: {}", e);
+            return;
+        }
     };
     
     let secret_bytes = if priv_bytes.len() == 48 {
@@ -118,7 +125,10 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
     let pub_key_str = std::fs::read_to_string(ident_dir.join("x25519_pub.b64")).unwrap_or_default();
     let pub_bytes = match b64.decode(pub_key_str.trim()) {
         Ok(b) => b,
-        Err(_) => return,
+        Err(e) => {
+            tracing::error!("DM Decrypt: Failed to decode public key: {}", e);
+            return;
+        }
     };
     
     let sender_raw = if pub_bytes.len() == 44 {
@@ -135,8 +145,17 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_jso
     let sender_public = PublicKey::from(sender_raw);
     
     let ciphertext = b64.decode(ciphertext_b64).unwrap_or_default();
-    let nonce_vec = b64.decode(nonce_b64).unwrap_or_default();
-    if nonce_vec.len() != 12 { return; }
+    let nonce_vec = match b64.decode(nonce_b64) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("DM Decrypt: Failed to decode nonce: {}", e);
+            return;
+        }
+    };
+    if nonce_vec.len() != 12 {
+        tracing::error!("DM Decrypt: Invalid nonce length: {}", nonce_vec.len());
+        return;
+    }
     let mut nonce_bytes = [0u8; 12];
     nonce_bytes.copy_from_slice(&nonce_vec);
     
