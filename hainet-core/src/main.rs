@@ -376,7 +376,7 @@ async fn main() -> Result<()> {
         hardware_profile: Arc::new(RwLock::new(hardware_profile)),
         gossip_engine: Arc::new(RwLock::new(gossip_engine)),
         social_db: Arc::new(social_db),
-        incoming_mesh_packets: Arc<RwLock<Vec<serde_json::Value>>>,
+        incoming_mesh_packets: Arc::new(RwLock::new(vec![])),
         log_dir: config.effective_log_dir(),
     });
 
@@ -397,8 +397,8 @@ async fn main() -> Result<()> {
                                 if n == 0 { break; }
                                 if let Ok(packet_json) = serde_json::from_str::<serde_json::Value>(&line) {
                                     let ptype = packet_json.get("type").and_then(|v| v.as_str()).unwrap_or_default();
-                                    let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default();
-                                    let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default();
+                                    let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
+                                    let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
                                     let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
                                     let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                                     

@@ -549,8 +549,8 @@ pub async fn handle_invoke(
                                 }
                             }
                         } else if ptype == "MESSAGE" {
-                            let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default();
-                            let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default();
+                            let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
+                            let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
                             let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
                             let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                             
@@ -571,9 +571,6 @@ pub async fn handle_invoke(
                         let _ = engine.process_incoming(&packet).await;
                     }
                 }
-                let posts = app_state.social_posts.read().await;
-                let path = std::path::PathBuf::from("/var/lib/hainet/data/social_posts.json");
-                let _ = std::fs::write(&path, serde_json::to_string(&*posts).unwrap_or_default());
                 Ok(json!({"status": "ok", "packets_processed": packets.len()}))
             } else {
                 Err("Missing 'packets' array".to_string())
