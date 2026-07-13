@@ -372,6 +372,9 @@ async fn main() -> Result<()> {
                                     
                                     // Intercept DMs sent to ourselves (AI Persona Chat)
                                     let admin_id = format!("admin_{}", my_node_id);
+                                    if ptype == "MESSAGE" {
+                                        tracing::warn!("TCP LISTENER MESSAGE CHECK: sender=[{}], target=[{}], my_node=[{}], admin=[{}]", sender_id, target_id, my_node_id, admin_id);
+                                    }
                                     if ptype == "MESSAGE" && target_id == admin_id && sender_id == my_node_id {
                                         let state_clone = state.clone();
                                         let pjson_clone = packet_json.clone();
@@ -542,7 +545,8 @@ async fn run_health_server(
             let mut req_str = String::from_utf8_lossy(&raw_req).into_owned();
             
             // Check Content-Length to ensure we read the full JSON payload
-            if let Some(cl_idx) = req_str.find("Content-Length: ") {
+            let req_str_lower = req_str.to_lowercase();
+            if let Some(cl_idx) = req_str_lower.find("content-length: ") {
                 let cl_line = &req_str[cl_idx..];
                 if let Some(end_idx) = cl_line.find("\r\n") {
                     if let Ok(cl) = cl_line[16..end_idx].trim().parse::<usize>() {
