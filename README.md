@@ -43,6 +43,13 @@ Instead of connecting to distant corporate servers, your devices form a **local 
 
 ---
 
+## 🚀 Recommended Deployment (NoSlop App)
+
+**The recommended way to deploy a single-device HAI-Net system is via the [NoSlop Android app](https://github.com/gaborkukucska/NoSlop).**
+NoSlop includes a built-in, zero-terminal SSH deployer that automatically scans your local network, securely clones your cryptographic identity to the Hub, and sets up the node seamlessly. *(Multi-device mesh deployments are not yet supported via the mobile app and require manual setup).*
+
+---
+
 ## The New Internet Stack
 
 HAI-Net replaces the services you currently depend on third parties to provide:
@@ -133,7 +140,9 @@ HAI-Net's MCP (Model Context Protocol) server layer equips your local AI with to
 
 ## 🤖 Your Personal AI: The HAI-Net Persona
 
-Every HAI-Net hub creates a **local AI entity**, cryptographically linked to you. This agent is not a chatbot — it is a proactive, autonomous system that works on your behalf around the clock.
+Every HAI-Net hub creates a **local AI entity**, cryptographically linked to you. **If your hardware permits, the Hub provides a completely private LLM assistant (Admin AI) equipped with an almost working project and LLM management harness.** You can even converse with this AI securely from the NoSlop mobile app using standard End-to-End Encrypted DMs!
+
+This agent is not just a chatbot — it is a proactive, autonomous system that works on your behalf around the clock.
 
 The agentic core (ported from the battle-tested TrippleEffect framework) runs a strict PM → Worker hierarchy with state machine delegation:
 
@@ -324,5 +333,19 @@ And when the community is ready — when the ground network is built and the har
 
 <p align="center">
   <strong>HAI-Net is free software. Fork it. Run it. Build on it. It belongs to everyone.</strong>
+</p>
+
+---
+
+## 💖 Support the Vision
+
+Building a decentralized, corporate-free internet takes time and resources. If you believe in this mission, please consider supporting the sole developer!
+
+🪙 ☕ 🍱 [Toss me a coin, buy me a chai or even a meal](https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00)
+
+---
+
+<p align="center">
+  ✨ <em><a href="https://gaborkukucska.com">Dreamed up by Gabby</a></em>
 </p>
 <!-- # END OF FILE README.md -->

@@ -1,4 +1,8 @@
 <!-- # START OF FILE docs/INSTALLATION_GUIDE.md -->
+
+> [!TIP]
+> **RECOMMENDED DEPLOYMENT:** The easiest and currently recommended way to deploy a single-device HAI-Net Home Hub is using the **[NoSlop Android app](https://github.com/gaborkukucska/NoSlop)**. NoSlop features a zero-terminal SSH deployer that automatically clones your cryptographic identity and provisions the node. *(Multi-device deployments are not yet supported via the mobile app and require the manual steps below).* 
+
 # HAI-Net Installation Guide
 
 Complete guide for installing HAI-Net in single-device or multi-device mesh configurations.
