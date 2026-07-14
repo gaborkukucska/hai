@@ -530,6 +530,12 @@ pub async fn handle_invoke(
             debug!("Mobile pushing packets to Hub Firewall");
             if let Some(packets) = args.get("packets").and_then(|p| p.as_array()) {
                 let engine = app_state.gossip_engine.read().await;
+                
+                // FIX: Trust our own mobile node ID so the firewall doesn't drop our outbound broadcasts!
+                let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+                let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                engine.trust_peer(my_node_id.clone()).await;
+
                 for packet_json in packets {
                     // Extract POST directly to bypass strict parsing failures
                     if let Some(ptype) = packet_json.get("type").and_then(|v| v.as_str()) {
