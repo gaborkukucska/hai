@@ -526,6 +526,26 @@ pub async fn handle_invoke(
             }
             Ok(json!({ "dms": dms }))
         },
+        "sync_pull_dms" => {
+            let since = args.get("since").and_then(|v| v.as_i64()).unwrap_or(0);
+            let rows = sqlx::query("SELECT * FROM dms WHERE timestamp > ? ORDER BY timestamp ASC LIMIT 200")
+                .bind(since)
+                .fetch_all(&app_state.social_db.pool).await.unwrap_or_default();
+            let mut dms = Vec::new();
+            for row in rows {
+                use sqlx::Row;
+                dms.push(json!({
+                    "id": row.try_get::<String, _>("id").unwrap_or_default(),
+                    "peer": row.try_get::<String, _>("peer").unwrap_or_default(),
+                    "sender": row.try_get::<String, _>("sender").unwrap_or_default(),
+                    "content": row.try_get::<String, _>("content").unwrap_or_default(),
+                    "timestamp": row.try_get::<i64, _>("timestamp").unwrap_or_default(),
+                    "mediaId": row.try_get::<Option<String>, _>("media_id").unwrap_or_default(),
+                    "mediaType": row.try_get::<Option<String>, _>("media_type").unwrap_or_default(),
+                }));
+            }
+            Ok(json!({"status": "ok", "dms": dms}))
+        },
 
         "sync_push_packets" => {
             debug!("Mobile pushing packets to Hub Firewall");

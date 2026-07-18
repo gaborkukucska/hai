@@ -431,30 +431,48 @@ async fn main() -> Result<()> {
                                     let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
                                     let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                                     
-                                    // Intercept DMs sent to ourselves (AI Persona Chat)
+                                    // Hub Proxy Logic: The Hub acts as a relay for the mobile app.
+                                    // Unlike a peer node, the Hub must accept packets targeted at the
+                                    // owner regardless of which intermediate node forwarded them
+                                    // (gossip re-stamps sender_id at each hop).
                                     let admin_id = format!("admin_{}", my_node_id);
-                                    if ptype == "MESSAGE" {
-                                        tracing::warn!("TCP LISTENER MESSAGE CHECK: sender=[{}], target=[{}], my_node=[{}], admin=[{}]", sender_id, target_id, my_node_id, admin_id);
-                                    }
-                                    if ptype == "MESSAGE" && target_id == admin_id && sender_id == my_node_id {
-                                        let state_clone = state.clone();
-                                        let pjson_clone = packet_json.clone();
-                                        tokio::spawn(async move {
-                                            handle_incoming_dm(state_clone, pjson_clone).await;
-                                        });
-                                    }
 
-                                    // Parse into native Rust NetworkPacket
-                                    if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
-                                        let engine = state.gossip_engine.read().await;
-                                        // The Hub's native firewall rejects untrusted/spam packets!
-                                        if let Ok(_) = engine.process_incoming(&packet).await {
-                                            debug!("Hub Firewall passed packet from: {}", packet.header.sender_id);
-                                            
+                                    if ptype == "MESSAGE" {
+                                        info!("TCP: MESSAGE packet from [{}] target [{}]", sender_id.chars().take(20).collect::<String>(), target_id.chars().take(20).collect::<String>());
+
+                                        // Case 1: DM to Admin AI from the owner
+                                        if target_id == admin_id && sender_id == my_node_id {
+                                            let state_clone = state.clone();
+                                            let pjson_clone = packet_json.clone();
+                                            tokio::spawn(async move {
+                                                handle_incoming_dm(state_clone, pjson_clone).await;
+                                            });
+                                        }
+
+                                        // Case 2: DM targeted at the Hub owner (from any peer/relay)
+                                        // Bypass gossip firewall — content is E2EE encrypted, only the
+                                        // owner's app can decrypt it. Safe to buffer unconditionally.
+                                        if target_id == my_node_id || target_id == admin_id {
                                             let mut buffer = state.incoming_mesh_packets.write().await;
-                                            buffer.push(packet_json);
-                                        } else {
-                                            warn!("Hub Firewall rejected packet from: {}", packet.header.sender_id);
+                                            buffer.push(packet_json.clone());
+                                            info!("TCP: Buffered inbound DM for mobile sync (bypassed firewall)");
+                                        }
+                                    } else {
+                                        // Non-MESSAGE packets: check sender trust directly via DB
+                                        // (avoids gossip engine dedup/state issues)
+                                        let is_trusted = sender_id == my_node_id || {
+                                            sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM mesh_peers WHERE public_key = ? AND is_trusted = 1")
+                                                .bind(&sender_id)
+                                                .fetch_one(&state.social_db.pool).await.unwrap_or(0) > 0
+                                        };
+
+                                        // Also allow CONNECTION_REQUEST through unconditionally
+                                        let is_connection = ptype == "CONNECTION_REQUEST" || ptype == "USER_HANDSHAKE";
+
+                                        if is_trusted || is_connection {
+                                            let mut buffer = state.incoming_mesh_packets.write().await;
+                                            buffer.push(packet_json.clone());
+                                            debug!("TCP: Accepted {} packet from {}", ptype, sender_id.chars().take(20).collect::<String>());
                                         }
                                     }
                                 }
