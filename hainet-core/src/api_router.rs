@@ -469,9 +469,10 @@ pub async fn handle_invoke(
                     let pub_key = peer.get("public_key").and_then(|v| v.as_str()).unwrap_or_default();
                     let handle = peer.get("handle").and_then(|v| v.as_str()).unwrap_or_default();
                     let is_trusted = peer.get("is_trusted").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let onion = peer.get("onion_address").and_then(|v| v.as_str()).unwrap_or_default();
 
-                    let _ = sqlx::query("INSERT OR REPLACE INTO mesh_peers (public_key, is_trusted, handle) VALUES (?, ?, ?)")
-                        .bind(pub_key).bind(is_trusted).bind(handle)
+                    let _ = sqlx::query("INSERT OR REPLACE INTO mesh_peers (public_key, is_trusted, handle, onion_address) VALUES (?, ?, ?, ?)")
+                        .bind(pub_key).bind(is_trusted).bind(handle).bind(onion)
                         .execute(&app_state.social_db.pool).await;
 
                     if is_trusted {
@@ -575,6 +576,39 @@ pub async fn handle_invoke(
                     // Attempt strict routing for the engine
                     if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
                         let _ = engine.process_incoming(&packet).await;
+                        
+                        let packet_str = packet_json.to_string();
+                        let target_id = packet.header.target_user_id.clone().unwrap_or_default();
+                        let db = app_state.social_db.clone();
+                        
+                        tokio::spawn(async move {
+                            if !target_id.is_empty() {
+                                if let Ok(row) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE public_key = ?")
+                                    .bind(&target_id)
+                                    .fetch_one(&db.pool).await 
+                                {
+                                    use sqlx::Row;
+                                    if let Ok(onion) = row.try_get::<String, _>("onion_address") {
+                                        if !onion.is_empty() {
+                                            send_packet_over_tor(&onion, &packet_str).await;
+                                        }
+                                    }
+                                }
+                            } else {
+                                if let Ok(rows) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE is_trusted = 1")
+                                    .fetch_all(&db.pool).await 
+                                {
+                                    for row in rows {
+                                        use sqlx::Row;
+                                        if let Ok(onion) = row.try_get::<String, _>("onion_address") {
+                                            if !onion.is_empty() {
+                                                send_packet_over_tor(&onion, &packet_str).await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
                     }
                 }
                 Ok(json!({"status": "ok", "packets_processed": packets.len()}))
@@ -594,5 +628,12 @@ pub async fn handle_invoke(
             error!("Unimplemented API command: {}", cmd);
             Err(format!("Command '{}' not yet ported to HTTP API", cmd))
         }
+    }
+}
+
+async fn send_packet_over_tor(onion: &str, packet_str: &str) {
+    use tokio::io::AsyncWriteExt;
+    if let Ok(mut stream) = tokio_socks::tcp::Socks5Stream::connect("127.0.0.1:9050", format!("{}:9999", onion)).await {
+        let _ = stream.write_all(format!("{}\n", packet_str).as_bytes()).await;
     }
 }

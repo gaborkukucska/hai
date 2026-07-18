@@ -53,7 +53,8 @@ impl SocialDb {
         let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(5).connect(db_path).await?;
         sqlx::query("CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, author TEXT, content TEXT, timestamp TEXT, media_id TEXT, media_type TEXT);").execute(&pool).await?;
         sqlx::query("CREATE TABLE IF NOT EXISTS dms (id TEXT PRIMARY KEY, peer TEXT, sender TEXT, content TEXT, timestamp INTEGER, media_id TEXT, media_type TEXT);").execute(&pool).await?;
-        sqlx::query("CREATE TABLE IF NOT EXISTS mesh_peers (public_key TEXT PRIMARY KEY, is_trusted BOOLEAN, handle TEXT);").execute(&pool).await?;
+        sqlx::query("CREATE TABLE IF NOT EXISTS mesh_peers (public_key TEXT PRIMARY KEY, is_trusted BOOLEAN, handle TEXT, onion_address TEXT);").execute(&pool).await?;
+        let _ = sqlx::query("ALTER TABLE mesh_peers ADD COLUMN onion_address TEXT;").execute(&pool).await;
         Ok(Self { pool })
     }
 }
@@ -387,6 +388,16 @@ async fn main() -> Result<()> {
     let social_db = SocialDb::new(&format!("sqlite://{}?mode=rwc", social_db_path.display()))
         .await
         .expect("Failed to initialize SocialDb");
+
+    // Startup Trust Hydration
+    if let Ok(rows) = sqlx::query("SELECT public_key FROM mesh_peers WHERE is_trusted = 1").fetch_all(&social_db.pool).await {
+        for row in rows {
+            use sqlx::Row;
+            if let Ok(pub_key) = row.try_get::<String, _>("public_key") {
+                gossip_engine.trust_peer(pub_key).await;
+            }
+        }
+    }
 
     let app_state = Arc::new(AppState {
         admin_bridge: admin_bridge.map(|b| Arc::new(RwLock::new(b))),
