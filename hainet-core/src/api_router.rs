@@ -547,6 +547,27 @@ pub async fn handle_invoke(
             Ok(json!({"status": "ok", "dms": dms}))
         },
 
+        "send_dm" => {
+            let peer = args.get("peer_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            
+            if peer.is_empty() || content.is_empty() {
+                return Err("Missing peer_id or content".to_string());
+            }
+
+            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+            
+            let id = uuid::Uuid::new_v4().to_string();
+            let timestamp = chrono::Utc::now().timestamp_millis();
+            
+            let _ = sqlx::query("INSERT INTO dms (id, peer, sender, content, timestamp) VALUES (?, ?, ?, ?, ?)")
+                .bind(&id).bind(&peer).bind(&my_node_id).bind(&content).bind(timestamp)
+                .execute(&app_state.social_db.pool).await;
+                
+            Ok(json!({"status": "ok", "id": id, "timestamp": timestamp}))
+        },
+
         "sync_push_packets" => {
             debug!("Mobile pushing packets to Hub Firewall");
             if let Some(packets) = args.get("packets").and_then(|p| p.as_array()) {

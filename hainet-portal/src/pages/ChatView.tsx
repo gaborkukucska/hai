@@ -126,19 +126,48 @@ export default function ChatView() {
     loadHistory();
   }, []);
 
-  /** Send a message to the Admin AI via the backend bridge */
+  /** Send a message to the Admin AI or a Mesh Peer via the backend bridge */
   const handleSend = async () => {
-    if (!input.trim() || isLoading || selectedPeerId !== 'AdminAI') return;
+    if (!input.trim() || isLoading) return;
 
-    const userMsg: ChatMessage = { id: Date.now(), role: 'user', content: input };
-    setAdminMessages(prev => [...prev, userMsg]);
+    const isPeerChat = selectedPeerId !== 'AdminAI';
+    const currentInput = input;
     setInput('');
     setIsLoading(true);
     setError(null);
 
+    if (isPeerChat) {
+      try {
+        await invoke<any>('send_dm', {
+          peer_id: selectedPeerId,
+          content: currentInput,
+        });
+        
+        // Optimistically add to DMs
+        const newDm: PeerDM = {
+          id: Date.now().toString(),
+          peer: selectedPeerId,
+          sender: "local_hub", // Will be replaced by actual on next sync
+          content: currentInput,
+          timestamp: Date.now()
+        };
+        setDms(prev => [...prev, newDm]);
+      } catch (e: any) {
+        setError(`Failed to send DM: ${e.toString()}`);
+        setInput(currentInput); // restore input
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // Admin AI flow
+    const userMsg: ChatMessage = { id: Date.now(), role: 'user', content: currentInput };
+    setAdminMessages(prev => [...prev, userMsg]);
+
     try {
       const response = await invoke<any>('send_message', {
-        content: input,
+        content: currentInput,
         attachments: [],
       });
 
@@ -349,17 +378,17 @@ export default function ChatView() {
             <input
               type="text"
               id="chat-message-input"
-              placeholder={isPeerChat ? "Read-only mode (Reply via mobile app)" : "Message Admin AI..."}
+              placeholder={isPeerChat ? `Message ${currentPeerName}...` : "Message Admin AI..."}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              disabled={isLoading || isPeerChat}
+              disabled={isLoading}
               className="flex-1 bg-theme-bg-tertiary border border-theme-border rounded-md px-4 py-2 focus:outline-none focus:border-theme-accent-primary disabled:opacity-50"
             />
             <button
               id="chat-send-button"
               onClick={handleSend}
-              disabled={!input.trim() || isLoading || isPeerChat}
+              disabled={!input.trim() || isLoading}
               className="px-4 py-2 bg-theme-accent-primary text-theme-bg-primary font-bold rounded-md hover:bg-theme-accent-secondary transition-colors disabled:opacity-50 disabled:bg-theme-bg-tertiary disabled:text-theme-text-muted"
             >
               Send
