@@ -133,7 +133,8 @@ pub struct Post {
     pub author_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_avatar: Option<String>,
-    pub author_public_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_public_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_node: Option<String>,
     pub content: String,
@@ -317,6 +318,8 @@ pub enum PacketPayload {
     MediaTransferAck { payload: MediaTransferAckPayload },
     #[serde(rename = "MEDIA_PENDING")]
     MediaPending { payload: MediaPendingPayload },
+    #[serde(rename = "MEDIA_METADATA_RESPONSE")]
+    MediaMetadataResponse { payload: MediaMetadata },
 
     // ── 8. LIFECYCLE ──────────────────────────────────────────────────────
     #[serde(rename = "USER_EXIT")]
@@ -377,24 +380,42 @@ pub struct CommentVotePayload {
 pub struct CommentReactionPayload {
     pub post_id: String,
     pub comment_id: String,
-    pub user_id: String,
-    pub emoji: String,
+    #[serde(rename = "author_id")]
+    pub author_id: String,
+    #[serde(rename = "reaction_type")]
+    pub reaction_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
     pub action: ReactionAction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReactionPayload {
     pub post_id: String,
-    pub user_id: String,
-    pub emoji: String,
+    #[serde(rename = "author_id")]
+    pub author_id: String,
+    #[serde(rename = "reaction_type")]
+    pub reaction_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
     pub action: ReactionAction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatReactionPayload {
     pub message_id: String,
-    pub user_id: String,
-    pub emoji: String,
+    #[serde(rename = "author_id")]
+    pub author_id: String,
+    #[serde(rename = "reaction_type")]
+    pub reaction_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
     pub action: ReactionAction,
 }
 
