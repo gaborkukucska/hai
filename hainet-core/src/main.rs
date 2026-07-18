@@ -416,7 +416,7 @@ async fn main() -> Result<()> {
             Ok(listener) => {
                 info!("🕸️  Smart Mesh gossip listener running on port 9999");
                 loop {
-                    if let Ok((mut stream, _)) = listener.accept().await {
+                    if let Ok((stream, _)) = listener.accept().await {
                         let state = mesh_app_state.clone();
                         tokio::spawn(async move {
                             use tokio::io::{AsyncBufReadExt, BufReader};
@@ -447,15 +447,12 @@ async fn main() -> Result<()> {
                                             tokio::spawn(async move {
                                                 handle_incoming_dm(state_clone, pjson_clone).await;
                                             });
-                                        }
-
-                                        // Case 2: DM targeted at the Hub owner (from any peer/relay)
-                                        // Bypass gossip firewall — content is E2EE encrypted, only the
-                                        // owner's app can decrypt it. Safe to buffer unconditionally.
-                                        if target_id == my_node_id || target_id == admin_id {
+                                        } else {
+                                            // Case 2: DM targeted at the Mobile App (or any other relay)
+                                            // Buffer all DMs. The Mobile App's firewall will verify and decrypt.
                                             let mut buffer = state.incoming_mesh_packets.write().await;
                                             buffer.push(packet_json.clone());
-                                            info!("TCP: Buffered inbound DM for mobile sync (bypassed firewall)");
+                                            info!("TCP: Buffered inbound DM for mobile sync");
                                         }
                                     } else {
                                         // Non-MESSAGE packets: check sender trust directly via DB
