@@ -371,6 +371,8 @@ pub async fn handle_invoke(
                     "public_key": row.try_get::<String, _>("public_key").unwrap_or_default(),
                     "is_trusted": row.try_get::<bool, _>("is_trusted").unwrap_or_default(),
                     "handle": row.try_get::<String, _>("handle").unwrap_or_default(),
+                    "onion_address": row.try_get::<String, _>("onion_address").unwrap_or_default(),
+                    "enc_public_key": row.try_get::<String, _>("enc_public_key").unwrap_or_default(),
                 }));
             }
             Ok(json!({ "peers": peers, "total": peers.len() }))
@@ -470,9 +472,10 @@ pub async fn handle_invoke(
                     let handle = peer.get("handle").and_then(|v| v.as_str()).unwrap_or_default();
                     let is_trusted = peer.get("is_trusted").and_then(|v| v.as_bool()).unwrap_or(false);
                     let onion = peer.get("onion_address").and_then(|v| v.as_str()).unwrap_or_default();
+                    let enc_pub = peer.get("enc_public_key").and_then(|v| v.as_str()).unwrap_or_default();
 
-                    let _ = sqlx::query("INSERT OR REPLACE INTO mesh_peers (public_key, is_trusted, handle, onion_address) VALUES (?, ?, ?, ?)")
-                        .bind(pub_key).bind(is_trusted).bind(handle).bind(onion)
+                    let _ = sqlx::query("INSERT OR REPLACE INTO mesh_peers (public_key, is_trusted, handle, onion_address, enc_public_key) VALUES (?, ?, ?, ?, ?)")
+                        .bind(pub_key).bind(is_trusted).bind(handle).bind(onion).bind(enc_pub)
                         .execute(&app_state.social_db.pool).await;
 
                     if is_trusted {
@@ -614,20 +617,42 @@ pub async fn handle_invoke(
                         }
                     }
 
-                    // Attempt strict routing for the engine
+                    // Attempt strict routing for the engine (deduplication, firewall, etc)
                     if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
                         let _ = engine.process_incoming(&packet).await;
-                        
-                        let packet_str = packet_json.to_string();
-                        let target_id = packet.header.target_user_id.clone().unwrap_or_default();
-                        let db = app_state.social_db.clone();
-                        
-                        tokio::spawn(async move {
-                            if !target_id.is_empty() {
-                                if let Ok(row) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE public_key = ?")
-                                    .bind(&target_id)
-                                    .fetch_one(&db.pool).await 
-                                {
+                    }
+
+                    // Fallback/Guaranteed Tor Routing based on raw JSON properties
+                    // This bypasses strict parsing failures (like camelCase targetUserId vs snake_case target_user_id)
+                    let packet_str = packet_json.to_string();
+                    let target_id = packet_json.get("target_user_id")
+                        .or_else(|| packet_json.get("targetUserId"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+
+                    let db = app_state.social_db.clone();
+                    
+                    tokio::spawn(async move {
+                        if !target_id.is_empty() {
+                            // Directed packet: Send only to target
+                            if let Ok(row) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE public_key = ?")
+                                .bind(&target_id)
+                                .fetch_one(&db.pool).await 
+                            {
+                                use sqlx::Row;
+                                if let Ok(onion) = row.try_get::<String, _>("onion_address") {
+                                    if !onion.is_empty() {
+                                        send_packet_over_tor(&onion, &packet_str).await;
+                                    }
+                                }
+                            }
+                        } else {
+                            // Broadcast packet: Send to ALL trusted peers
+                            if let Ok(rows) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE is_trusted = 1")
+                                .fetch_all(&db.pool).await 
+                            {
+                                for row in rows {
                                     use sqlx::Row;
                                     if let Ok(onion) = row.try_get::<String, _>("onion_address") {
                                         if !onion.is_empty() {
@@ -635,22 +660,9 @@ pub async fn handle_invoke(
                                         }
                                     }
                                 }
-                            } else {
-                                if let Ok(rows) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE is_trusted = 1")
-                                    .fetch_all(&db.pool).await 
-                                {
-                                    for row in rows {
-                                        use sqlx::Row;
-                                        if let Ok(onion) = row.try_get::<String, _>("onion_address") {
-                                            if !onion.is_empty() {
-                                                send_packet_over_tor(&onion, &packet_str).await;
-                                            }
-                                        }
-                                    }
-                                }
                             }
-                        });
-                    }
+                        }
+                    });
                 }
                 Ok(json!({"status": "ok", "packets_processed": packets.len()}))
             } else {

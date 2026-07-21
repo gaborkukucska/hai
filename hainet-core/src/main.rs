@@ -55,6 +55,7 @@ impl SocialDb {
         sqlx::query("CREATE TABLE IF NOT EXISTS dms (id TEXT PRIMARY KEY, peer TEXT, sender TEXT, content TEXT, timestamp INTEGER, media_id TEXT, media_type TEXT);").execute(&pool).await?;
         sqlx::query("CREATE TABLE IF NOT EXISTS mesh_peers (public_key TEXT PRIMARY KEY, is_trusted BOOLEAN, handle TEXT, onion_address TEXT);").execute(&pool).await?;
         let _ = sqlx::query("ALTER TABLE mesh_peers ADD COLUMN onion_address TEXT;").execute(&pool).await;
+        let _ = sqlx::query("ALTER TABLE mesh_peers ADD COLUMN enc_public_key TEXT;").execute(&pool).await;
         Ok(Self { pool })
     }
 }
