@@ -446,16 +446,10 @@ async fn main() -> Result<()> {
                                             tokio::spawn(async move {
                                                 handle_incoming_dm(state_clone, pjson_clone).await;
                                             });
-                                        } else if target_id == my_node_id {
-                                            let state_clone = state.clone();
-                                            let pjson_clone = packet_json.clone();
-                                            tokio::spawn(async move {
-                                                decrypt_and_store_dm(state_clone, pjson_clone).await;
-                                            });
                                         } else {
                                             let mut buffer = state.incoming_mesh_packets.write().await;
                                             buffer.push(packet_json.clone());
-                                            info!("TCP: Buffered inbound DM for mobile sync");
+                                            tracing::warn!("TCP: Buffered inbound DM from {} for mobile sync", sender_id);
                                         }
                                     } else {
                                         // Non-MESSAGE packets: check sender trust directly via DB
