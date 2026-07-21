@@ -440,16 +440,19 @@ async fn main() -> Result<()> {
                                     if ptype == "MESSAGE" {
                                         info!("TCP: MESSAGE packet from [{}] target [{}]", sender_id.chars().take(20).collect::<String>(), target_id.chars().take(20).collect::<String>());
 
-                                        // Case 1: DM to Admin AI from the owner
                                         if target_id == admin_id && sender_id == my_node_id {
                                             let state_clone = state.clone();
                                             let pjson_clone = packet_json.clone();
                                             tokio::spawn(async move {
                                                 handle_incoming_dm(state_clone, pjson_clone).await;
                                             });
+                                        } else if target_id == my_node_id {
+                                            let state_clone = state.clone();
+                                            let pjson_clone = packet_json.clone();
+                                            tokio::spawn(async move {
+                                                decrypt_and_store_dm(state_clone, pjson_clone).await;
+                                            });
                                         } else {
-                                            // Case 2: DM targeted at the Mobile App (or any other relay)
-                                            // Buffer all DMs. The Mobile App's firewall will verify and decrypt.
                                             let mut buffer = state.incoming_mesh_packets.write().await;
                                             buffer.push(packet_json.clone());
                                             info!("TCP: Buffered inbound DM for mobile sync");
@@ -969,4 +972,146 @@ fn verify_qr_signature(session_id: &str, public_key_b64: &str, signature_b64: &s
 
 fn get_hainet_dir() -> std::path::PathBuf {
     dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet")
+}
+
+
+pub async fn decrypt_and_store_dm(app_state: Arc<AppState>, packet_json: serde_json::Value) {
+    tracing::info!("Intercepted DM for owner! Hub is decrypting and storing it...");
+    use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
+    use x25519_dalek::{StaticSecret, PublicKey};
+    use hainet_social::crypto::decrypt_from_sender;
+
+    let payload = match packet_json.get("payload") {
+        Some(p) => p,
+        None => { tracing::error!("DM Decrypt FATAL: Packet missing payload!"); return; },
+    };
+    
+    let ciphertext_b64 = payload.get("ciphertext").and_then(|v| v.as_str()).unwrap_or_default();
+    let nonce_b64 = payload.get("nonce").and_then(|v| v.as_str()).unwrap_or_default();
+    
+    let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+    let priv_key_path = ident_dir.join("x25519_priv.b64");
+    if !priv_key_path.exists() {
+        tracing::error!("DM Decrypt FATAL: x25519_priv.b64 is MISSING!");
+        return;
+    }
+    let priv_key_str = std::fs::read_to_string(priv_key_path).unwrap_or_default().replace("\n", "").replace("\r", "");
+    
+    let priv_bytes = match b64.decode(priv_key_str.trim()) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("DM Decrypt: Failed to decode private key: {}", e);
+            return;
+        }
+    };
+    
+    let secret_bytes = if priv_bytes.len() == 32 {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&priv_bytes);
+        arr
+    } else {
+        let mut found = None;
+        for i in 0..priv_bytes.len().saturating_sub(33) {
+            if priv_bytes[i] == 0x04 && priv_bytes[i+1] == 0x20 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&priv_bytes[i+2..i+34]);
+                found = Some(arr);
+                break;
+            }
+        }
+        if let Some(arr) = found {
+            arr
+        } else {
+            tracing::error!("DM Decrypt FATAL: Invalid x25519_priv length: {}", priv_bytes.len());
+            return;
+        }
+    };
+    
+    let recipient_secret = StaticSecret::from(secret_bytes);
+    
+    let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    
+    // Look up X25519 public key from mesh_peers (or fallback to Ed25519 key)
+    let sender_enc_pub = match sqlx::query_scalar::<_, String>("SELECT public_key FROM mesh_peers WHERE public_key = ?")
+        .bind(&sender_id)
+        .fetch_one(&app_state.social_db.pool).await 
+    {
+        Ok(key) => key,
+        Err(_) => sender_id.clone() 
+    };
+
+    let pub_bytes = match b64.decode(sender_enc_pub.trim()) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("DM Decrypt: Failed to decode sender public key: {}", e);
+            return;
+        }
+    };
+    
+    let sender_raw = if pub_bytes.len() == 32 {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&pub_bytes);
+        arr
+    } else {
+        let mut found = None;
+        for i in 0..pub_bytes.len().saturating_sub(33) {
+            if pub_bytes[i] == 0x03 && pub_bytes[i+1] == 0x21 && pub_bytes[i+2] == 0x00 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&pub_bytes[i+3..i+35]);
+                found = Some(arr);
+                break;
+            }
+        }
+        if let Some(arr) = found {
+            arr
+        } else {
+            tracing::error!("DM Decrypt FATAL: Invalid x25519_pub length: {}", pub_bytes.len());
+            return;
+        }
+    };
+    let sender_public = PublicKey::from(sender_raw);
+    
+    let ciphertext = b64.decode(ciphertext_b64).unwrap_or_default();
+    let nonce_vec = match b64.decode(nonce_b64) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("DM Decrypt: Failed to decode nonce: {}", e);
+            return;
+        }
+    };
+    if nonce_vec.len() != 12 {
+        tracing::error!("DM Decrypt: Invalid nonce length: {}", nonce_vec.len());
+        return;
+    }
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&nonce_vec);
+    
+    let decrypt_result = decrypt_from_sender(&ciphertext, &nonce_bytes, &recipient_secret, &sender_public);
+    if let Ok(decrypted) = decrypt_result {
+        tracing::info!("DM Decrypted successfully! Storing in SQLite for mobile sync...");
+        if let Ok(plaintext) = String::from_utf8(decrypted) {
+            let id = payload.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let timestamp = payload.get("timestamp").and_then(|v| v.as_i64()).unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+            
+            let mut content = plaintext.clone();
+            let mut media_id = None;
+            let mut media_type = None;
+
+            if let Ok(json_obj) = serde_json::from_str::<serde_json::Value>(&plaintext) {
+                if let Some(c) = json_obj.get("content").and_then(|v| v.as_str()) {
+                    content = c.to_string();
+                }
+                if let Some(media) = json_obj.get("media") {
+                    media_id = media.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    media_type = media.get("type").and_then(|v| v.as_str()).map(|s| s.to_string());
+                }
+            }
+
+            let _ = sqlx::query("INSERT OR IGNORE INTO dms (id, peer, sender, content, timestamp, media_id, media_type) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                .bind(&id).bind(&sender_id).bind(&sender_id).bind(&content).bind(timestamp).bind(&media_id).bind(&media_type)
+                .execute(&app_state.social_db.pool).await;
+        }
+    } else {
+        tracing::error!("DM Decryption failed.");
+    }
 }
