@@ -735,7 +735,7 @@ async fn send_packet_over_tor(onion: &str, packet_str: &str) -> bool {
     let target = format!("{}:9999", onion);
     let mut success = false;
     for attempt in 1..=3 {
-        let connect_future = tokio_socks::tcp::Socks5Stream::connect("127.0.0.1:9050", &target);
+        let connect_future = tokio_socks::tcp::Socks5Stream::connect("127.0.0.1:9050", target.as_str());
         match tokio::time::timeout(tokio::time::Duration::from_secs(60), connect_future).await {
             Ok(Ok(mut stream)) => {
                 if stream.write_all(format!("{}\n", packet_str).as_bytes()).await.is_ok() {
