@@ -649,6 +649,7 @@ pub async fn handle_invoke(
                     tokio::spawn(async move {
                         if !target_id.is_empty() {
                             // Directed packet: Send only to target
+                            let mut sent = false;
                             if let Ok(row) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE public_key = ?")
                                 .bind(&target_id)
                                 .fetch_one(&db.pool).await 
@@ -656,7 +657,36 @@ pub async fn handle_invoke(
                                 use sqlx::Row;
                                 if let Ok(onion) = row.try_get::<String, _>("onion_address") {
                                     if !onion.is_empty() {
-                                        send_packet_over_tor(&onion, &packet_str).await;
+                                        sent = send_packet_over_tor(&onion, &packet_str).await;
+                                    }
+                                }
+                            }
+                            
+                            // If direct send failed (e.g. peer is offline or onion changed),
+                            // fallback to gossip relaying across all trusted peers.
+                            if !sent {
+                                tracing::warn!("Hub: Direct send to {} failed. Falling back to gossip relay.", target_id);
+                                if let Ok(mut packet_obj) = serde_json::from_str::<serde_json::Value>(&packet_str) {
+                                    if let Some(obj) = packet_obj.as_object_mut() {
+                                        obj.insert("id".to_string(), serde_json::json!(uuid::Uuid::new_v4().to_string()));
+                                        obj.insert("hops".to_string(), serde_json::json!(6));
+                                    }
+                                    let fallback_str = serde_json::to_string(&packet_obj).unwrap_or_else(|_| packet_str.clone());
+                                    if let Ok(rows) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE is_trusted = 1 AND public_key != ?")
+                                        .bind(&target_id)
+                                        .fetch_all(&db.pool).await 
+                                    {
+                                        for row in rows {
+                                            use sqlx::Row;
+                                            if let Ok(onion) = row.try_get::<String, _>("onion_address") {
+                                                if !onion.is_empty() {
+                                                    let payload = fallback_str.clone();
+                                                    tokio::spawn(async move {
+                                                        send_packet_over_tor(&onion, &payload).await;
+                                                    });
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -669,7 +699,10 @@ pub async fn handle_invoke(
                                     use sqlx::Row;
                                     if let Ok(onion) = row.try_get::<String, _>("onion_address") {
                                         if !onion.is_empty() {
-                                            send_packet_over_tor(&onion, &packet_str).await;
+                                            let payload = packet_str.clone();
+                                            tokio::spawn(async move {
+                                                send_packet_over_tor(&onion, &payload).await;
+                                            });
                                         }
                                     }
                                 }
@@ -697,9 +730,35 @@ pub async fn handle_invoke(
     }
 }
 
-async fn send_packet_over_tor(onion: &str, packet_str: &str) {
+async fn send_packet_over_tor(onion: &str, packet_str: &str) -> bool {
     use tokio::io::AsyncWriteExt;
-    if let Ok(mut stream) = tokio_socks::tcp::Socks5Stream::connect("127.0.0.1:9050", format!("{}:9999", onion)).await {
-        let _ = stream.write_all(format!("{}\n", packet_str).as_bytes()).await;
+    let target = format!("{}:9999", onion);
+    let mut success = false;
+    for attempt in 1..=3 {
+        let connect_future = tokio_socks::tcp::Socks5Stream::connect("127.0.0.1:9050", &target);
+        match tokio::time::timeout(tokio::time::Duration::from_secs(60), connect_future).await {
+            Ok(Ok(mut stream)) => {
+                if stream.write_all(format!("{}\n", packet_str).as_bytes()).await.is_ok() {
+                    tracing::info!("Successfully routed packet to {} on attempt {}", target, attempt);
+                    success = true;
+                    break;
+                } else {
+                    tracing::warn!("Failed to write packet to {} on attempt {}", target, attempt);
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("Failed to connect to {} via Tor on attempt {}: {}", target, attempt, e);
+            }
+            Err(_) => {
+                tracing::warn!("Timeout connecting to {} via Tor on attempt {}", target, attempt);
+            }
+        }
+        if attempt < 3 {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5 * attempt as u64)).await;
+        }
     }
+    if !success {
+        tracing::error!("Failed to route packet to {} after 3 attempts.", target);
+    }
+    success
 }
