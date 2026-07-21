@@ -416,7 +416,8 @@ async fn main() -> Result<()> {
             Ok(listener) => {
                 info!("🕸️  Smart Mesh gossip listener running on port 9999");
                 loop {
-                    if let Ok((stream, _)) = listener.accept().await {
+                    if let Ok((stream, addr)) = listener.accept().await {
+                        tracing::warn!("TCP: RAW CONNECTION ACCEPTED FROM {}", addr);
                         let state = mesh_app_state.clone();
                         tokio::spawn(async move {
                             use tokio::io::{AsyncBufReadExt, BufReader};
@@ -424,6 +425,7 @@ async fn main() -> Result<()> {
                             let mut line = String::new();
                             while let Ok(n) = reader.read_line(&mut line).await {
                                 if n == 0 { break; }
+                                tracing::warn!("TCP: Received {} bytes of raw data", n);
                                 if let Ok(packet_json) = serde_json::from_str::<serde_json::Value>(&line) {
                                     let ptype = packet_json.get("type").and_then(|v| v.as_str()).unwrap_or_default();
                                     let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
