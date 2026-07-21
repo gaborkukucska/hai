@@ -252,6 +252,19 @@ pub async fn handle_invoke(
             Ok(serde_json::to_value(res).unwrap())
         },
 
+        "get_node_info" => {
+            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+            let pub_key = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+            let onion = std::fs::read_to_string("/var/lib/tor/hainet/hostname")
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            Ok(serde_json::json!({
+                "public_key": pub_key,
+                "onion_address": onion
+            }))
+        },
+
         // ====================================================================
         // --- Compute Router (from hainet-collab / PPLPWR) ---
         // ====================================================================
