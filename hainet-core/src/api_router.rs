@@ -747,7 +747,12 @@ async fn send_packet_over_tor(onion: &str, packet_str: &str) -> bool {
                 }
             }
             Ok(Err(e)) => {
-                tracing::warn!("Failed to connect to {} via Tor on attempt {}: {}", target, attempt, e);
+                let err_msg = e.to_string();
+                tracing::warn!("Failed to connect to {} via Tor on attempt {}: {}", target, attempt, err_msg);
+                if err_msg.contains("Host unreachable") || err_msg.contains("TTL expired") || err_msg.contains("general SOCKS server failure") {
+                    tracing::warn!("Tor explicitly rejected routing to {}. Fast-failing.", target);
+                    break;
+                }
             }
             Err(_) => {
                 tracing::warn!("Timeout connecting to {} via Tor on attempt {}", target, attempt);
