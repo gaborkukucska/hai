@@ -1029,12 +1029,12 @@ pub async fn decrypt_and_store_dm(app_state: Arc<AppState>, packet_json: serde_j
     let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default().to_string();
     
     // Look up X25519 public key from mesh_peers (or fallback to Ed25519 key)
-    let sender_enc_pub = match sqlx::query_scalar::<_, String>("SELECT public_key FROM mesh_peers WHERE public_key = ?")
+    let sender_enc_pub = match sqlx::query_scalar::<_, Option<String>>("SELECT enc_public_key FROM mesh_peers WHERE public_key = ?")
         .bind(&sender_id)
         .fetch_one(&app_state.social_db.pool).await 
     {
-        Ok(key) => key,
-        Err(_) => sender_id.clone() 
+        Ok(Some(key)) if !key.trim().is_empty() => key,
+        _ => sender_id.clone() 
     };
 
     let pub_bytes = match b64.decode(sender_enc_pub.trim()) {
