@@ -637,7 +637,14 @@ pub async fn handle_invoke(
 
                     // Fallback/Guaranteed Tor Routing based on raw JSON properties
                     // This bypasses strict parsing failures (like camelCase targetUserId vs snake_case target_user_id)
-                    let packet_str = packet_json.to_string();
+                    let mut packet_json_mut = packet_json.clone();
+                    if let Some(obj) = packet_json_mut.as_object_mut() {
+                        let current_hops = obj.get("hops").and_then(|v| v.as_u64()).unwrap_or(0);
+                        if current_hops < 3 {
+                            obj.insert("hops".to_string(), serde_json::json!(3));
+                        }
+                    }
+                    let packet_str = packet_json_mut.to_string();
                     let target_id = packet_json.get("target_user_id")
                         .or_else(|| packet_json.get("targetUserId"))
                         .and_then(|v| v.as_str())
@@ -647,6 +654,8 @@ pub async fn handle_invoke(
                     let db = app_state.social_db.clone();
                     
                     tokio::spawn(async move {
+                        let my_onion = std::fs::read_to_string("/var/lib/tor/hainet/hostname").unwrap_or_default().trim().to_string();
+                        
                         if !target_id.is_empty() {
                             // Directed packet: Send only to target
                             let mut sent = false;
@@ -656,8 +665,10 @@ pub async fn handle_invoke(
                             {
                                 use sqlx::Row;
                                 if let Ok(onion) = row.try_get::<String, _>("onion_address") {
-                                    if !onion.is_empty() {
+                                    if !onion.is_empty() && onion != my_onion {
                                         sent = send_packet_over_tor(&onion, &packet_str).await;
+                                    } else if onion == my_onion {
+                                        sent = true; // Skip sending to ourselves, pretend it succeeded
                                     }
                                 }
                             }
@@ -679,7 +690,7 @@ pub async fn handle_invoke(
                                         for row in rows {
                                             use sqlx::Row;
                                             if let Ok(onion) = row.try_get::<String, _>("onion_address") {
-                                                if !onion.is_empty() {
+                                                if !onion.is_empty() && onion != my_onion {
                                                     let payload = fallback_str.clone();
                                                     tokio::spawn(async move {
                                                         send_packet_over_tor(&onion, &payload).await;
@@ -698,7 +709,7 @@ pub async fn handle_invoke(
                                 for row in rows {
                                     use sqlx::Row;
                                     if let Ok(onion) = row.try_get::<String, _>("onion_address") {
-                                        if !onion.is_empty() {
+                                        if !onion.is_empty() && onion != my_onion {
                                             let payload = packet_str.clone();
                                             tokio::spawn(async move {
                                                 send_packet_over_tor(&onion, &payload).await;
