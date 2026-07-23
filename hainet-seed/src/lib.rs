@@ -162,7 +162,16 @@ impl SeedService {
         )?;
         info!("✅ Hub config written to {}/hub_config.json", hub_config_dir);
 
-        // Step 4: Restart hainet-core to pick up the new identity and config
+        // Step 4: Configure Tor Hidden Service
+        info!("🧅 Configuring Tor Hidden Service...");
+        let orchestrator = crate::installer::deployment::DeploymentOrchestrator::new();
+        if let Err(e) = orchestrator.setup_tor_hidden_service() {
+            tracing::warn!("⚠️ Failed to setup Tor Hidden Service: {}", e);
+        } else {
+            info!("✅ Tor Hidden Service configured successfully");
+        }
+
+        // Step 5: Restart hainet-core to pick up the new identity and config
         // Check if systemctl is available and if hainet-core service exists
         let has_systemctl = std::process::Command::new("which")
             .arg("systemctl")

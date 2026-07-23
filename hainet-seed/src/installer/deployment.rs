@@ -632,7 +632,7 @@ WantedBy=multi-user.target
         Ok(())
     }
 
-    fn setup_tor_hidden_service(&self) -> Result<()> {
+    pub fn setup_tor_hidden_service(&self) -> Result<()> {
         use std::process::Command;
         use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
         use sha2::{Sha512, Digest};
