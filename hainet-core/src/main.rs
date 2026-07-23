@@ -465,6 +465,24 @@ async fn main() -> Result<()> {
 
                                         // Also allow CONNECTION_REQUEST through unconditionally
                                         let is_connection = ptype == "CONNECTION_REQUEST" || ptype == "USER_HANDSHAKE";
+                                        
+                                        if is_connection {
+                                            if let Some(payload) = packet_json.get("payload") {
+                                                if let (Some(uid), Some(onion)) = (
+                                                    payload.get("fromUserId").and_then(|v| v.as_str()),
+                                                    payload.get("fromHomeNode").and_then(|v| v.as_str())
+                                                ) {
+                                                    let _ = sqlx::query(
+                                                        "INSERT INTO mesh_peers (public_key, onion_address, is_trusted) 
+                                                         VALUES (?, ?, 0) 
+                                                         ON CONFLICT(public_key) DO UPDATE SET onion_address = excluded.onion_address"
+                                                    )
+                                                    .bind(uid)
+                                                    .bind(onion)
+                                                    .execute(&state.social_db.pool).await;
+                                                }
+                                            }
+                                        }
 
                                         if is_trusted || is_connection {
                                             let mut buffer = state.incoming_mesh_packets.write().await;
