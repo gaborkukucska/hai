@@ -375,13 +375,21 @@ pub async fn handle_invoke(
         // In Phase 4, this will be populated by actual P2P connections.
         "get_mesh_peers" => {
             debug!("Fetching mesh peers from SQLite");
+            // Exclude the hub's own node_id from the peer list to prevent the
+            // mobile app from adding itself as a contact on sync-pull.
+            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
             let rows = sqlx::query("SELECT * FROM mesh_peers")
                 .fetch_all(&app_state.social_db.pool).await.unwrap_or_default();
             let mut peers = Vec::new();
             for row in rows {
                 use sqlx::Row;
+                let pub_key = row.try_get::<String, _>("public_key").unwrap_or_default();
+                if pub_key == my_node_id {
+                    continue; // Skip self
+                }
                 peers.push(json!({
-                    "public_key": row.try_get::<String, _>("public_key").unwrap_or_default(),
+                    "public_key": pub_key,
                     "is_trusted": row.try_get::<bool, _>("is_trusted").unwrap_or_default(),
                     "handle": row.try_get::<String, _>("handle").unwrap_or_default(),
                     "onion_address": row.try_get::<String, _>("onion_address").unwrap_or_default(),
@@ -480,8 +488,17 @@ pub async fn handle_invoke(
             debug!("Mobile pushing Contacts/Peers to Hub Firewall");
             if let Some(peers) = args.get("peers").and_then(|p| p.as_array()) {
                 let engine = app_state.gossip_engine.read().await;
+                // Read the hub's own node_id so we never store it as a peer
+                let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+                let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
                 for peer in peers {
                     let pub_key = peer.get("public_key").and_then(|v| v.as_str()).unwrap_or_default();
+                    // Skip self — the mobile app shares its identity with the hub,
+                    // so the hub must never store itself as its own peer.
+                    if pub_key == my_node_id {
+                        tracing::debug!("sync_push_peers: Skipping self ({})", &my_node_id[..20.min(my_node_id.len())]);
+                        continue;
+                    }
                     let handle = peer.get("handle").and_then(|v| v.as_str()).unwrap_or_default();
                     let is_trusted = peer.get("is_trusted").and_then(|v| v.as_bool()).unwrap_or(false);
                     let onion = peer.get("onion_address").and_then(|v| v.as_str()).unwrap_or_default();
@@ -746,8 +763,24 @@ pub async fn handle_invoke(
             }
         },
         "sync_pull_packets" => {
+            // Filter out packets that originated from the hub's own node_id
+            // (i.e. the mobile user's public key). These are looped-back
+            // handshakes/connection-requests that cause infinite notification loops.
+            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
             let mut buffer = app_state.incoming_mesh_packets.write().await;
-            let packets = buffer.clone();
+            let packets: Vec<_> = buffer.iter().filter(|p| {
+                // Keep packets NOT sent by ourselves
+                let sender = p.get("sender_id").or_else(|| p.get("senderId"))
+                    .and_then(|v| v.as_str()).unwrap_or_default()
+                    .replace("\n", "").replace("\r", "");
+                if sender == my_node_id {
+                    tracing::debug!("sync_pull_packets: Filtering out self-originated packet");
+                    false
+                } else {
+                    true
+                }
+            }).cloned().collect();
             buffer.clear();
             Ok(json!({"status": "ok", "packets": packets}))
         },

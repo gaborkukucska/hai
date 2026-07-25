@@ -472,14 +472,19 @@ async fn main() -> Result<()> {
                                                     payload.get("fromUserId").and_then(|v| v.as_str()).or_else(|| payload.get("from_user_id").and_then(|v| v.as_str())),
                                                     payload.get("fromHomeNode").and_then(|v| v.as_str()).or_else(|| payload.get("from_home_node").and_then(|v| v.as_str()))
                                                 ) {
-                                                    let _ = sqlx::query(
-                                                        "INSERT INTO mesh_peers (public_key, onion_address, is_trusted) 
-                                                         VALUES (?, ?, 0) 
-                                                         ON CONFLICT(public_key) DO UPDATE SET onion_address = excluded.onion_address"
-                                                    )
-                                                    .bind(uid)
-                                                    .bind(onion)
-                                                    .execute(&state.social_db.pool).await;
+                                                    // Never insert ourselves as a peer
+                                                    if uid != my_node_id {
+                                                        let _ = sqlx::query(
+                                                            "INSERT INTO mesh_peers (public_key, onion_address, is_trusted) 
+                                                             VALUES (?, ?, 0) 
+                                                             ON CONFLICT(public_key) DO UPDATE SET onion_address = excluded.onion_address"
+                                                        )
+                                                        .bind(uid)
+                                                        .bind(onion)
+                                                        .execute(&state.social_db.pool).await;
+                                                    } else {
+                                                        tracing::debug!("TCP: Skipping self-insert from looped-back {} packet", ptype);
+                                                    }
                                                 }
                                             }
                                         }
