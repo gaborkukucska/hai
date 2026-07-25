@@ -255,7 +255,7 @@ pub async fn handle_invoke(
         "get_node_info" => {
             let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
             let pub_key = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-            let onion = std::fs::read_to_string("/var/lib/tor/hainet/hostname")
+            let onion = std::fs::read_to_string("/var/lib/hainet/onion.txt")
                 .unwrap_or_default()
                 .trim()
                 .to_string();
@@ -689,7 +689,7 @@ pub async fn handle_invoke(
                     let db = app_state.social_db.clone();
                     
                     tokio::spawn(async move {
-                        let my_onion = std::fs::read_to_string("/var/lib/tor/hainet/hostname").unwrap_or_default().trim().to_string();
+                        let my_onion = std::fs::read_to_string("/var/lib/hainet/onion.txt").unwrap_or_default().trim().to_string();
                         
                         if !target_id.is_empty() {
                             // Directed packet: Send only to target
