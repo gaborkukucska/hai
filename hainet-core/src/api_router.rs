@@ -6,6 +6,31 @@ use crate::{
     admin_bridge, metrics_handler, settings_handler, tts_handler
 };
 
+fn derive_onion_address(pub_key_b64: &str) -> Option<String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use sha3::{Digest, Sha3_256};
+    
+    let decoded = STANDARD.decode(pub_key_b64.trim()).ok()?;
+    if decoded.len() < 32 {
+        return None;
+    }
+    let pubkey = &decoded[decoded.len() - 32..];
+    
+    let mut hasher = Sha3_256::new();
+    hasher.update(b".onion checksum");
+    hasher.update(pubkey);
+    hasher.update(&[0x03]);
+    let hash = hasher.finalize();
+    
+    let mut onion_data = Vec::with_capacity(35);
+    onion_data.extend_from_slice(pubkey);
+    onion_data.extend_from_slice(&hash[0..2]);
+    onion_data.push(0x03);
+    
+    let onion_str = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &onion_data).to_lowercase();
+    Some(format!("{}.onion", onion_str))
+}
+
 pub async fn handle_invoke(
     cmd: &str,
     args: Value,
@@ -255,10 +280,15 @@ pub async fn handle_invoke(
         "get_node_info" => {
             let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
             let pub_key = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-            let onion = std::fs::read_to_string("/var/lib/hainet/onion.txt")
+            let mut onion = std::fs::read_to_string("/var/lib/hainet/onion.txt")
                 .unwrap_or_default()
                 .trim()
                 .to_string();
+            if onion.is_empty() {
+                if let Some(derived) = derive_onion_address(&pub_key) {
+                    onion = derived;
+                }
+            }
             Ok(serde_json::json!({
                 "public_key": pub_key,
                 "onion_address": onion
@@ -689,7 +719,14 @@ pub async fn handle_invoke(
                     let db = app_state.social_db.clone();
                     
                     tokio::spawn(async move {
-                        let my_onion = std::fs::read_to_string("/var/lib/hainet/onion.txt").unwrap_or_default().trim().to_string();
+                        let mut my_onion = std::fs::read_to_string("/var/lib/hainet/onion.txt").unwrap_or_default().trim().to_string();
+                        if my_onion.is_empty() {
+                            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
+                            let pk = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                            if let Some(derived) = derive_onion_address(&pk) {
+                                my_onion = derived;
+                            }
+                        }
                         
                         if !target_id.is_empty() {
                             // Directed packet: Send only to target
