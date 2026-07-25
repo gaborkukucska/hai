@@ -694,6 +694,7 @@ pub async fn handle_invoke(
                         if !target_id.is_empty() {
                             // Directed packet: Send only to target
                             let mut sent = false;
+                            let mut target_onion = String::new();
                             if let Ok(row) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE public_key = ?")
                                 .bind(&target_id)
                                 .fetch_one(&db.pool).await 
@@ -701,11 +702,32 @@ pub async fn handle_invoke(
                                 use sqlx::Row;
                                 if let Ok(onion) = row.try_get::<String, _>("onion_address") {
                                     if !onion.is_empty() && onion != my_onion {
+                                        target_onion = onion.clone();
                                         sent = send_packet_over_tor(&onion, &packet_str).await;
                                     } else if onion == my_onion {
                                         sent = true; // Skip sending to ourselves, pretend it succeeded
                                     }
                                 }
+                            }
+                            
+                            // If direct send failed (e.g. peer is offline or onion descriptor is still publishing),
+                            // spawn a background retry task to try again every minute for 12 minutes.
+                            // This is critical for delivering handshakes to Hub-less mobile users.
+                            if !sent && !target_onion.is_empty() {
+                                let onion_clone = target_onion.clone();
+                                let packet_str_clone = packet_str.clone();
+                                let target_id_clone = target_id.clone();
+                                tokio::spawn(async move {
+                                    tracing::warn!("Hub: Direct send to {} failed. Spooling background retries for 12m.", target_id_clone);
+                                    for i in 1..=12 {
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                                        tracing::info!("Hub: Background retry {}/12 for {}", i, onion_clone);
+                                        if send_packet_over_tor(&onion_clone, &packet_str_clone).await {
+                                            tracing::info!("Hub: Background retry {} succeeded for {}", i, onion_clone);
+                                            break;
+                                        }
+                                    }
+                                });
                             }
                             
                             // If direct send failed (e.g. peer is offline or onion changed),
@@ -813,8 +835,9 @@ async fn send_packet_over_tor(onion: &str, packet_str: &str) -> bool {
                 let err_msg = e.to_string();
                 tracing::warn!("Failed to connect to {} via Tor on attempt {}: {}", target, attempt, err_msg);
                 if err_msg.contains("Host unreachable") || err_msg.contains("TTL expired") || err_msg.contains("general SOCKS server failure") {
-                    tracing::warn!("Tor explicitly rejected routing to {}. Fast-failing.", target);
-                    break;
+                    tracing::warn!("Tor explicitly rejected routing to {} (likely descriptor not published yet).", target);
+                    // Do NOT fast-fail break here. Onion descriptors can take several minutes to publish,
+                    // so we should wait and allow the retry loop to continue.
                 }
             }
             Err(_) => {
