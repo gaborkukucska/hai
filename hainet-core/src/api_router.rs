@@ -497,6 +497,19 @@ pub async fn handle_invoke(
                         engine.untrust_peer(pub_key).await;
                     }
                 }
+                if !peers.is_empty() {
+                    let placeholders = peers.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    let query = format!("DELETE FROM mesh_peers WHERE public_key NOT IN ({})", placeholders);
+                    let mut q = sqlx::query(&query);
+                    for peer in peers {
+                        if let Some(pub_key) = peer.get("public_key").and_then(|v| v.as_str()) {
+                            q = q.bind(pub_key);
+                        }
+                    }
+                    let _ = q.execute(&app_state.social_db.pool).await;
+                } else {
+                    let _ = sqlx::query("DELETE FROM mesh_peers").execute(&app_state.social_db.pool).await;
+                }
                 Ok(json!({"status": "ok", "peers_processed": peers.len()}))
             } else {
                 Err("Missing 'peers' array".to_string())
@@ -589,10 +602,9 @@ pub async fn handle_invoke(
             if let Some(packets) = args.get("packets").and_then(|p| p.as_array()) {
                 let engine = app_state.gossip_engine.read().await;
                 
-                // FIX: Trust our own mobile node ID so the firewall doesn't drop our outbound broadcasts!
+                // Let the firewall handle mobile node trust natively
                 let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
                 let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                engine.trust_peer(my_node_id.clone()).await;
 
                 for packet_json in packets {
                     // Extract POST directly to bypass strict parsing failures

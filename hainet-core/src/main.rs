@@ -469,8 +469,8 @@ async fn main() -> Result<()> {
                                         if is_connection {
                                             if let Some(payload) = packet_json.get("payload") {
                                                 if let (Some(uid), Some(onion)) = (
-                                                    payload.get("fromUserId").and_then(|v| v.as_str()),
-                                                    payload.get("fromHomeNode").and_then(|v| v.as_str())
+                                                    payload.get("fromUserId").and_then(|v| v.as_str()).or_else(|| payload.get("from_user_id").and_then(|v| v.as_str())),
+                                                    payload.get("fromHomeNode").and_then(|v| v.as_str()).or_else(|| payload.get("from_home_node").and_then(|v| v.as_str()))
                                                 ) {
                                                     let _ = sqlx::query(
                                                         "INSERT INTO mesh_peers (public_key, onion_address, is_trusted) 
