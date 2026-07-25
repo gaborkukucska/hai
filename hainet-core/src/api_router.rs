@@ -662,6 +662,12 @@ pub async fn handle_invoke(
                         .and_then(|v| v.as_str())
                         .unwrap_or_default()
                         .to_string();
+                        
+                    let sender_id = packet_json.get("sender_id")
+                        .or_else(|| packet_json.get("senderId"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
 
                     let db = app_state.social_db.clone();
                     
@@ -695,8 +701,9 @@ pub async fn handle_invoke(
                                         obj.insert("hops".to_string(), serde_json::json!(6));
                                     }
                                     let fallback_str = serde_json::to_string(&packet_obj).unwrap_or_else(|_| packet_str.clone());
-                                    if let Ok(rows) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE is_trusted = 1 AND public_key != ?")
+                                    if let Ok(rows) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE is_trusted = 1 AND public_key != ? AND public_key != ?")
                                         .bind(&target_id)
+                                        .bind(&sender_id)
                                         .fetch_all(&db.pool).await 
                                     {
                                         for row in rows {
