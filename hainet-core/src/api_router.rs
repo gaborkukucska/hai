@@ -649,9 +649,10 @@ pub async fn handle_invoke(
             if let Some(packets) = args.get("packets").and_then(|p| p.as_array()) {
                 let engine = app_state.gossip_engine.read().await;
                 
-                // Let the firewall handle mobile node trust natively
+                // Trust our own mobile node ID so the firewall doesn't drop our outbound broadcasts!
                 let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
                 let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
+                engine.trust_peer(my_node_id.clone()).await;
 
                 for packet_json in packets {
                     // Extract POST directly to bypass strict parsing failures
@@ -769,7 +770,7 @@ pub async fn handle_invoke(
                             
                             // If direct send failed (e.g. peer is offline or onion changed),
                             // fallback to gossip relaying across all trusted peers.
-                            if !sent {
+                            if !sent && target_onion.is_empty() {
                                 tracing::warn!("Hub: Direct send to {} failed. Falling back to gossip relay.", target_id);
                                 if let Ok(mut packet_obj) = serde_json::from_str::<serde_json::Value>(&packet_str) {
                                     if let Some(obj) = packet_obj.as_object_mut() {
