@@ -61,12 +61,20 @@ impl SocialDb {
 }
 
 pub struct AppState {
-    pub incoming_mesh_packets: Arc<RwLock<Vec<serde_json::Value>>>,
     pub admin_bridge: Option<Arc<RwLock<AdminBridge>>>,
     pub tts_handler: Arc<RwLock<TTSHandler>>,
     pub hardware_profile: Arc<RwLock<HardwareProfile>>,
     pub gossip_engine: Arc<RwLock<GossipEngine>>,
     pub social_db: Arc<SocialDb>,
+    /// The NoSlop Home HUB node: verified mesh ingress, the phone's durable inbox, creator hosting,
+    /// Tor delivery and the owner API (`hainet_noslop::hub`).
+    pub noslop: Arc<hainet_noslop::hub::HubNode>,
+    /// Nonces of owner-signed API requests already seen (replay guard).
+    pub api_nonces: Arc<hainet_noslop::hub::api::NonceCache>,
+    /// Portal browser sessions (cookie token -> expiry).
+    pub sessions: Sessions,
+    /// Admin AI message ids already answered (the phone re-sends until its ACK arrives).
+    pub admin_seen: Arc<tokio::sync::Mutex<std::collections::VecDeque<String>>>,
     pub log_dir: std::path::PathBuf,
 }
 
@@ -87,188 +95,53 @@ pub type MetricsState = Arc<RwLock<MetricsCollector>>;
 pub type MetricsStorageState = Arc<RwLock<MetricsStorage>>;
 pub type SettingsState = Arc<RwLock<SettingsStorage>>;
 
-pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet_json: serde_json::Value) {
-    tracing::info!("Intercepted DM to Admin AI! Attempting decryption...");
-    use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
-    use x25519_dalek::{StaticSecret, PublicKey};
-    use hainet_social::crypto::{decrypt_from_sender, encrypt_for_recipient};
-    use serde_json::json;
-
-    let payload = match packet_json.get("payload") {
-        Some(p) => p,
-        None => { tracing::error!("DM Decrypt FATAL: Packet missing payload!"); return; },
-    };
-    
-    let ciphertext_b64 = payload.get("ciphertext").and_then(|v| v.as_str()).unwrap_or_default();
-    let nonce_b64 = payload.get("nonce").and_then(|v| v.as_str()).unwrap_or_default();
-    
-    let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-    let priv_key_path = ident_dir.join("x25519_priv.b64");
-    if !priv_key_path.exists() {
-        tracing::error!("DM Decrypt FATAL: x25519_priv.b64 is MISSING from {}! The Hub cannot decrypt DMs.", ident_dir.display());
+/// The owner's message to the Hub's Admin AI (`admin_<owner key>`), handed over by the phone through
+/// `hub_send`. NoSlop 0.7+ seals it as DM v2; the Hub acknowledges it at once (`DM_ACK` v3, so the
+/// phone stops re-sending), asks the Admin AI, and puts the v2 reply in the phone's inbox.
+pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet: hainet_noslop::packet::Packet) {
+    use hainet_noslop::hub::admin;
+    let node = app_state.noslop.clone();
+    let Some(owner) = node.personal().await else {
+        tracing::error!("Admin AI: this Hub has no owner identity; cannot open the message");
         return;
+    };
+    let (msg_id, text) = match admin::open_owner_message(&owner, &packet) {
+        Ok(x) => x,
+        Err(e) => { tracing::error!("Admin AI: {}", e); return; }
+    };
+    match admin::ack_packet(&owner, &msg_id, node.now()) {
+        Ok(ack) => node.inbox("packet", &ack, &ack.to_wire()).await,
+        Err(e) => tracing::error!("Admin AI: could not build the DM_ACK: {}", e),
     }
-    let priv_key_str = std::fs::read_to_string(priv_key_path).unwrap_or_default().replace("\n", "").replace("\r", "");
-    
-    let priv_bytes = match b64.decode(priv_key_str.trim()) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::error!("DM Decrypt: Failed to decode private key: {}", e);
-            return;
-        }
-    };
-    
-    let secret_bytes = if priv_bytes.len() == 32 {
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&priv_bytes);
-        arr
-    } else {
-        let mut found = None;
-        for i in 0..priv_bytes.len().saturating_sub(33) {
-            if priv_bytes[i] == 0x04 && priv_bytes[i+1] == 0x20 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&priv_bytes[i+2..i+34]);
-                found = Some(arr);
-                break;
-            }
-        }
-        if let Some(arr) = found {
-            arr
-        } else {
-            tracing::error!("DM Decrypt FATAL: Invalid x25519_priv length: {}", priv_bytes.len());
-            return;
-        }
-    };
-    
-    let recipient_secret = StaticSecret::from(secret_bytes);
-    
-    let pub_key_str = std::fs::read_to_string(ident_dir.join("x25519_pub.b64")).unwrap_or_default().replace("\n", "").replace("\r", "");
-    let pub_bytes = match b64.decode(pub_key_str.trim()) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::error!("DM Decrypt: Failed to decode public key: {}", e);
-            return;
-        }
-    };
-    
-    let sender_raw = if pub_bytes.len() == 32 {
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&pub_bytes);
-        arr
-    } else {
-        let mut found = None;
-        for i in 0..pub_bytes.len().saturating_sub(33) {
-            if pub_bytes[i] == 0x03 && pub_bytes[i+1] == 0x21 && pub_bytes[i+2] == 0x00 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&pub_bytes[i+3..i+35]);
-                found = Some(arr);
-                break;
-            }
-        }
-        if let Some(arr) = found {
-            arr
-        } else {
-            tracing::error!("DM Decrypt FATAL: Invalid x25519_pub length: {}", pub_bytes.len());
-            return;
-        }
-    };
-    let sender_public = PublicKey::from(sender_raw);
-    
-    let ciphertext = b64.decode(ciphertext_b64).unwrap_or_default();
-    let nonce_vec = match b64.decode(nonce_b64) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::error!("DM Decrypt: Failed to decode nonce: {}", e);
-            return;
-        }
-    };
-    if nonce_vec.len() != 12 {
-        tracing::error!("DM Decrypt: Invalid nonce length: {}", nonce_vec.len());
-        return;
+    // The phone re-sends a message until its ACK arrives; each message is answered once.
+    {
+        let mut seen = app_state.admin_seen.lock().await;
+        if seen.contains(&msg_id) { return; }
+        seen.push_back(msg_id.clone());
+        while seen.len() > 512 { seen.pop_front(); }
     }
-    let mut nonce_bytes = [0u8; 12];
-    nonce_bytes.copy_from_slice(&nonce_vec);
-    
-    let decrypt_result = decrypt_from_sender(&ciphertext, &nonce_bytes, &recipient_secret, &sender_public);
-    if let Err(e) = &decrypt_result {
-        tracing::error!("DM Decryption failed: {}", e);
-    }
-    if let Ok(decrypted) = decrypt_result {
-        tracing::info!("DM Decrypted successfully! Sending to AdminBridge...");
-        if let Ok(plaintext) = String::from_utf8(decrypted) {
-            let mut message_content = plaintext.clone();
-            if let Ok(json_obj) = serde_json::from_str::<serde_json::Value>(&plaintext) {
-                if let Some(content) = json_obj.get("content").and_then(|v| v.as_str()) {
-                    message_content = content.to_string();
-                }
-            }
-            
-            if let Some(bridge_arc) = &app_state.admin_bridge {
-                let bridge = bridge_arc.read().await;
-                let reply_text = match bridge.send_message(message_content, vec![]).await {
-                    Ok(response) => {
-                        tracing::info!("Admin AI responded successfully.");
-                        response.message.content
-                    },
-                    Err(e) => {
-                        tracing::error!("Admin AI Error: {}", e);
-                        format!("⚠️ Admin AI Error: {}\n\n(Check your Hub logs, MCP servers or persona config might have failed to start)", e)
-                    }
-                };
-                
-                let response_json = json!({"content": reply_text}).to_string();
-                if let Ok((resp_ciphertext, resp_nonce)) = encrypt_for_recipient(response_json.as_bytes(), &recipient_secret, &sender_public) {
-                    let msg_id = uuid::Uuid::new_v4().to_string();
-                    let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                    
-                    let reply_packet = json!({
-                        "id": uuid::Uuid::new_v4().to_string(),
-                        "hops": 1,
-                        "sender_id": format!("admin_{}", my_node_id),
-                        "target_user_id": my_node_id,
-                        "type": "MESSAGE",
-                        "payload": {
-                            "id": msg_id,
-                            "nonce": b64.encode(resp_nonce),
-                            "ciphertext": b64.encode(resp_ciphertext),
-                            "timestamp": chrono::Utc::now().timestamp_millis()
-                        }
-                    });
-                    
-                    let mut buffer = app_state.incoming_mesh_packets.write().await;
-                    buffer.push(reply_packet);
-                    tracing::info!("Reply encrypted and pushed to mobile sync buffer!");
-                } else {
-                    tracing::error!("Failed to encrypt reply for Admin AI");
-                }
-            } else {
-                tracing::error!("AdminBridge is None. Is this a master node?");
-                let reply_text = "⚠️ Admin AI is disabled on this node (not a Master node or failed to init).".to_string();
-                let response_json = json!({"content": reply_text}).to_string();
-                if let Ok((resp_ciphertext, resp_nonce)) = encrypt_for_recipient(response_json.as_bytes(), &recipient_secret, &sender_public) {
-                    let msg_id = uuid::Uuid::new_v4().to_string();
-                    let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                    let reply_packet = json!({
-                        "id": uuid::Uuid::new_v4().to_string(),
-                        "hops": 1,
-                        "sender_id": format!("admin_{}", my_node_id),
-                        "target_user_id": my_node_id,
-                        "type": "MESSAGE",
-                        "payload": {
-                            "id": msg_id,
-                            "nonce": b64.encode(resp_nonce),
-                            "ciphertext": b64.encode(resp_ciphertext),
-                            "timestamp": chrono::Utc::now().timestamp_millis()
-                        }
-                    });
-                    let mut buffer = app_state.incoming_mesh_packets.write().await;
-                    buffer.push(reply_packet);
+    tracing::info!("Admin AI: message from the owner opened; asking the Admin AI...");
+    let reply_text = match &app_state.admin_bridge {
+        Some(bridge_arc) => {
+            let bridge = bridge_arc.read().await;
+            match bridge.send_message(text, vec![]).await {
+                Ok(response) => response.message.content,
+                Err(e) => {
+                    tracing::error!("Admin AI Error: {}", e);
+                    format!("⚠️ Admin AI Error: {}\n\n(Check your Hub logs, MCP servers or persona config might have failed to start)", e)
                 }
             }
         }
+        None => "⚠️ Admin AI is disabled on this node (not a Master node or failed to init).".to_string(),
+    };
+    match admin::reply_packet(&owner, &reply_text, node.now()) {
+        Ok(reply) => {
+            node.inbox("packet", &reply, &reply.to_wire()).await;
+            tracing::info!("Admin AI: reply sealed and queued for the phone");
+        }
+        Err(e) => tracing::error!("Admin AI: could not seal the reply: {}", e),
     }
 }
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Step 1: Load configuration (before logging, so we know the log dir)
@@ -400,112 +273,37 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Step 3.5: NoSlop Home HUB node (hainet-noslop): verified mesh listeners for the personal and
+    // creator onions (loopback; Tor forwards to them), the durable inbox for the phone, creator
+    // hosting, and Tor delivery. Replaces the earlier unverified 0.0.0.0:9999 relay.
+    let hub_cfg = hainet_noslop::hub::HubConfig::from_env(get_hainet_dir().join("identity"), data_dir.clone());
+    info!("🕸️  NoSlop Home HUB: personal mesh on {}, creator mesh on {}, Tor SOCKS {}", hub_cfg.personal_listen, hub_cfg.creator_listen, hub_cfg.socks);
+    let noslop = hainet_noslop::hub::HubNode::new(
+        hub_cfg,
+        hainet_noslop::hub::store::Store::open(social_db.pool.clone()).await.expect("Failed to initialize the NoSlop Hub store"),
+        None,
+        true,
+        hainet_noslop::hub::system_clock(),
+    ).await;
+
     let app_state = Arc::new(AppState {
         admin_bridge: admin_bridge.map(|b| Arc::new(RwLock::new(b))),
         tts_handler: Arc::new(RwLock::new(tts_handler)),
         hardware_profile: Arc::new(RwLock::new(hardware_profile)),
         gossip_engine: Arc::new(RwLock::new(gossip_engine)),
         social_db: Arc::new(social_db),
-        incoming_mesh_packets: Arc::new(RwLock::new(vec![])),
+        noslop: noslop.clone(),
+        api_nonces: Arc::new(hainet_noslop::hub::api::NonceCache::default()),
+        sessions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        admin_seen: Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::new())),
         log_dir: config.effective_log_dir(),
     });
-
-    // Step 3.5: Start Smart Mesh Gossip Listener on Port 9999
-    let mesh_app_state = app_state.clone();
-    tokio::spawn(async move {
-        match tokio::net::TcpListener::bind("0.0.0.0:9999").await {
-            Ok(listener) => {
-                info!("🕸️  Smart Mesh gossip listener running on port 9999");
-                loop {
-                    if let Ok((stream, addr)) = listener.accept().await {
-                        tracing::warn!("TCP: RAW CONNECTION ACCEPTED FROM {}", addr);
-                        let state = mesh_app_state.clone();
-                        tokio::spawn(async move {
-                            use tokio::io::{AsyncBufReadExt, BufReader};
-                            let mut reader = BufReader::new(stream);
-                            let mut line = String::new();
-                            while let Ok(n) = reader.read_line(&mut line).await {
-                                if n == 0 { break; }
-                                tracing::warn!("TCP: Received {} bytes of raw data", n);
-                                if let Ok(packet_json) = serde_json::from_str::<serde_json::Value>(&line) {
-                                    let ptype = packet_json.get("type").and_then(|v| v.as_str()).unwrap_or_default();
-                                    let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
-                                    let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
-                                    let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-                                    let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                                    
-                                    // Hub Proxy Logic: The Hub acts as a relay for the mobile app.
-                                    // Unlike a peer node, the Hub must accept packets targeted at the
-                                    // owner regardless of which intermediate node forwarded them
-                                    // (gossip re-stamps sender_id at each hop).
-                                    let admin_id = format!("admin_{}", my_node_id);
-
-                                    if ptype == "MESSAGE" {
-                                        info!("TCP: MESSAGE packet from [{}] target [{}]", sender_id.chars().take(20).collect::<String>(), target_id.chars().take(20).collect::<String>());
-
-                                        if target_id == admin_id && sender_id == my_node_id {
-                                            let state_clone = state.clone();
-                                            let pjson_clone = packet_json.clone();
-                                            tokio::spawn(async move {
-                                                handle_incoming_dm(state_clone, pjson_clone).await;
-                                            });
-                                        } else {
-                                            let mut buffer = state.incoming_mesh_packets.write().await;
-                                            buffer.push(packet_json.clone());
-                                            tracing::warn!("TCP: Buffered inbound DM from {} for mobile sync", sender_id);
-                                        }
-                                    } else {
-                                        // Non-MESSAGE packets: check sender trust directly via DB
-                                        // (avoids gossip engine dedup/state issues)
-                                        let is_trusted = sender_id == my_node_id || {
-                                            sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM mesh_peers WHERE public_key = ? AND is_trusted = 1")
-                                                .bind(&sender_id)
-                                                .fetch_one(&state.social_db.pool).await.unwrap_or(0) > 0
-                                        };
-
-                                        // Also allow CONNECTION_REQUEST through unconditionally
-                                        let is_connection = ptype == "CONNECTION_REQUEST" || ptype == "USER_HANDSHAKE";
-                                        
-                                        if is_connection {
-                                            if let Some(payload) = packet_json.get("payload") {
-                                                if let (Some(uid), Some(onion)) = (
-                                                    payload.get("fromUserId").and_then(|v| v.as_str()).or_else(|| payload.get("from_user_id").and_then(|v| v.as_str())),
-                                                    payload.get("fromHomeNode").and_then(|v| v.as_str()).or_else(|| payload.get("from_home_node").and_then(|v| v.as_str()))
-                                                ) {
-                                                    // Never insert ourselves as a peer
-                                                    if uid != my_node_id {
-                                                        let _ = sqlx::query(
-                                                            "INSERT INTO mesh_peers (public_key, onion_address, is_trusted) 
-                                                             VALUES (?, ?, 0) 
-                                                             ON CONFLICT(public_key) DO UPDATE SET onion_address = excluded.onion_address"
-                                                        )
-                                                        .bind(uid)
-                                                        .bind(onion)
-                                                        .execute(&state.social_db.pool).await;
-                                                    } else {
-                                                        tracing::debug!("TCP: Skipping self-insert from looped-back {} packet", ptype);
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if is_trusted || is_connection {
-                                            let mut buffer = state.incoming_mesh_packets.write().await;
-                                            buffer.push(packet_json.clone());
-                                            debug!("TCP: Accepted {} packet from {}", ptype, sender_id.chars().take(20).collect::<String>());
-                                        }
-                                    }
-                                }
-                                line.clear();
-                            }
-                        });
-                    }
-                }
-            },
-            Err(e) => warn!("Failed to bind mesh port 9999: {}", e),
-        }
-    });
-
+    let hook_state = app_state.clone();
+    noslop.set_admin_hook(Arc::new(move |pkt| {
+        let st = hook_state.clone();
+        Box::pin(async move { handle_incoming_dm(st, pkt).await })
+    })).await;
+    noslop.spawn_all();
     // Step 4: Start minimal TCP-based health/API endpoint
     let role_for_health = config.network.role.clone();
     let health_app_state = app_state.clone();
@@ -551,15 +349,24 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Serialize, Deserialize};
 use sha3::{Digest, Sha3_256};
 use std::path::PathBuf;
 use rand::Rng;
 use chrono::Utc;
 
-static IS_LOGGED_IN: AtomicBool = AtomicBool::new(false);
-
+/// Portal browser sessions: `hainet_session` cookie token -> expiry (epoch ms). Each browser gets its
+/// own session (HttpOnly, SameSite=Strict); logging in one browser no longer logs in every client.
+pub type Sessions = Arc<tokio::sync::Mutex<std::collections::HashMap<String, i64>>>;
+const SESSION_COOKIE: &str = "hainet_session";
+/// Session lifetime (`HAINET_SESSION_TTL_HOURS`, default 7 days).
+fn session_ttl_ms() -> i64 {
+    std::env::var("HAINET_SESSION_TTL_HOURS").ok().and_then(|v| v.parse::<i64>().ok()).unwrap_or(168) * 3_600_000
+}
+/// Request header block ceiling (`HAINET_HTTP_MAX_HEADER_BYTES`).
+fn max_header_bytes() -> usize { std::env::var("HAINET_HTTP_MAX_HEADER_BYTES").ok().and_then(|v| v.parse().ok()).unwrap_or(32 * 1024) }
+/// Request body ceiling for everything except backup uploads (`HAINET_HTTP_MAX_BODY_BYTES`).
+fn max_body_bytes() -> usize { std::env::var("HAINET_HTTP_MAX_BODY_BYTES").ok().and_then(|v| v.parse().ok()).unwrap_or(16 * 1024 * 1024) }
 #[derive(Serialize, Deserialize, Clone)]
 struct AuthState {
     setup_complete: bool,
@@ -603,8 +410,133 @@ fn generate_random_seed() -> String {
     words.join(" ")
 }
 
+fn now_ms() -> i64 { Utc::now().timestamp_millis() }
+
+async fn new_session(sessions: &Sessions) -> String {
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill(&mut bytes);
+    let token = hex::encode(bytes);
+    let now = now_ms();
+    let mut s = sessions.lock().await;
+    s.retain(|_, exp| *exp > now);
+    s.insert(token.clone(), now + session_ttl_ms());
+    token
+}
+
+fn session_cookie(token: &str) -> String {
+    format!("Set-Cookie: {}={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}", SESSION_COOKIE, token, session_ttl_ms() / 1000)
+}
+
+fn cookie_token(headers: &std::collections::HashMap<String, String>) -> Option<String> {
+    headers.get("cookie")?.split(';').find_map(|c| {
+        let (k, v) = c.trim().split_once('=')?;
+        (k == SESSION_COOKIE && !v.is_empty()).then(|| v.to_string())
+    })
+}
+
+async fn session_valid(sessions: &Sessions, headers: &std::collections::HashMap<String, String>) -> bool {
+    let Some(t) = cookie_token(headers) else { return false };
+    let now = now_ms();
+    sessions.lock().await.get(&t).map(|exp| *exp > now).unwrap_or(false)
+}
+
+/// One parsed HTTP request. `upload` is set for a streamed backup upload: (temp file, SHA-256 hex, size).
+struct HttpRequest {
+    method: String,
+    path: String,
+    headers: std::collections::HashMap<String, String>,
+    body: Vec<u8>,
+    upload: Option<(PathBuf, String, u64)>,
+}
+
+/// Reads one request with bounded header and body sizes. A `POST /api/backup/push` body is streamed
+/// to a temporary file (hashed on the way) instead of being held in memory.
+async fn read_request(stream: &mut tokio::net::TcpStream, backup_tmp_dir: &std::path::Path, backup_max: u64) -> Result<HttpRequest, (&'static str, String)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let io_timeout = std::time::Duration::from_secs(30);
+    let mut head = Vec::with_capacity(4096);
+    let mut buf = vec![0u8; 8192];
+    let header_end = loop {
+        if let Some(pos) = head.windows(4).position(|w| w == b"\r\n\r\n") {
+            if pos > max_header_bytes() { return Err(("431 Request Header Fields Too Large", "headers too large".into())); }
+            break pos;
+        }
+        if head.len() > max_header_bytes() { return Err(("431 Request Header Fields Too Large", "headers too large".into())); }
+        let n = tokio::time::timeout(io_timeout, stream.read(&mut buf)).await.map_err(|_| ("408 Request Timeout", "timeout".to_string()))?.map_err(|e| ("400 Bad Request", e.to_string()))?;
+        if n == 0 { return Err(("400 Bad Request", "connection closed".into())); }
+        head.extend_from_slice(&buf[..n]);
+    };
+    let mut body = head.split_off(header_end + 4);
+    let head_str = String::from_utf8_lossy(&head[..header_end]).into_owned();
+    let mut lines = head_str.split("\r\n");
+    let request_line = lines.next().unwrap_or("");
+    let mut parts = request_line.split_whitespace();
+    let (method, path) = match (parts.next(), parts.next()) { (Some(m), Some(p)) => (m.to_string(), p.to_string()), _ => return Err(("400 Bad Request", "bad request line".into())) };
+    let mut headers = std::collections::HashMap::new();
+    for l in lines {
+        if let Some((k, v)) = l.split_once(':') { headers.insert(k.trim().to_ascii_lowercase(), v.trim().to_string()); }
+    }
+    let content_length: u64 = match headers.get("content-length") { Some(v) => v.parse().map_err(|_| ("400 Bad Request", "bad content-length".to_string()))?, None => 0 };
+
+    if method == "POST" && path == "/api/backup/push" {
+        if content_length == 0 { return Err(("411 Length Required", "Content-Length required".into())); }
+        if content_length > backup_max { return Err(("413 Payload Too Large", format!("backup larger than {} bytes", backup_max))); }
+        tokio::fs::create_dir_all(backup_tmp_dir).await.map_err(|e| ("500 Internal Server Error", e.to_string()))?;
+        let tmp = backup_tmp_dir.join(format!("upload_{}.tmp", uuid::Uuid::new_v4()));
+        let mut f = tokio::fs::File::create(&tmp).await.map_err(|e| ("500 Internal Server Error", e.to_string()))?;
+        let mut hasher = sha2::Sha256::new();
+        let mut received = 0u64;
+        if !body.is_empty() {
+            let take = (body.len() as u64).min(content_length) as usize;
+            sha2::Digest::update(&mut hasher, &body[..take]);
+            f.write_all(&body[..take]).await.map_err(|e| ("500 Internal Server Error", e.to_string()))?;
+            received = take as u64;
+        }
+        while received < content_length {
+            let want = ((content_length - received) as usize).min(buf.len());
+            let n = match tokio::time::timeout(io_timeout, stream.read(&mut buf[..want])).await { Ok(Ok(n)) => n, _ => 0 };
+            if n == 0 { let _ = tokio::fs::remove_file(&tmp).await; return Err(("400 Bad Request", "upload interrupted".into())); }
+            sha2::Digest::update(&mut hasher, &buf[..n]);
+            if let Err(e) = f.write_all(&buf[..n]).await { let _ = tokio::fs::remove_file(&tmp).await; return Err(("500 Internal Server Error", e.to_string())); }
+            received += n as u64;
+        }
+        f.flush().await.map_err(|e| ("500 Internal Server Error", e.to_string()))?;
+        let sha = hex::encode(sha2::Digest::finalize(hasher));
+        return Ok(HttpRequest { method, path, headers, body: Vec::new(), upload: Some((tmp, sha, received)) });
+    }
+
+    if content_length as usize > max_body_bytes() { return Err(("413 Payload Too Large", "body too large".into())); }
+    body.truncate(content_length as usize);
+    while body.len() < content_length as usize {
+        let n = match tokio::time::timeout(io_timeout, stream.read(&mut buf)).await { Ok(Ok(n)) => n, _ => 0 };
+        if n == 0 { return Err(("400 Bad Request", "body incomplete".into())); }
+        let want = content_length as usize - body.len();
+        body.extend_from_slice(&buf[..n.min(want)]);
+    }
+    Ok(HttpRequest { method, path, headers, body, upload: None })
+}
+
+async fn write_response(stream: &mut tokio::net::TcpStream, status: &str, content_type: &str, extra_headers: &[String], body: &[u8]) {
+    use tokio::io::AsyncWriteExt;
+    let mut head = format!(
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: {}\r\nConnection: close\r\n",
+        status, content_type, body.len()
+    );
+    for h in extra_headers { head.push_str(h); head.push_str("\r\n"); }
+    head.push_str("\r\n");
+    let _ = stream.write_all(head.as_bytes()).await;
+    let _ = stream.write_all(body).await;
+    let _ = stream.flush().await;
+}
+
+fn json_body(v: &str) -> Vec<u8> { v.as_bytes().to_vec() }
+
 /// Run a minimal TCP-based HTTP server for health checks and portal API.
 /// Uses raw TCP to avoid hyper version compatibility issues.
+///
+/// Authentication: the owner's phone signs each request (`X-NoSlop-Hub-*` headers, see
+/// `hainet_noslop::hub::api`); the portal uses a per-browser session cookie set at login. Nothing
+/// under `/api/invoke` or `/api/backup` is reachable without one of the two.
 async fn run_health_server(
     port: u16, 
     role: &str,
@@ -614,8 +546,6 @@ async fn run_health_server(
     settings_state: SettingsState,
     qr_sessions: Arc<tokio::sync::Mutex<std::collections::HashMap<String, bool>>>
 ) -> Result<()> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await
         .map_err(|e| anyhow::anyhow!("Failed to bind health endpoint on port {}: {}", port, e))?;
     
@@ -634,82 +564,94 @@ async fn run_health_server(
         let qr_sessions = qr_sessions.clone();
         
         tokio::spawn(async move {
-            let mut raw_req = Vec::new();
-            let mut buf = vec![0u8; 8192];
-            
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            if n == 0 { return; }
-            raw_req.extend_from_slice(&buf[..n]);
-            
-            let mut req_str = String::from_utf8_lossy(&raw_req).into_owned();
-            
-            // Check Content-Length to ensure we read the full JSON payload
-            let req_str_lower = req_str.to_lowercase();
-            if let Some(cl_idx) = req_str_lower.find("content-length: ") {
-                let cl_line = &req_str[cl_idx..];
-                if let Some(end_idx) = cl_line.find("\r\n") {
-                    if let Ok(cl) = cl_line[16..end_idx].trim().parse::<usize>() {
-                        if let Some(header_end) = req_str.find("\r\n\r\n") {
-                            let header_len = header_end + 4;
-                            while raw_req.len() < header_len + cl {
-                                let n = stream.read(&mut buf).await.unwrap_or(0);
-                                if n == 0 { break; }
-                                raw_req.extend_from_slice(&buf[..n]);
+            let backup_tmp = app_state.noslop.cfg.backup_dir().join("incoming");
+            let req = match read_request(&mut stream, &backup_tmp, app_state.noslop.cfg.backup_max).await {
+                Ok(r) => r,
+                Err((status, msg)) => {
+                    write_response(&mut stream, status, "application/json", &[], &json_body(&serde_json::json!({"error": msg}).to_string())).await;
+                    return;
+                }
+            };
+            let method = req.method.as_str();
+            let path = req.path.as_str();
+            debug!("API Request: {} {}", method, path);
+            let body_str = String::from_utf8_lossy(&req.body).into_owned();
+            let mut extra_headers: Vec<String> = Vec::new();
+            let owner_signed = req.headers.contains_key("x-noslop-hub-sig");
+
+            // --- Backups (owner only) ---------------------------------------------------------
+            if path == "/api/backup/push" && method == "POST" {
+                let Some((tmp, sha, size)) = req.upload else { return };
+                let res = hainet_noslop::hub::api::verify_owner_request_hashed(&app_state.noslop, &app_state.api_nonces, method, path, &req.headers, &sha).await;
+                let (status, body) = match res {
+                    Err(e) => { let _ = tokio::fs::remove_file(&tmp).await; warn!("Backup push refused: {}", e); ("401 Unauthorized", serde_json::json!({"error": e}).to_string()) }
+                    Ok(()) => match hainet_noslop::hub::api::backup_store(&app_state.noslop, &tmp, &sha, size).await {
+                        Ok(v) => ("200 OK", v.to_string()),
+                        Err(e) => { let _ = tokio::fs::remove_file(&tmp).await; ("500 Internal Server Error", serde_json::json!({"error": e}).to_string()) }
+                    },
+                };
+                write_response(&mut stream, status, "application/json", &[], &json_body(&body)).await;
+                return;
+            }
+            if (path == "/api/backup/pull" || path == "/api/backup/list") && method == "GET" {
+                if let Err(e) = hainet_noslop::hub::api::verify_owner_request(&app_state.noslop, &app_state.api_nonces, method, path, &req.headers, &req.body).await {
+                    write_response(&mut stream, "401 Unauthorized", "application/json", &[], &json_body(&serde_json::json!({"error": e}).to_string())).await;
+                    return;
+                }
+                if path == "/api/backup/list" {
+                    let names = hainet_noslop::hub::api::backup_list(&app_state.noslop).await;
+                    write_response(&mut stream, "200 OK", "application/json", &[], &json_body(&serde_json::json!({"status": "ok", "backups": names}).to_string())).await;
+                    return;
+                }
+                match hainet_noslop::hub::api::backup_latest(&app_state.noslop).await {
+                    None => write_response(&mut stream, "404 Not Found", "application/json", &[], br#"{"error":"no backup on this Hub"}"#).await,
+                    Some(file) => {
+                        use tokio::io::AsyncWriteExt;
+                        let sha = tokio::fs::read_to_string(file.with_extension("sha256")).await.unwrap_or_default();
+                        match tokio::fs::File::open(&file).await {
+                            Ok(mut f) => {
+                                let len = f.metadata().await.map(|m| m.len()).unwrap_or(0);
+                                let head = format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nX-Backup-Sha256: {}\r\nConnection: close\r\n\r\n", len, sha.trim());
+                                if stream.write_all(head.as_bytes()).await.is_ok() { let _ = tokio::io::copy(&mut f, &mut stream).await; }
+                                let _ = stream.flush().await;
                             }
-                            req_str = String::from_utf8_lossy(&raw_req).into_owned();
+                            Err(e) => write_response(&mut stream, "500 Internal Server Error", "application/json", &[], &json_body(&serde_json::json!({"error": e.to_string()}).to_string())).await,
                         }
                     }
                 }
+                return;
             }
-            
-            let request = req_str;
-            
-            // Parse headers and body
-            let body_str = if let Some(idx) = request.find("\r\n\r\n") {
-                &request[idx + 4..]
-            } else {
-                ""
-            };
 
-            let first_line = request.lines().next().unwrap_or("");
-            let parts: Vec<&str> = first_line.split_whitespace().collect();
-            
-            if parts.len() < 2 { return; }
-            let method = parts[0];
-            let path = parts[1];
-            
-            debug!("API Request: {} {}", method, path);
-            
-            let (status, body) = match (method, path) {
+            let (status, body): (String, Vec<u8>) = match (method, path) {
                 ("GET", "/health") => (
                     "200 OK".to_string(),
-                    format!(r#"{{"status":"ok","service":"hainet-core","role":"{}","version":"{}"}}"#, role, env!("CARGO_PKG_VERSION"))
+                    json_body(&format!(r#"{{"status":"ok","service":"hainet-core","role":"{}","version":"{}","noslop_api":{}}}"#, role, env!("CARGO_PKG_VERSION"), hainet_noslop::hub::api::API_PROTOCOL))
                 ),
                 ("GET", "/api/auth/verify") => {
-                    if IS_LOGGED_IN.load(Ordering::SeqCst) {
-                        ("200 OK".to_string(), r#"{"status":"ok"}"#.to_string())
+                    if session_valid(&app_state.sessions, &req.headers).await {
+                        ("200 OK".to_string(), json_body(r#"{"status":"ok"}"#))
                     } else {
-                        ("401 Unauthorized".to_string(), r#"{"error":"unauthorized"}"#.to_string())
+                        ("401 Unauthorized".to_string(), json_body(r#"{"error":"unauthorized"}"#))
                     }
                 },
                 ("GET", "/api/auth/status") => {
                     let has_identity = get_hainet_dir().join("identity/ed25519_pub.b64").exists();
                     if is_setup() {
-                        ("200 OK".to_string(), r#"{"status":"login_required"}"#.to_string())
+                        ("200 OK".to_string(), json_body(r#"{"status":"login_required"}"#))
                     } else if has_identity {
-                        ("200 OK".to_string(), r#"{"status":"qr_login_only"}"#.to_string())
+                        ("200 OK".to_string(), json_body(r#"{"status":"qr_login_only"}"#))
                     } else {
-                        ("200 OK".to_string(), r#"{"status":"setup_required"}"#.to_string())
+                        ("200 OK".to_string(), json_body(r#"{"status":"setup_required"}"#))
                     }
                 },
                 ("POST", "/api/auth/qr/init") => {
                     let session_id = uuid::Uuid::new_v4().to_string();
                     let mut sessions = qr_sessions.lock().await;
                     sessions.insert(session_id.clone(), false);
-                    ("200 OK".to_string(), format!(r#"{{"session_id":"{}"}}"#, session_id))
+                    ("200 OK".to_string(), json_body(&format!(r#"{{"session_id":"{}"}}"#, session_id)))
                 },
                 ("POST", "/api/auth/qr/verify") => {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body_str) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
                         let session_id = json.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
                         let public_key = json.get("public_key").and_then(|v| v.as_str()).unwrap_or("");
                         let signature = json.get("signature").and_then(|v| v.as_str()).unwrap_or("");
@@ -718,15 +660,15 @@ async fn run_health_server(
                             let mut sessions = qr_sessions.lock().await;
                             if sessions.contains_key(session_id) {
                                 sessions.insert(session_id.to_string(), true);
-                                ("200 OK".to_string(), r#"{"status":"verified"}"#.to_string())
+                                ("200 OK".to_string(), json_body(r#"{"status":"verified"}"#))
                             } else {
-                                ("404 Not Found".to_string(), r#"{"error":"Session not found"}"#.to_string())
+                                ("404 Not Found".to_string(), json_body(r#"{"error":"Session not found"}"#))
                             }
                         } else {
-                            ("401 Unauthorized".to_string(), r#"{"error":"Invalid signature"}"#.to_string())
+                            ("401 Unauthorized".to_string(), json_body(r#"{"error":"Invalid signature"}"#))
                         }
                     } else {
-                        ("400 Bad Request".to_string(), r#"{"error":"invalid_json"}"#.to_string())
+                        ("400 Bad Request".to_string(), json_body(r#"{"error":"invalid_json"}"#))
                     }
                 },
                 ("GET", p) if p.starts_with("/api/auth/qr/status/") => {
@@ -737,21 +679,23 @@ async fn run_health_server(
                     };
                     
                     if is_verified {
-                        IS_LOGGED_IN.store(true, Ordering::SeqCst);
+                        // The browser that showed this QR code (and only it) is now logged in.
                         qr_sessions.lock().await.remove(session_id);
-                        ("200 OK".to_string(), r#"{"status":"authenticated"}"#.to_string())
+                        let token = new_session(&app_state.sessions).await;
+                        extra_headers.push(session_cookie(&token));
+                        ("200 OK".to_string(), json_body(r#"{"status":"authenticated"}"#))
                     } else {
-                        ("200 OK".to_string(), r#"{"status":"pending"}"#.to_string())
+                        ("200 OK".to_string(), json_body(r#"{"status":"pending"}"#))
                     }
                 },
                 ("GET", "/api/auth/generate-seed") => (
                     "200 OK".to_string(),
-                    format!(r#"{{"seed_phrase":"{}"}}"#, generate_random_seed())
+                    json_body(&format!(r#"{{"seed_phrase":"{}"}}"#, generate_random_seed()))
                 ),
                 ("POST", "/api/auth/setup") => {
                     if is_setup() {
-                        ("400 Bad Request".to_string(), r#"{"error":"already_setup"}"#.to_string())
-                    } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(body_str) {
+                        ("400 Bad Request".to_string(), json_body(r#"{"error":"already_setup"}"#))
+                    } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
                         if let Some(passphrase) = json.get("app_passphrase").and_then(|v| v.as_str()) {
                             let auth_state = AuthState {
                                 setup_complete: true,
@@ -762,94 +706,124 @@ async fn run_health_server(
                             match std::fs::write(get_auth_file_path(), serde_json::to_string_pretty(&auth_state).unwrap_or_default()) {
                                 Ok(_) => {
                                     info!("✅ Setup complete: auth file saved.");
-                                    IS_LOGGED_IN.store(true, Ordering::SeqCst);
-                                    ("200 OK".to_string(), r#"{"status":"ok"}"#.to_string())
+                                    let token = new_session(&app_state.sessions).await;
+                                    extra_headers.push(session_cookie(&token));
+                                    ("200 OK".to_string(), json_body(r#"{"status":"ok"}"#))
                                 },
                                 Err(e) => {
                                     warn!("Failed to save auth file: {}", e);
-                                    ("500 Internal Server Error".to_string(), r#"{"error":"disk_error"}"#.to_string())
+                                    ("500 Internal Server Error".to_string(), json_body(r#"{"error":"disk_error"}"#))
                                 }
                             }
                         } else {
-                            ("400 Bad Request".to_string(), r#"{"error":"missing_passphrase"}"#.to_string())
+                            ("400 Bad Request".to_string(), json_body(r#"{"error":"missing_passphrase"}"#))
                         }
                     } else {
-                        ("400 Bad Request".to_string(), r#"{"error":"invalid_json"}"#.to_string())
+                        ("400 Bad Request".to_string(), json_body(r#"{"error":"invalid_json"}"#))
                     }
                 },
                 ("POST", "/api/auth/login") => {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body_str) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
                         if let Some(passphrase) = json.get("app_passphrase").and_then(|v| v.as_str()) {
                             if let Ok(auth_content) = std::fs::read_to_string(get_auth_file_path()) {
                                 if let Ok(auth_state) = serde_json::from_str::<AuthState>(&auth_content) {
                                     if auth_state.passphrase_hash == hash_passphrase(passphrase) {
                                         info!("✅ Login successful.");
-                                        IS_LOGGED_IN.store(true, Ordering::SeqCst);
-                                        ("200 OK".to_string(), r#"{"status":"ok"}"#.to_string())
+                                        let token = new_session(&app_state.sessions).await;
+                                        extra_headers.push(session_cookie(&token));
+                                        ("200 OK".to_string(), json_body(r#"{"status":"ok"}"#))
                                     } else {
                                         warn!("❌ Login failed: incorrect passphrase.");
-                                        ("401 Unauthorized".to_string(), r#"{"error":"invalid_credentials"}"#.to_string())
+                                        ("401 Unauthorized".to_string(), json_body(r#"{"error":"invalid_credentials"}"#))
                                     }
                                 } else {
-                                    ("500 Internal Server Error".to_string(), r#"{"error":"corrupted_auth_file"}"#.to_string())
+                                    ("500 Internal Server Error".to_string(), json_body(r#"{"error":"corrupted_auth_file"}"#))
                                 }
                             } else {
-                                ("400 Bad Request".to_string(), r#"{"error":"not_setup"}"#.to_string())
+                                ("400 Bad Request".to_string(), json_body(r#"{"error":"not_setup"}"#))
                             }
                         } else {
-                            ("400 Bad Request".to_string(), r#"{"error":"missing_passphrase"}"#.to_string())
+                            ("400 Bad Request".to_string(), json_body(r#"{"error":"missing_passphrase"}"#))
                         }
                     } else {
-                        ("400 Bad Request".to_string(), r#"{"error":"invalid_json"}"#.to_string())
+                        ("400 Bad Request".to_string(), json_body(r#"{"error":"invalid_json"}"#))
                     }
                 },
+                ("POST", "/api/auth/logout") => {
+                    if let Some(t) = cookie_token(&req.headers) { app_state.sessions.lock().await.remove(&t); }
+                    extra_headers.push(format!("Set-Cookie: {}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", SESSION_COOKIE));
+                    ("200 OK".to_string(), json_body(r#"{"status":"ok"}"#))
+                },
                 ("POST", "/api/invoke") => {
-                    let mut is_sync = false;
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body_str) {
-                        if let Some(cmd) = json.get("cmd").and_then(|v| v.as_str()) {
-                            is_sync = cmd.starts_with("sync_") || cmd.starts_with("get_dms") || cmd.starts_with("get_mesh_peers");
-                        }
-                    }
-                    
-                    if !IS_LOGGED_IN.load(Ordering::SeqCst) && !is_sync {
-                        ("401 Unauthorized".to_string(), r#"{"error":"unauthorized"}"#.to_string())
+                    // The phone signs every request; the portal sends its session cookie. A request with
+                    // a signature that does not verify is refused even if it also carries a cookie.
+                    let auth = if owner_signed {
+                        hainet_noslop::hub::api::verify_owner_request(&app_state.noslop, &app_state.api_nonces, method, path, &req.headers, &req.body).await
+                    } else if session_valid(&app_state.sessions, &req.headers).await {
+                        Ok(())
                     } else {
-                        // Parse invoke JSON body: { "cmd": "foo", "args": { ... } }
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(body_str) {
-                            if let Some(cmd) = json.get("cmd").and_then(|v| v.as_str()) {
-                                let args = json.get("args").cloned().unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                        Err("unauthorized".to_string())
+                    };
+                    if let Err(e) = auth {
+                        warn!("API: refused /api/invoke: {}", e);
+                        ("401 Unauthorized".to_string(), json_body(&serde_json::json!({"error": e}).to_string()))
+                    } else if let Ok(jv) = hainet_noslop::json::parse(&body_str) {
+                        // Hub commands get the request in its wire order (packets are passed on as written).
+                        let cmd = jv.get_str("cmd").unwrap_or("").to_string();
+                        let empty = hainet_noslop::json::JValue::obj();
+                        let jargs = jv.get("args").filter(|a| !a.is_null()).unwrap_or(&empty);
+                        // The Web UI feed keeps the posts the phone sends out (as it always did).
+                        if cmd == "hub_send" || cmd == "sync_push_packets" {
+                            let sv = jargs.to_serde();
+                            let packets: Vec<serde_json::Value> = if cmd == "hub_send" {
+                                sv.get("items").and_then(|i| i.as_array()).map(|a| a.iter().filter_map(|it| it.get("packet").cloned()).collect()).unwrap_or_default()
+                            } else {
+                                sv.get("packets").and_then(|p| p.as_array()).cloned().unwrap_or_default()
+                            };
+                            let posts: Vec<serde_json::Value> = packets.iter()
+                                .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("POST"))
+                                .filter_map(|p| p.get("payload").cloned()).collect();
+                            if !posts.is_empty() { api_router::store_portal_posts(&app_state, posts.iter()).await; }
+                        }
+                        match hainet_noslop::hub::api::handle(&app_state.noslop, &cmd, jargs).await {
+                            Some(Ok(res)) => ("200 OK".to_string(), json_body(&res.to_string())),
+                            Some(Err(e)) => {
+                                warn!("API Invoke Error [{}]: {}", cmd, e);
+                                ("500 Internal Server Error".to_string(), json_body(&serde_json::json!({"error": e}).to_string()))
+                            }
+                            None if cmd.is_empty() => ("400 Bad Request".to_string(), json_body(r#"{"error":"missing_cmd"}"#)),
+                            None => {
+                                let args = jargs.to_serde();
                                 match api_router::handle_invoke(
-                                    cmd, 
+                                    &cmd,
                                     args, 
                                     app_state.clone(), 
                                     &metrics_state, 
                                     &metrics_storage, 
                                     &settings_state
                                 ).await {
-                                    Ok(res) => ("200 OK".to_string(), serde_json::to_string(&res).unwrap_or_default()),
+                                    Ok(res) => ("200 OK".to_string(), json_body(&serde_json::to_string(&res).unwrap_or_default())),
                                     Err(e) => {
                                         warn!("API Invoke Error [{}]: {}", cmd, e);
-                                        ("500 Internal Server Error".to_string(), serde_json::to_string(&serde_json::json!({"error": e})).unwrap_or_default())
+                                        ("500 Internal Server Error".to_string(), json_body(&serde_json::to_string(&serde_json::json!({"error": e})).unwrap_or_default()))
                                     }
                                 }
-                            } else {
-                                ("400 Bad Request".to_string(), r#"{"error":"missing_cmd"}"#.to_string())
                             }
-                        } else {
-                            ("400 Bad Request".to_string(), r#"{"error":"invalid_json"}"#.to_string())
                         }
+                    } else {
+                        ("400 Bad Request".to_string(), json_body(r#"{"error":"invalid_json"}"#))
                     }
                 },
                 ("OPTIONS", _) => {
                     // Handle CORS preflight
-                    ("204 No Content".to_string(), "".to_string())
+                    ("204 No Content".to_string(), Vec::new())
                 },
                 // Block API routes from falling through to the SPA fallback
                 ("GET", path) if path.starts_with("/api/") => {
                     warn!("API: Not Found: {} {}", method, path);
                     (
                         "404 Not Found".to_string(),
-                        r#"{"error":"not_found"}"#.to_string()
+                        json_body(r#"{"error":"not_found"}"#)
                     )
                 },
                 // --- Static file serving: Portal UI assets ---
@@ -861,7 +835,7 @@ async fn run_health_server(
                     warn!("API: Not Found: {} {}", method, path);
                     (
                         "404 Not Found".to_string(),
-                        r#"{"error":"not_found"}"#.to_string()
+                        json_body(r#"{"error":"not_found"}"#)
                     )
                 }
             };
@@ -869,13 +843,11 @@ async fn run_health_server(
             debug!("API Response to {} {}: {}", method, path, status);
 
             // Determine content type from response — JSON for API, mime type for static
-            let content_type = if body.starts_with('{') || body.starts_with('[') {
-                "application/json"
-            } else if status.contains("STATIC:") {
+            let content_type = if status.contains("STATIC:") {
                 // Extract the mime type from our marker (see serve_static_asset)
-                status.split("STATIC:").nth(1).unwrap_or("application/octet-stream")
+                status.split("STATIC:").nth(1).unwrap_or("application/octet-stream").to_string()
             } else {
-                "application/json"
+                "application/json".to_string()
             };
 
             // Clean the status line for the HTTP response
@@ -885,22 +857,15 @@ async fn run_health_server(
                 &status
             };
 
-            let response = format!(
-                "HTTP/1.1 {}\r\nContent-Type: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                clean_status,
-                content_type,
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes()).await;
+            write_response(&mut stream, clean_status, &content_type, &extra_headers, &body).await;
         });
     }
 }
 
-/// Serve a static file from the embedded Portal UI assets.
+/// Serve a static file from the embedded Portal UI assets (as bytes: images and fonts are binary).
 /// Falls back to index.html for SPA routing (React Router).
-fn serve_static_asset(path: &str) -> (String, String) {
-    let mut asset_path = path.trim_start_matches('/').to_string();
+fn serve_static_asset(path: &str) -> (String, Vec<u8>) {
+    let mut asset_path = path.trim_start_matches('/').split('?').next().unwrap_or("").to_string();
     
     // Root path → index.html
     if asset_path.is_empty() {
@@ -911,7 +876,7 @@ fn serve_static_asset(path: &str) -> (String, String) {
         warn!("API route not found, preventing SPA fallback: /{}", asset_path);
         return (
             "404 Not Found".to_string(),
-            r#"{"error":"not_found"}"#.to_string()
+            json_body(r#"{"error":"not_found"}"#)
         );
     }
 
@@ -922,23 +887,21 @@ fn serve_static_asset(path: &str) -> (String, String) {
             let mime = mime_guess::from_path(&asset_path)
                 .first_or_octet_stream()
                 .to_string();
-            let body = String::from_utf8_lossy(content.data.as_ref()).to_string();
             // Use a "STATIC:" prefix in the status to signal the content type to the writer
-            (format!("STATIC:{}", mime), body)
+            (format!("STATIC:{}", mime), content.data.to_vec())
         }
         None => {
             // SPA fallback: return index.html for unknown routes (React Router)
             debug!("Asset '{}' not found, serving index.html (SPA fallback)", asset_path);
             match PortalAssets::get("index.html") {
                 Some(index) => {
-                    let body = String::from_utf8_lossy(index.data.as_ref()).to_string();
-                    ("STATIC:text/html".to_string(), body)
+                    ("STATIC:text/html".to_string(), index.data.to_vec())
                 }
                 None => {
                     warn!("Portal UI not built! Run 'cd hainet-portal && npm run build'");
                     (
                         "404 Not Found".to_string(),
-                        r#"{"error":"Portal UI not built. Run: cd hainet-portal && npm run build"}"#.to_string()
+                        json_body(r#"{"error":"Portal UI not built. Run: cd hainet-portal && npm run build"}"#)
                     )
                 }
             }

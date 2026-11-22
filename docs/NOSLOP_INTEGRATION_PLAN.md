@@ -1,5 +1,11 @@
 # HAI-Net Home Hub <-> NoSlop Integration Plan
 
+> **Status (2026-11-22).** Phases 1–3 below describe the first Hub (July 2026) and are kept as history.
+> The Hub as it is now — verified mesh, durable inbox, creator hosting, owner-signed API, backups — is
+> described in **[NOSLOP_HUB.md](NOSLOP_HUB.md)**. Phase 2's `/api/backup/push|pull` exist now (owner
+> signed). Phase 4's blockchain link between the personal and the creator identity is **not** pursued:
+> NoSlop's creator identity is deliberately severable from the personal one.
+
 ## Context & Architecture
 HAI-Net is adapting its architecture to act as the `MASTER` Home Hub for the NoSlop mobile application.
 - **The Hub (Rust)** handles 24/7 Tor connectivity, AI media processing (Whisper, Ollama, FFmpeg), and master data storage.

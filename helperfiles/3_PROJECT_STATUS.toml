@@ -3,9 +3,27 @@
 # Last Updated: 2026-05-28T12:30:00+08:00
 
 [meta]
-last_updated = "2026-07-13T13:30:00.000000+08:00"
+last_updated = "2026-11-22T21:00:00.000000+08:00"
 project_name = "HAI-Net"
-version = "0.57"
+version = "0.58"
+
+[[completed_cycles]]
+id = "NoSlop-Hub-Creator-Hosting"
+date = "2026-11-22"
+phase = "NoSlop Hub Integration"
+session = "SESSION_60: NoSlop 0.8 Home HUB — creator hosting, verified mesh, owner-signed API"
+changes = [
+    "New crate hainet-noslop: Gson-exact JSON, encodeForSigning (UTF-16), envelope signatures, key formats, DM v2, vectors from the app's own Gson/Bouncy Castle",
+    "Hub node: loopback mesh listeners for the personal and creator onions, every frame envelope-verified, durable SQLite inbox with ACK",
+    "Creator hosting: creator identity on the Hub, creator onion via ADD_ONION held by the process, follower auto-accept, sync/inventory/media serving, presence and discovery",
+    "Owner API: every /api/invoke signed by the owner key or a per-browser session cookie; hub_send with phone-chosen destinations; streamed /api/backup/push|pull|list",
+    "Admin AI: DM v2 with immediate DM_ACK v3; old unsigned relay and in-memory buffer replaced",
+    "Deploy: Tor control access (group + cookie ControlPort) in the seed installer and the NoSlop SSH deployer",
+]
+status = "success"
+next_session = "Device test with the phone offline; then NoSlop discovery cache and community mirroring"
+current_phase = "Grand Integration — NoSlop Home HUB"
+current_cycle = "Creator hosting"
 
 [[completed_cycles]]
 id = "NoSlop-Hub-Ph3-Sync"

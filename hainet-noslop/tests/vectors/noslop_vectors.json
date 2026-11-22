@@ -1,0 +1,109 @@
+{
+  "encode_for_signing": [
+    {
+      "parts": [
+        "noslop-env-v1",
+        "",
+        "abc"
+      ],
+      "encoded": "13:noslop-env-v10:3:abc"
+    },
+    {
+      "parts": [
+        "héllo",
+        "😀x",
+        null,
+        "日本"
+      ],
+      "encoded": "5:héllo3:😀x0:2:日本"
+    },
+    {
+      "parts": [
+        "",
+        null,
+        ""
+      ],
+      "encoded": "0:0:0:"
+    }
+  ],
+  "payload_digest": [
+    {
+      "wire": "{\"a\":1,\"b\":null,\"c\":[1,null,{\"d\":null,\"e\":\"x\"}],\"z\":{}}",
+      "rendered": "{\"a\":1,\"c\":[1,null,{\"e\":\"x\"}],\"z\":{}}",
+      "digest": "f6790f843a2b27070bf4dcc3f15df15da0f07d4c4e7b4274a1e6f75b5b3ad352"
+    },
+    {
+      "wire": "{\"s\":\"quote\\\" back\\\\ nl\\n tab\\t cr\\r bs\\b ff\\f nul\\u0000 us\\u001f del\\u007f\"}",
+      "rendered": "{\"s\":\"quote\\\" back\\\\ nl\\n tab\\t cr\\r bs\\b ff\\f nul\\u0000 us\\u001f del\"}",
+      "digest": "0ee8592238e9ff7540e744f65177a9bf8820290741dfe84381c59a6dd7932c3f"
+    },
+    {
+      "wire": "{\"u\":\"ls\\u2028 ps\\u2029 emoji😀 é <html>&='\",\"slash\":\"a/b\\/c\"}",
+      "rendered": "{\"u\":\"ls\\u2028 ps\\u2029 emoji😀 é <html>&='\",\"slash\":\"a/b/c\"}",
+      "digest": "328317cdcd1cf58f86788acf34c8e4652c013db9a3384ca0ca0dce958f4697b4"
+    },
+    {
+      "wire": "{\"n1\":1700000000000,\"n2\":-5,\"n3\":1.50,\"n4\":1e3,\"n5\":0,\"t\":true,\"f\":false}",
+      "rendered": "{\"n1\":1700000000000,\"n2\":-5,\"n3\":1.50,\"n4\":1e3,\"n5\":0,\"t\":true,\"f\":false}",
+      "digest": "2f217a89516c17a7cdfb94cccdab02b5786214868c8f6c657ec440a50265df5b"
+    },
+    {
+      "wire": "{\"author_avatar_b64\":\"QUJD+/==\",\"empty\":\"\",\"arr\":[],\"nested\":{\"x\":[[null]]}}",
+      "rendered": "{\"author_avatar_b64\":\"QUJD+/==\",\"empty\":\"\",\"arr\":[],\"nested\":{\"x\":[[null]]}}",
+      "digest": "9caa43a7e8ac9a5016c15d7fefe148896e7211903d4a950053544fce78f1c546"
+    },
+    {
+      "wire": "[]",
+      "rendered": "[]",
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "wire": "\"just a string\"",
+      "rendered": "\"just a string\"",
+      "digest": "3fe01def54b1c6cd795b2ebfcbab64150f6a507bce043040c662c682eebfed1e"
+    },
+    {
+      "wire": "null",
+      "rendered": "",
+      "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "identity": {
+    "seed_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+    "public_key_b64": "MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=",
+    "private_key_b64": "MC4CAQAwBQYDK2VwBCIEIAMKERgfJi00O0JJUFdeZWxzeoGIj5adpKuyucDHztXc",
+    "onion": "ovoezojfnst43rfm7xdm73w2qsibpznz7fiu5gizdplh4cynij3c2tad.onion",
+    "enc_public_key_b64": "MCowBQYDK2VuAyEAMIITYSrbYnu9xqiLoKzVHtd+zM1AjEuMN2y9BXwgswE=",
+    "enc_private_key_b64": "MFECAQEwBQYDK2VuBCIEIP/8+fbz8O3q5+Th3tvY1dLPzMnGw8C9ure0sa6rqKWigSEAMIITYSrbYnu9xqiLoKzVHtd+zM1AjEuMN2y9BXwgswE=",
+    "tor_expanded_b64": "wJAu9gDBiPCpsNMtXnjt+IbWGIfmmKgaqwhMj4bb/m9cS6WiJuKwMTqDd0fBoJpWseyfUkebb5lZrBsNDD00ZQ=="
+  },
+  "envelope": {
+    "signing_string": "13:noslop-env-v15:pkt-113:ANNOUNCE_PEER60:MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=0:4:c2ln13:176370000012364:e2c0542115e516c760f39afcc4f53f03dba23a0d10586245b70f92e94e57ebbf",
+    "packet_wire": "{\"id\":\"pkt-1\",\"hops\":3,\"sender_id\":\"MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY\\u003d\",\"signature\":\"c2ln\",\"type\":\"ANNOUNCE_PEER\",\"payload\":{\"author_id\":\"MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY\\u003d\",\"onion_address\":\"ovoezojfnst43rfm7xdm73w2qsibpznz7fiu5gizdplh4cynij3c2tad.onion\",\"timestamp\":1763700000000,\"signature\":\"c2ln\"},\"env_v\":1,\"env_ts\":1763700000123,\"env_sig\":\"0QIJiSSpc5DhsHwk1TVTBbyx4CmEA37RtLEZ3jGfESW1jg7BBLBYqhu2zgTx32mmZ8lwkpibmZ7YVHq4Pu20Dg\\u003d\\u003d\"}"
+  },
+  "canonical": {
+    "announce_v2": "18:noslop-announce-v260:MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=62:ovoezojfnst43rfm7xdm73w2qsibpznz7fiu5gizdplh4cynij3c2tad.onion13:1763700000000",
+    "announce_v2_sig": "i8wc1L9Iaohz7L7pI1aS7kUc0qDbqyBymzeMvyvbUogSkCypkLCUWhQEBzj5qrd1fKkwHPlSlRVme+bWiVhGDw==",
+    "handshake_v2": "12:noslop-hs-v260:MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=14:Alice.abc1234562:ovoezojfnst43rfm7xdm73w2qsibpznz7fiu5gizdplh4cynij3c2tad.onion60:MCowBQYDK2VuAyEAMIITYSrbYnu9xqiLoKzVHtd+zM1AjEuMN2y9BXwgswE=9:TARGETKEY8:nonce12313:17637000000000:6:bio 😀",
+    "handshake_v2_sig": "uhdtMUEyEzu7f5dSfiiR9ClhclnW3HQoF3rXP+vw5sHfpOc+FHfBwCPVA+vLLPkEzLPMrYYI0ucHJ0/TBnjJDg==",
+    "media_req": "19:noslop-media-req-v160:MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=9:TARGETKEY7:media_11:06:2621441:06:26214413:1763700000000",
+    "media_req_sig": "+jgBbkI8wXKYVmnBDajVTpeds9X+RVYMl8ywmVVYT5xtrfJBQPEKugRSZhlQQnuT1a4eJYMf+ojCVjEuGMCnBw==",
+    "discoverable": "MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=:Creator.abc:ovoezojfnst43rfm7xdm73w2qsibpznz7fiu5gizdplh4cynij3c2tad.onion:MCowBQYDK2VuAyEAMIITYSrbYnu9xqiLoKzVHtd+zM1AjEuMN2y9BXwgswE=:true:https://x.y/z::my bio:1763700000000",
+    "discoverable_sig": "foBZyJ/UPCe2/DuYJFQkmPt3KJXKNRW8BTbt41fAQoOCNbuL7XIK1DQVx24UgnIFm5xT1BdQ0x+wL57SIifdAQ=="
+  },
+  "dm_v2": {
+    "sender_enc_priv_b64": "MFECAQEwBQYDK2VuBCIEIP/8+fbz8O3q5+Th3tvY1dLPzMnGw8C9ure0sa6rqKWigSEAMIITYSrbYnu9xqiLoKzVHtd+zM1AjEuMN2y9BXwgswE=",
+    "recipient_enc_pub_b64": "MCowBQYDK2VuAyEAI5Qbl+hOXynotu1xihNJB5nfzXiIbM6TW/rezv3nHFs=",
+    "recipient_enc_priv_b64": "MFECAQEwBQYDK2VuBCIEIAEMFyItOENOWWRveoWQm6axvMfS3ejz/gkUHyo1QEtWgSEAI5Qbl+hOXynotu1xihNJB5nfzXiIbM6TW/rezv3nHFs=",
+    "sender_enc_pub_b64": "MCowBQYDK2VuAyEAMIITYSrbYnu9xqiLoKzVHtd+zM1AjEuMN2y9BXwgswE=",
+    "sender_ed": "MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=",
+    "recipient_ed": "admin_MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=",
+    "msg_id": "msg-1",
+    "timestamp": 1763700000000,
+    "aad": "12:noslop-dm-v260:MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=66:admin_MCowBQYDK2VwAyEAdVxMuSVsp83ErP3Gz+7ahJAX5bn5UU6ZGRvWfgsNQnY=5:msg-10:13:1763700000000",
+    "key_hex": "f8a3e7bff48cdec9229238d2ce9274c3414861c81ed912f52109fb3ee4ddc5e4",
+    "iv_b64": "ZGVmZ2hpamtsbW5v",
+    "plaintext": "{\"content\":\"hi 😀\"}",
+    "ciphertext_b64": "I3r7JHCYJDYjDl9tUzxMPk3JNNGEdaAVqNY/k8XKEqF8/sazsQ=="
+  }
+}

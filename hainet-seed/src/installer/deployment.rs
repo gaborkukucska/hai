@@ -702,6 +702,28 @@ echo 'HiddenServicePort 9999 127.0.0.1:9999' >> /etc/tor/torrc
             let _ = std::fs::remove_file(tmp_script);
         }
 
+        // NoSlop Home HUB: hainet-core publishes the creator identity's onion through Tor's control
+        // interface (ADD_ONION, held only while the Hub runs). The service user joins Tor's group to
+        // read the control cookie and use the control socket; where the distribution's Tor defaults
+        // provide no control interface, a cookie-authenticated loopback ControlPort is added.
+        let svc_user = std::env::var("SUDO_USER").or_else(|_| std::env::var("USER")).unwrap_or_default();
+        if svc_user.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.') {
+            let control_script = format!(
+                "
+TOR_GROUP=$(getent group debian-tor >/dev/null 2>&1 && echo debian-tor || echo tor)
+grep -q '^ControlPort' /etc/tor/torrc || echo 'ControlPort 127.0.0.1:9051' >> /etc/tor/torrc
+grep -q '^CookieAuthentication' /etc/tor/torrc || echo 'CookieAuthentication 1' >> /etc/tor/torrc
+grep -q '^CookieAuthFileGroupReadable' /etc/tor/torrc || echo 'CookieAuthFileGroupReadable 1' >> /etc/tor/torrc
+if [ -n '{user}' ] && [ '{user}' != 'root' ] && getent group \"$TOR_GROUP\" >/dev/null 2>&1; then usermod -aG \"$TOR_GROUP\" '{user}'; fi
+",
+                user = svc_user
+            );
+            let tmp_script = "/tmp/hainet_tor_control.sh";
+            std::fs::write(tmp_script, control_script)?;
+            let _ = Command::new("sudo").args(&["bash", tmp_script]).status();
+            let _ = std::fs::remove_file(tmp_script);
+        }
+
         let _ = Command::new("sudo").args(&["systemctl", "restart", "tor"]).status();
 
         Ok(())

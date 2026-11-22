@@ -9,6 +9,7 @@ members = [
     "hainet-portal",
     "hainet-bridge",
     "hainet-social",
+    "hainet-noslop",
     "hainet-collab",
     "mcp-servers/hainet-web",
     "mcp-servers/hainet-files",

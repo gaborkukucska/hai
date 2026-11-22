@@ -278,6 +278,9 @@ pub async fn handle_invoke(
         },
 
         "get_node_info" => {
+            if let Some(me) = app_state.noslop.personal().await {
+                return Ok(serde_json::json!({ "public_key": me.public_key_b64, "onion_address": me.onion }));
+            }
             let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
             let pub_key = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
             let mut onion = std::fs::read_to_string("/var/lib/hainet/onion.txt")
@@ -404,6 +407,23 @@ pub async fn handle_invoke(
         // Returns the list of mesh peers known to the gossip engine.
         // In Phase 4, this will be populated by actual P2P connections.
         "get_mesh_peers" => {
+            // The NoSlop Hub's contact list carries which identity each contact knows and the
+            // followers the Hub accepted while the phone was away; the older table is the fallback.
+            if let Ok(contacts) = app_state.noslop.store.contacts_all().await {
+                if !contacts.is_empty() {
+                    let peers: Vec<Value> = contacts.iter().map(|c| json!({
+                        "public_key": c.public_key,
+                        "is_trusted": c.is_trusted,
+                        "handle": c.handle,
+                        "onion_address": c.onion_address,
+                        "enc_public_key": c.enc_public_key,
+                        "identity": c.identity,
+                        "relationship": c.relationship,
+                        "is_temporary": c.is_temporary,
+                    })).collect();
+                    return Ok(json!({ "peers": peers, "total": peers.len() }));
+                }
+            }
             debug!("Fetching mesh peers from SQLite");
             // Exclude the hub's own node_id from the peer list to prevent the
             // mobile app from adding itself as a contact on sync-pull.
@@ -557,6 +577,12 @@ pub async fn handle_invoke(
                 } else {
                     let _ = sqlx::query("DELETE FROM mesh_peers").execute(&app_state.social_db.pool).await;
                 }
+                // Older clients: their contacts as personal contacts of the Hub node.
+                if let Ok(jargs) = hainet_noslop::json::parse(&args.to_string()) {
+                    if let Err(e) = hainet_noslop::hub::api::contacts_push(&app_state.noslop, &jargs).await {
+                        tracing::warn!("sync_push_peers: could not update the Hub contact list: {}", e);
+                    }
+                }
                 Ok(json!({"status": "ok", "peers_processed": peers.len()}))
             } else {
                 Err("Missing 'peers' array".to_string())
@@ -644,205 +670,14 @@ pub async fn handle_invoke(
             Ok(json!({"status": "ok", "id": id, "timestamp": timestamp}))
         },
 
-        "sync_push_packets" => {
-            debug!("Mobile pushing packets to Hub Firewall");
-            if let Some(packets) = args.get("packets").and_then(|p| p.as_array()) {
-                let engine = app_state.gossip_engine.read().await;
-                
-                // Trust our own mobile node ID so the firewall doesn't drop our outbound broadcasts!
-                let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-                let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                engine.trust_peer(my_node_id.clone()).await;
+        // "sync_push_packets" / "sync_pull_packets" and every "hub_*" / "creator_*" command are handled
+        // by the NoSlop Home HUB node (hainet_noslop::hub::api) before this router is reached.
 
-                for packet_json in packets {
-                    // Extract POST directly to bypass strict parsing failures
-                    if let Some(ptype) = packet_json.get("type").and_then(|v| v.as_str()) {
-                        if ptype == "POST" {
-                            if let Some(payload) = packet_json.get("payload") {
-                                let id = payload.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-                                let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or_default();
-                                let timestamp = payload.get("timestamp").and_then(|v| v.as_u64()).map(|t| t.to_string()).unwrap_or_else(|| payload.get("timestamp").and_then(|v| v.as_str()).unwrap_or_default().to_string());
-                                let author = payload.get("author_name").and_then(|v| v.as_str()).unwrap_or("Unknown");
-                                let media_id = payload.get("media_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-                                let media_type = payload.get("media_metadata").and_then(|m| m.get("type")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                                
-                                if !id.is_empty() {
-                                    let _ = sqlx::query("INSERT OR REPLACE INTO posts (id, author, content, timestamp, media_id, media_type) VALUES (?, ?, ?, ?, ?, ?)")
-                                        .bind(id).bind(author).bind(content).bind(timestamp).bind(media_id).bind(media_type)
-                                        .execute(&app_state.social_db.pool).await;
-                                }
-                            }
-                        } else if ptype == "MESSAGE" {
-                            let target_id = packet_json.get("target_user_id").or_else(|| packet_json.get("targetUserId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
-                            let sender_id = packet_json.get("sender_id").or_else(|| packet_json.get("senderId")).and_then(|v| v.as_str()).unwrap_or_default().replace("\n", "").replace("\r", "");
-                            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-                            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                            
-                            let admin_id = format!("admin_{}", my_node_id);
-                            tracing::warn!("API_ROUTER MESSAGE CHECK: sender=[{}], target=[{}], my_node=[{}], admin=[{}]", sender_id, target_id, my_node_id, admin_id);
-                            if target_id == admin_id && sender_id == my_node_id {
-                                let state_clone = app_state.clone();
-                                let pjson_clone = packet_json.clone();
-                                tokio::spawn(async move {
-                                    crate::handle_incoming_dm(state_clone, pjson_clone).await;
-                                });
-                            }
-                        }
-                    }
-
-                    // Attempt strict routing for the engine (deduplication, firewall, etc)
-                    if let Ok(packet) = serde_json::from_value::<hainet_social::packets::NetworkPacket>(packet_json.clone()) {
-                        let _ = engine.process_incoming(&packet).await;
-                    }
-
-                    // Fallback/Guaranteed Tor Routing based on raw JSON properties
-                    // This bypasses strict parsing failures (like camelCase targetUserId vs snake_case target_user_id)
-                    let mut packet_json_mut = packet_json.clone();
-                    if let Some(obj) = packet_json_mut.as_object_mut() {
-                        let current_hops = obj.get("hops").and_then(|v| v.as_u64()).unwrap_or(0);
-                        if current_hops < 3 {
-                            obj.insert("hops".to_string(), serde_json::json!(3));
-                        }
-                    }
-                    let packet_str = packet_json_mut.to_string();
-                    let target_id = packet_json.get("target_user_id")
-                        .or_else(|| packet_json.get("targetUserId"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                        
-                    let sender_id = packet_json.get("sender_id")
-                        .or_else(|| packet_json.get("senderId"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-
-                    let db = app_state.social_db.clone();
-                    
-                    tokio::spawn(async move {
-                        let mut my_onion = std::fs::read_to_string("/var/lib/hainet/onion.txt").unwrap_or_default().trim().to_string();
-                        if my_onion.is_empty() {
-                            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-                            let pk = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-                            if let Some(derived) = derive_onion_address(&pk) {
-                                my_onion = derived;
-                            }
-                        }
-                        
-                        if !target_id.is_empty() {
-                            // Directed packet: Send only to target
-                            let mut sent = false;
-                            let mut target_onion = String::new();
-                            if let Ok(row) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE public_key = ?")
-                                .bind(&target_id)
-                                .fetch_one(&db.pool).await 
-                            {
-                                use sqlx::Row;
-                                if let Ok(onion) = row.try_get::<String, _>("onion_address") {
-                                    if !onion.is_empty() && onion != my_onion {
-                                        target_onion = onion.clone();
-                                        sent = send_packet_over_tor(&onion, &packet_str).await;
-                                    } else if onion == my_onion {
-                                        sent = true; // Skip sending to ourselves, pretend it succeeded
-                                    }
-                                }
-                            }
-                            
-                            // If direct send failed (e.g. peer is offline or onion descriptor is still publishing),
-                            // spawn a background retry task to try again every minute for 12 minutes.
-                            // This is critical for delivering handshakes to Hub-less mobile users.
-                            if !sent && !target_onion.is_empty() {
-                                let onion_clone = target_onion.clone();
-                                let packet_str_clone = packet_str.clone();
-                                let target_id_clone = target_id.clone();
-                                tokio::spawn(async move {
-                                    tracing::warn!("Hub: Direct send to {} failed. Spooling background retries for 12m.", target_id_clone);
-                                    for i in 1..=12 {
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-                                        tracing::info!("Hub: Background retry {}/12 for {}", i, onion_clone);
-                                        if send_packet_over_tor(&onion_clone, &packet_str_clone).await {
-                                            tracing::info!("Hub: Background retry {} succeeded for {}", i, onion_clone);
-                                            break;
-                                        }
-                                    }
-                                });
-                            }
-                            
-                            // If direct send failed (e.g. peer is offline or onion changed),
-                            // fallback to gossip relaying across all trusted peers.
-                            if !sent && target_onion.is_empty() {
-                                tracing::warn!("Hub: Direct send to {} failed. Falling back to gossip relay.", target_id);
-                                if let Ok(mut packet_obj) = serde_json::from_str::<serde_json::Value>(&packet_str) {
-                                    if let Some(obj) = packet_obj.as_object_mut() {
-                                        obj.insert("id".to_string(), serde_json::json!(uuid::Uuid::new_v4().to_string()));
-                                        obj.insert("hops".to_string(), serde_json::json!(6));
-                                    }
-                                    let fallback_str = serde_json::to_string(&packet_obj).unwrap_or_else(|_| packet_str.clone());
-                                    if let Ok(rows) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE is_trusted = 1 AND public_key != ? AND public_key != ?")
-                                        .bind(&target_id)
-                                        .bind(&sender_id)
-                                        .fetch_all(&db.pool).await 
-                                    {
-                                        for row in rows {
-                                            use sqlx::Row;
-                                            if let Ok(onion) = row.try_get::<String, _>("onion_address") {
-                                                if !onion.is_empty() && onion != my_onion {
-                                                    let payload = fallback_str.clone();
-                                                    tokio::spawn(async move {
-                                                        send_packet_over_tor(&onion, &payload).await;
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // Broadcast packet: Send to ALL trusted peers
-                            if let Ok(rows) = sqlx::query("SELECT onion_address FROM mesh_peers WHERE is_trusted = 1")
-                                .fetch_all(&db.pool).await 
-                            {
-                                for row in rows {
-                                    use sqlx::Row;
-                                    if let Ok(onion) = row.try_get::<String, _>("onion_address") {
-                                        if !onion.is_empty() && onion != my_onion {
-                                            let payload = packet_str.clone();
-                                            tokio::spawn(async move {
-                                                send_packet_over_tor(&onion, &payload).await;
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-                Ok(json!({"status": "ok", "packets_processed": packets.len()}))
-            } else {
-                Err("Missing 'packets' array".to_string())
-            }
-        },
-        "sync_pull_packets" => {
-            // Filter out packets that originated from the hub's own node_id
-            // (i.e. the mobile user's public key). These are looped-back
-            // handshakes/connection-requests that cause infinite notification loops.
-            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-            let mut buffer = app_state.incoming_mesh_packets.write().await;
-            let packets: Vec<_> = buffer.iter().filter(|p| {
-                // Keep packets NOT sent by ourselves
-                let sender = p.get("sender_id").or_else(|| p.get("senderId"))
-                    .and_then(|v| v.as_str()).unwrap_or_default()
-                    .replace("\n", "").replace("\r", "");
-                if sender == my_node_id {
-                    tracing::debug!("sync_pull_packets: Filtering out self-originated packet");
-                    false
-                } else {
-                    true
-                }
-            }).cloned().collect();
-            buffer.clear();
-            Ok(json!({"status": "ok", "packets": packets}))
+        // The phone's recent posts for the Web UI feed: stored here, sent to nobody.
+        "hub_feed_push" => {
+            let posts = args.get("posts").and_then(|p| p.as_array()).cloned().unwrap_or_default();
+            let n = store_portal_posts(&app_state, posts.iter()).await;
+            Ok(json!({"status": "ok", "posts_stored": n}))
         },
 
         // Fallback for unimplemented endpoints
@@ -853,41 +688,21 @@ pub async fn handle_invoke(
     }
 }
 
-async fn send_packet_over_tor(onion: &str, packet_str: &str) -> bool {
-    use tokio::io::AsyncWriteExt;
-    let target = format!("{}:9999", onion);
-    let mut success = false;
-    for attempt in 1..=3 {
-        let connect_future = tokio_socks::tcp::Socks5Stream::connect("127.0.0.1:9050", target.as_str());
-        match tokio::time::timeout(tokio::time::Duration::from_secs(60), connect_future).await {
-            Ok(Ok(mut stream)) => {
-                if stream.write_all(format!("{}\n", packet_str).as_bytes()).await.is_ok() {
-                    tracing::info!("Successfully routed packet to {} on attempt {}", target, attempt);
-                    success = true;
-                    break;
-                } else {
-                    tracing::warn!("Failed to write packet to {} on attempt {}", target, attempt);
-                }
-            }
-            Ok(Err(e)) => {
-                let err_msg = e.to_string();
-                tracing::warn!("Failed to connect to {} via Tor on attempt {}: {}", target, attempt, err_msg);
-                if err_msg.contains("Host unreachable") || err_msg.contains("TTL expired") || err_msg.contains("general SOCKS server failure") {
-                    tracing::warn!("Tor explicitly rejected routing to {} (likely descriptor not published yet).", target);
-                    // Do NOT fast-fail break here. Onion descriptors can take several minutes to publish,
-                    // so we should wait and allow the retry loop to continue.
-                }
-            }
-            Err(_) => {
-                tracing::warn!("Timeout connecting to {} via Tor on attempt {}", target, attempt);
-            }
-        }
-        if attempt < 3 {
-            tokio::time::sleep(tokio::time::Duration::from_secs(5 * attempt as u64)).await;
-        }
+/// Stores `PostPayload`s in the Web UI's `posts` table (what the older `sync_push_packets` did with
+/// every POST it saw). Returns how many were stored.
+pub async fn store_portal_posts<'a, I: Iterator<Item = &'a Value>>(app_state: &AppState, posts: I) -> usize {
+    let mut n = 0;
+    for payload in posts {
+        let id = payload.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        if id.is_empty() { continue; }
+        let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+        let timestamp = payload.get("timestamp").and_then(|v| v.as_u64()).map(|t| t.to_string()).unwrap_or_else(|| payload.get("timestamp").and_then(|v| v.as_str()).unwrap_or_default().to_string());
+        let author = payload.get("author_name").and_then(|v| v.as_str()).unwrap_or("Unknown");
+        let media_id = payload.get("media_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let media_type = payload.get("media_metadata").and_then(|m| m.get("type")).and_then(|v| v.as_str()).map(|s| s.to_string());
+        if sqlx::query("INSERT OR REPLACE INTO posts (id, author, content, timestamp, media_id, media_type) VALUES (?, ?, ?, ?, ?, ?)")
+            .bind(id).bind(author).bind(content).bind(timestamp).bind(media_id).bind(media_type)
+            .execute(&app_state.social_db.pool).await.is_ok() { n += 1; }
     }
-    if !success {
-        tracing::error!("Failed to route packet to {} after 3 attempts.", target);
-    }
-    success
+    n
 }

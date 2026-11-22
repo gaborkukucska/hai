@@ -85,6 +85,14 @@ path = "../hainet-collab"
 [dependencies.hainet-social]
 path = "../hainet-social"
 
+# NoSlop Home HUB: the NoSlop 0.8 mesh protocol, creator hosting and the owner API
+[dependencies.hainet-noslop]
+path = "../hainet-noslop"
+features = ["hub"]
+
+[dependencies.sha2]
+version = "0.10"
+
 # Static file serving (portal consolidation — serve UI from core port)
 [dependencies.rust-embed]
 version = "8.0"

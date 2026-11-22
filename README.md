@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen">
-  <img alt="Version" src="https://img.shields.io/badge/Version-0.57--alpha-blue">
+  <img alt="Version" src="https://img.shields.io/badge/Version-0.58--alpha-blue">
   <img alt="Phase" src="https://img.shields.io/badge/Phase-Integration_Active-orange">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple">
 </p>
@@ -47,6 +47,8 @@ Instead of connecting to distant corporate servers, your devices form a **local 
 
 **The recommended way to deploy a single-device HAI-Net system is via the [NoSlop Android app](https://github.com/gaborkukucska/NoSlop).**
 NoSlop includes a built-in, zero-terminal SSH deployer that automatically scans your local network, securely clones your cryptographic identity to the Hub, and sets up the node seamlessly. *(Multi-device mesh deployments are not yet supported via the mobile app and require manual setup).*
+
+For **creators**, the Hub takes over the creator identity's onion: it accepts followers, serves your public posts and media, and announces you to the mesh while your phone is off. Every packet it handles is signature-checked, and only you can control it: your phone signs every request with your key, and the Web UI needs its own login per browser. Details: **[docs/NOSLOP_HUB.md](docs/NOSLOP_HUB.md)**. The NoSlop app needs a Hub build (`NOSLOP_ENABLE_HUB=true`) for this.
 
 ---
 
@@ -232,6 +234,7 @@ HAI-Net is built in **Rust 🦀** for performance, safety, and single-binary dep
 hainet/
 ├── hainet-core/          # Networking (libp2p/mDNS/Tor), storage (CAS+CRDT), multimodal AI
 ├── hainet-persona/       # Agentic system — PM/Worker state machines (TrippleEffect patterns)
+├── hainet-noslop/        # NoSlop 0.8 protocol + Home HUB node (creator hosting, owner API)
 ├── hainet-social/        # Decentralised social mesh (ported from gChat v1.5)
 │   ├── gossip            # Daisy-chain public feed propagation
 │   ├── messaging         # E2EE direct messages and group chats
@@ -280,6 +283,7 @@ hainet/
 - **[Architecture & Tech Stack](docs/ARCHITECTURE.md)** — How HAI-Net is built under the hood
 - **[Installation & Quick Start](docs/INSTALLATION_GUIDE.md)** — Deploy your first local hub
 - **[Integration Plan](docs/INTEGRATION_PLAN.md)** — Grand integration roadmap (TrippleEffect, gChat, NoSlop, PPLPWR)
+- **[NoSlop Home HUB](docs/NOSLOP_HUB.md)** — How the Hub serves the NoSlop app: verified mesh, creator hosting, the owner API, deployment and settings
 - **[Contributing Guide](docs/CONTRIBUTING_GUIDE.md)** — Workflows and code standards
 - **[Security & License](docs/SECURITY_AND_LICENSE.md)** — Privacy model, mesh security, vulnerability reporting
 
@@ -298,13 +302,14 @@ hainet/
 
 ## 🚀 Current Status
 
-**Version 0.57-alpha — Integration Active**
+**Version 0.58-alpha — Integration Active**
 
 | Component | Status |
 |---|---|
 | hainet-core (networking, multimodal, storage) | ✅ Stable |
 | hainet-persona (TrippleEffect agentic core) | ✅ Phase 1 Complete |
 | hainet-social (gChat gossip mesh, E2EE, media relay) | ✅ Ported to Rust (SQLite synced w/ NoSlop) |
+| hainet-noslop (NoSlop 0.8 Home HUB: verified mesh, creator hosting, owner-signed API) | ✅ Built, tested (unit, vectors, end to end); device test pending |
 | hainet-chain (blockchain, identity, governance) | ✅ Functional |
 | hainet-collab (compute sharing, PPLPWR integration) | 🔄 Phase 2 Active |
 | hainet-seed (smart installer, mobile-assisted mesh deployment) | ✅ Operational |
@@ -313,7 +318,7 @@ hainet/
 | Email (federated, encrypted node-to-node) | 📋 Roadmap |
 | TropoMesh Phase Zero (community initiative) | 🌱 Proposal — Recruiting |
 
-**Latest milestone:** TrippleEffect agentic core fully ported to Rust with strict PM/Worker state machine delegation, semantic tool aliasing, loop detection, model failover, and a live dependency-aware Task Tree UI in the Unified Portal.
+**Latest milestone:** the Hub is a NoSlop 0.8 node again: every mesh packet signature-checked, a durable inbox for the phone, the creator identity hosted (followers, posts, media, discovery) while the phone is away, and an owner-signed control API ([docs/NOSLOP_HUB.md](docs/NOSLOP_HUB.md)). Before that: TrippleEffect agentic core fully ported to Rust with strict PM/Worker state machine delegation, semantic tool aliasing, loop detection, model failover, and a live dependency-aware Task Tree UI in the Unified Portal.
 
 ---
 
