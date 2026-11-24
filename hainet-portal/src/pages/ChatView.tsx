@@ -4,6 +4,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '../lib/tauri';
+import { useSearchParams } from 'react-router-dom';
+import { useDmNotifications } from '../lib/dmNotifications';
 
 interface DynamicComponent {
   type: string;
@@ -75,6 +77,22 @@ export default function ChatView() {
   const [selectedPeerId, setSelectedPeerId] = useState<string>('AdminAI');
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // NOSLOP_HUB_DM_VIEW_V1: unread badges, and the conversation a notification was clicked for (?peer=)
+  const { unread, setActivePeer, notificationSupport, requestPermission } = useDmNotifications();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const p = searchParams.get('peer');
+    if (p) {
+      setSelectedPeerId(p);
+      searchParams.delete('peer');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+  useEffect(() => {
+    setActivePeer(selectedPeerId !== 'AdminAI' ? selectedPeerId : null);
+    return () => setActivePeer(null);
+  }, [selectedPeerId, setActivePeer]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -282,7 +300,14 @@ export default function ChatView() {
                 onClick={() => setSelectedPeerId(p.public_key)}
                 className={`p-3 rounded-md cursor-pointer border-l-2 transition-colors ${selectedPeerId === p.public_key ? 'bg-theme-bg-tertiary/50 border-theme-accent-primary' : 'hover:bg-theme-bg-tertiary/30 border-transparent hover:border-theme-border'}`}
               >
-                <h3 className="text-sm font-semibold">{p.handle || "Unknown Peer"}</h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold">{p.handle || "Unknown Peer"}</h3>
+                  {(unread[p.public_key] || 0) > 0 && selectedPeerId !== p.public_key && (
+                    <span className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-theme-accent-primary text-white text-[10px] font-bold text-center">
+                      {unread[p.public_key] > 99 ? '99+' : unread[p.public_key]}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-theme-text-muted truncate mt-1">
                   {lastDm.slice(0, 50) + (lastDm.length > 50 ? '...' : '')}
                 </p>
@@ -297,6 +322,15 @@ export default function ChatView() {
         <div className="p-4 border-b border-theme-border flex items-center justify-between bg-theme-bg-secondary">
           <h2 className="text-lg font-semibold">{currentPeerName}</h2>
           <div className="flex items-center gap-2">
+            {notificationSupport === 'default' && (
+              <button
+                onClick={() => { requestPermission(); }}
+                className="text-xs px-2 py-1 bg-theme-bg-tertiary rounded hover:bg-theme-border transition-colors"
+                title="Show a desktop notification when a DM reaches your Hub"
+              >
+                Enable desktop notifications
+              </button>
+            )}
             {!isPeerChat && (
               <button
                 onClick={handleClear}

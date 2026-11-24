@@ -5,7 +5,21 @@
 [meta]
 last_updated = "2026-11-22T21:00:00.000000+08:00"
 project_name = "HAI-Net"
-version = "0.58"
+version = "0.59"
+
+[[completed_cycles]]
+id = "NoSlop-Hub-DM-View"
+date = "2026-11-24"
+phase = "NoSlop Hub Integration"
+session = "SESSION_61: the Hub opens the owner's DMs for the Web UI; unread badges and desktop notifications"
+changes = [
+    "hainet-noslop hub::dms: incoming DMs to either identity and the phone's outgoing DMs (hub_send) opened with the Hub's keys (DM v2), written to the Web UI's dms table through a hook; packets still reach the phone unchanged",
+    "nh_dm_events (store schema v2) and hub_dm_events: incoming DMs that reached the Hub, for notifications",
+    "Portal: unread counts (menu, conversations, tab title), desktop notifications behind the existing setting, click opens the conversation",
+    "Removed hai.patch, committed by mistake with Session 60",
+]
+status = "success"
+next_session = "Device test of the Web UI DM view; then NoSlop discovery cache and community mirroring"
 
 [[completed_cycles]]
 id = "NoSlop-Hub-Creator-Hosting"

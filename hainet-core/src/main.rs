@@ -303,6 +303,21 @@ async fn main() -> Result<()> {
         let st = hook_state.clone();
         Box::pin(async move { handle_incoming_dm(st, pkt).await })
     })).await;
+    // NOSLOP_HUB_DM_VIEW_V1: the owner's DMs the Hub can open go straight to the Web UI's chat (`dms`, the
+    // table `sync_push_dms` also fills from the phone; same message ids, so the two never duplicate).
+    let dm_pool = app_state.social_db.pool.clone();
+    noslop.set_dm_hook(Arc::new(move |rec: hainet_noslop::hub::dms::DmRecord| {
+        let pool = dm_pool.clone();
+        Box::pin(async move {
+            if let Err(e) = sqlx::query("INSERT OR REPLACE INTO dms (id, peer, sender, content, timestamp, media_id, media_type) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                .bind(&rec.id).bind(&rec.peer).bind(&rec.sender).bind(&rec.content).bind(rec.timestamp)
+                .bind(rec.media_id.as_deref()).bind(rec.media_type.as_deref())
+                .execute(&pool).await
+            {
+                warn!("NOSLOP_HUB: could not store DM {} for the Web UI: {}", rec.id, e);
+            }
+        })
+    })).await;
     noslop.spawn_all();
     // Step 4: Start minimal TCP-based health/API endpoint
     let role_for_health = config.network.role.clone();

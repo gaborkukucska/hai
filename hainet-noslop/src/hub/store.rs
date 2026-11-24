@@ -14,11 +14,25 @@
 
 use sqlx::{sqlite::SqlitePool, Row};
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Clone)]
 pub struct Store {
     pub pool: SqlitePool,
+}
+
+/// How many DM events are kept (the Web UI only needs the recent ones).
+pub const DM_EVENTS_KEEP: i64 = 1000;
+
+/// An incoming DM that reached the Hub (NOSLOP_HUB_DM_VIEW_V1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DmEvent {
+    pub seq: i64,
+    pub dm_id: String,
+    pub peer: String,
+    pub sender: String,
+    pub preview: String,
+    pub at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +107,13 @@ impl Store {
             ] {
                 sqlx::query(stmt).execute(&mut *tx).await?;
             }
+            sqlx::query("INSERT OR REPLACE INTO nh_meta (key, value) VALUES ('schema_version', '1')").execute(&mut *tx).await?;
+            tx.commit().await?;
+        }
+        if current < 2 {
+            // NOSLOP_HUB_DM_VIEW_V1: DMs from contacts that reached the Hub, for the Web UI's notifications.
+            let mut tx = self.pool.begin().await?;
+            sqlx::query("CREATE TABLE IF NOT EXISTS nh_dm_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, dm_id TEXT NOT NULL UNIQUE, peer TEXT NOT NULL, sender TEXT NOT NULL, preview TEXT NOT NULL, at INTEGER NOT NULL)").execute(&mut *tx).await?;
             sqlx::query("INSERT OR REPLACE INTO nh_meta (key, value) VALUES ('schema_version', ?)").bind(SCHEMA_VERSION.to_string()).execute(&mut *tx).await?;
             tx.commit().await?;
         }
@@ -146,6 +167,30 @@ impl Store {
 
     pub async fn inbox_ack(&self, up_to_seq: i64) -> Result<u64, sqlx::Error> {
         Ok(sqlx::query("DELETE FROM nh_inbox WHERE seq <= ?").bind(up_to_seq).execute(&self.pool).await?.rows_affected())
+    }
+
+    // --- DM events (NOSLOP_HUB_DM_VIEW_V1) ----------------------------------------------------------
+
+    /// Records an incoming DM once (by message id); keeps the newest [`DM_EVENTS_KEEP`]. Returns false for a
+    /// DM already recorded (a re-delivery).
+    pub async fn dm_event_add(&self, dm_id: &str, peer: &str, sender: &str, preview: &str, now: i64) -> Result<bool, sqlx::Error> {
+        let added = sqlx::query("INSERT OR IGNORE INTO nh_dm_events (dm_id, peer, sender, preview, at) VALUES (?, ?, ?, ?, ?)")
+            .bind(dm_id).bind(peer).bind(sender).bind(preview).bind(now)
+            .execute(&self.pool).await?.rows_affected() > 0;
+        if added {
+            sqlx::query("DELETE FROM nh_dm_events WHERE seq <= (SELECT MAX(seq) FROM nh_dm_events) - ?").bind(DM_EVENTS_KEEP).execute(&self.pool).await?;
+        }
+        Ok(added)
+    }
+
+    /// Events after `after_seq`, oldest first, and the newest sequence number (0 when there are none).
+    pub async fn dm_events_after(&self, after_seq: i64, limit: i64) -> Result<(Vec<DmEvent>, i64), sqlx::Error> {
+        let rows = sqlx::query("SELECT seq, dm_id, peer, sender, preview, at FROM nh_dm_events WHERE seq > ? ORDER BY seq ASC LIMIT ?")
+            .bind(after_seq).bind(limit).fetch_all(&self.pool).await?;
+        let latest: Option<i64> = sqlx::query("SELECT MAX(seq) FROM nh_dm_events").fetch_one(&self.pool).await?.get(0);
+        Ok((rows.into_iter().map(|r| DmEvent {
+            seq: r.get(0), dm_id: r.get(1), peer: r.get(2), sender: r.get(3), preview: r.get(4), at: r.get(5),
+        }).collect(), latest.unwrap_or(0)))
     }
 
     pub async fn inbox_stats(&self) -> Result<(i64, i64), sqlx::Error> {

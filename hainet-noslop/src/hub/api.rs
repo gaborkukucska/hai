@@ -94,6 +94,18 @@ pub async fn handle(node: &Arc<HubNode>, cmd: &str, args: &JValue) -> Option<Res
             node.store.inbox_ack(up_to).await.map(|n| json!({"status": "ok", "deleted": n})).map_err(|e| e.to_string())
         }
         "hub_contacts_push" => contacts_push(node, args).await,
+        "hub_dm_events" => {
+            // NOSLOP_HUB_DM_VIEW_V1: DMs from contacts that reached the Hub, for the Web UI's notifications.
+            let after = args.get_i64("after").unwrap_or(0).max(0);
+            let limit = args.get_i64("limit").unwrap_or(200).clamp(1, 500);
+            match node.store.dm_events_after(after, limit).await {
+                Ok((events, latest)) => Ok(json!({
+                    "events": events.iter().map(|e| json!({"seq": e.seq, "dm_id": e.dm_id, "peer": e.peer, "sender": e.sender, "preview": e.preview, "at": e.at})).collect::<Vec<_>>(),
+                    "latest": latest,
+                })),
+                Err(e) => Err(e.to_string()),
+            }
+        }
         "creator_identity_set" => creator_identity_set(node, args).await,
         "creator_identity_remove" => creator_identity_remove(node).await,
         "creator_profile_set" => {
@@ -194,6 +206,10 @@ async fn observe_outgoing(node: &Arc<HubNode>, pkt: &Packet) -> bool {
     }
     if matches!(pkt.ptype.as_str(), "COMMENT" | "EDIT_COMMENT" | "DELETE_COMMENT" | "REACTION") {
         creator::apply_engagement(node, pkt).await;
+    }
+    if pkt.ptype == "MESSAGE" {
+        // NOSLOP_HUB_DM_VIEW_V1: the owner's own DMs show in the Web UI as soon as they leave through the Hub.
+        super::dms::observe(node, pkt, false).await;
     }
     false
 }

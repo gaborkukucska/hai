@@ -5,10 +5,13 @@ import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { MessageSquare, Rss, Layers, Cpu, Network, Settings, User } from 'lucide-react';
 import { invoke } from '../lib/tauri';
+import { useDmNotifications } from '../lib/dmNotifications';
 
 export const Sidebar: React.FC = () => {
   // Live peer count from the gossip engine
   const [peerCount, setPeerCount] = useState<number>(0);
+  // NOSLOP_HUB_DM_VIEW_V1: unread DMs that reached the Home HUB
+  const { totalUnread } = useDmNotifications();
 
   // Poll peer count every 15 seconds for the sidebar status indicator
   useEffect(() => {
@@ -59,6 +62,11 @@ export const Sidebar: React.FC = () => {
               >
                 <item.icon size={18} className="shrink-0" />
                 <span className="text-sm">{item.name}</span>
+                {item.path === '/chat' && totalUnread > 0 && (
+                  <span className="ml-auto min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-theme-accent-primary text-white text-[10px] font-bold text-center" title={`${totalUnread} unread`}>
+                    {totalUnread > 99 ? '99+' : totalUnread}
+                  </span>
+                )}
               </NavLink>
             </li>
           ))}

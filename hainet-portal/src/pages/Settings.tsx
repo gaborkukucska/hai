@@ -2,11 +2,14 @@
 import React, { useEffect, useState } from 'react';
 import { Shield, Moon, Database, Bell, Info, Cpu, Mic, Video, MessageSquare } from 'lucide-react';
 import { invoke } from '../lib/tauri';
+import { useDmNotifications } from '../lib/dmNotifications';
 import type { Settings as SettingsType, ModelPreference, ModelFamily } from '../types';
 import { MODEL_FAMILIES } from '../types';
 
 export default function Settings() {
   const [settings, setSettings] = useState<SettingsType | null>(null);
+  // NOSLOP_HUB_DM_VIEW_V1: desktop notifications for DMs that reach the Home HUB need the browser's permission
+  const { notificationSupport, requestPermission } = useDmNotifications();
   const [modelPreferences, setModelPreferences] = useState<ModelPreference[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -365,8 +368,20 @@ export default function Settings() {
           label="Enable Notifications"
           description="Show desktop notifications for important events"
           checked={settings.enable_notifications}
-          onChange={(value) => updateSetting('enable_notifications', value)}
+          onChange={(value) => {
+            updateSetting('enable_notifications', value);
+            if (value && notificationSupport === 'default') requestPermission();
+          }}
         />
+        {settings.enable_notifications && notificationSupport !== 'granted' && (
+          <p className="text-xs text-theme-text-muted px-1">
+            {notificationSupport === 'unsupported'
+              ? 'This browser cannot show desktop notifications on this address (they need http://localhost or the Hub\'s .onion in Tor Browser). Unread counts still show in the menu.'
+              : notificationSupport === 'denied'
+                ? 'Desktop notifications are blocked for this site in your browser settings. Unread counts still show in the menu.'
+                : (<button onClick={() => { requestPermission(); }} className="underline">Allow desktop notifications in this browser</button>)}
+          </p>
+        )}
         <SettingToggle
           label="Enable Sound"
           description="Play sounds for notifications and alerts"

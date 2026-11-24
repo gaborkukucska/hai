@@ -462,3 +462,133 @@ async fn backups_keep_a_sha256_sidecar_and_prune_with_it() {
     assert_eq!(sidecars, keep, "the pruned backup's sidecar is removed too");
     assert!(!dir.join(format!("noslop_backup_{}.sha256", NOW - 1000 - (keep as i64 - 1))).exists());
 }
+
+// --- NOSLOP_HUB_DM_VIEW_V1 ------------------------------------------------------------------------------
+
+fn dm_packet(from: &Identity, to: &Identity, id: &str, body: &str, group: Option<&str>, ts: i64) -> Packet {
+    let (ct, iv) = crate::dm::encrypt_v2(body, &to.enc_public_key_b64, &from.x25519_secret(), &from.public_key_b64, &to.public_key_b64, id, group, ts, crate::dm::DM_AAD_MESSAGE).unwrap();
+    let payload = JValue::obj().with("id", JValue::str(id)).with("nonce", JValue::str(iv)).with("ciphertext", JValue::str(ct))
+        .with_opt("group_id", group.map(JValue::str)).with("timestamp", JValue::int(ts)).with("v", JValue::int(2));
+    Packet::new("MESSAGE", &from.public_key_b64, Some(&to.public_key_b64), payload, 1)
+}
+
+async fn add_contact(r: &Rig, who: &Identity, identity: &str) {
+    let c = store::Contact {
+        public_key: who.public_key_b64.clone(), identity: identity.into(), relationship: "ACCEPTED".into(), is_trusted: true,
+        is_temporary: false, handle: "Gabby".into(), onion_address: who.onion.clone(), enc_public_key: who.enc_public_key_b64.clone(),
+        source: "phone".into(), declined_nonce: String::new(),
+    };
+    r.node.store.contact_upsert(&c, NOW).await.unwrap();
+}
+
+fn capture_dms(r: &Rig) -> Arc<StdMutex<Vec<dms::DmRecord>>> {
+    let got = Arc::new(StdMutex::new(Vec::new()));
+    let g = got.clone();
+    let node = r.node.clone();
+    futures_lite_block(async move {
+        node.set_dm_hook(Arc::new(move |rec| { g.lock().unwrap().push(rec); Box::pin(async {}) })).await;
+    });
+    got
+}
+
+/// Runs a short future to completion inside the current runtime (test helper).
+fn futures_lite_block<F: std::future::Future<Output = ()> + Send + 'static>(f: F) {
+    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(f));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dms_to_either_identity_are_opened_for_the_web_ui_and_still_reach_the_phone() {
+    let r = rig(true).await;
+    let got = capture_dms(&r);
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    // To the creator identity (Gabby follows the creator), with a media attachment.
+    let body = r#"{"content":"hi creator 😀","media":{"id":"m1","type":"image"}}"#;
+    let to_creator = signed(dm_packet(&gabby, &r.creator, "dm-1", body, None, NOW - 5), &gabby, NOW);
+    r.node.handle_frame(&to_creator, Listener::Creator).await;
+    // To the personal identity, plain text.
+    let to_me = signed(dm_packet(&gabby, &r.owner, "dm-2", "plain hello", None, NOW - 4), &gabby, NOW);
+    r.node.handle_frame(&to_me, Listener::Personal).await;
+    settle().await;
+    let recs = got.lock().unwrap().clone();
+    assert_eq!(recs.len(), 2, "both opened: {:?}", recs);
+    let a = recs.iter().find(|d| d.id == "dm-1").unwrap();
+    assert_eq!((a.peer.as_str(), a.sender.as_str(), a.content.as_str()), (gabby.public_key_b64.as_str(), gabby.public_key_b64.as_str(), "hi creator 😀"));
+    assert_eq!((a.media_id.as_deref(), a.media_type.as_deref(), a.timestamp, a.incoming), (Some("m1"), Some("image"), NOW - 5, true));
+    let b = recs.iter().find(|d| d.id == "dm-2").unwrap();
+    assert_eq!((b.content.as_str(), b.media_id.clone()), ("plain hello", None));
+    // The phone still gets both packets, unchanged.
+    let (items, _) = r.node.store.inbox_pull(0, 10, 1 << 20).await.unwrap();
+    assert!(items.iter().any(|i| i.packet == to_creator) && items.iter().any(|i| i.packet == to_me));
+    // Two notification events, in arrival order; a re-delivery adds none.
+    r.node.store.dm_event_add("dm-1", &gabby.public_key_b64, &gabby.public_key_b64, "again", NOW).await.unwrap();
+    let res = api::handle(&r.node, "hub_dm_events", &JValue::obj().with("after", JValue::int(0))).await.unwrap().unwrap();
+    let ev = res["events"].as_array().unwrap();
+    assert_eq!(ev.len(), 2);
+    assert_eq!(ev.iter().map(|e| e["preview"].as_str().unwrap()).collect::<Vec<_>>().len(), 2);
+    assert!(ev.iter().any(|e| e["preview"] == "hi creator 😀") && ev.iter().any(|e| e["preview"] == "plain hello"));
+    assert_eq!(res["latest"], ev[1]["seq"]);
+    let none = api::handle(&r.node, "hub_dm_events", &JValue::obj().with("after", res["latest"].as_i64().map(JValue::int).unwrap())).await.unwrap().unwrap();
+    assert!(none["events"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_owners_outgoing_dms_show_without_a_notification() {
+    let r = rig(true).await;
+    let got = capture_dms(&r);
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    let out = envelope::sign(&dm_packet(&r.creator, &gabby, "dm-out", r#"{"content":"thanks!"}"#, None, NOW), &r.creator, NOW).unwrap();
+    let items = JValue::Arr(vec![JValue::obj().with("onion", JValue::str(&gabby.onion)).with("packet", out.to_value())]);
+    let res = api::handle(&r.node, "hub_send", &JValue::obj().with("items", items)).await.unwrap().unwrap();
+    assert_eq!(res["queued"], 1, "still delivered");
+    let recs = got.lock().unwrap().clone();
+    assert_eq!(recs.len(), 1);
+    assert_eq!((recs[0].peer.as_str(), recs[0].sender.as_str(), recs[0].content.as_str(), recs[0].incoming),
+        (gabby.public_key_b64.as_str(), r.creator.public_key_b64.as_str(), "thanks!", false));
+    let ev = api::handle(&r.node, "hub_dm_events", &JValue::obj()).await.unwrap().unwrap();
+    assert!(ev["events"].as_array().unwrap().is_empty(), "no notification for our own message");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn group_unknown_sender_forged_and_admin_dms_are_not_opened() {
+    let r = rig(true).await;
+    let got = capture_dms(&r);
+    let (gabby, _) = ident(7);
+    let (stranger, _) = ident(8);
+    add_contact(&r, &gabby, "personal").await;
+    // A group message: keys come from a group directory the Hub does not keep.
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.owner, "g-1", "group hi", Some("grp"), NOW), &gabby, NOW), Listener::Personal).await;
+    // From someone who is not a contact (no X25519 key on record).
+    r.node.handle_frame(&signed(dm_packet(&stranger, &r.owner, "s-1", "who am i", None, NOW), &stranger, NOW), Listener::Personal).await;
+    // Signed by Gabby, but the ciphertext is the stranger's (wrong keys): fails authentication.
+    let mut forged = dm_packet(&stranger, &r.owner, "f-1", "forged", None, NOW);
+    forged.sender_id = gabby.public_key_b64.clone();
+    r.node.handle_frame(&signed(forged, &gabby, NOW), Listener::Personal).await;
+    // The owner's conversation with the Admin AI is handled elsewhere.
+    let admin = envelope::sign(&admin_dm(&r.owner, "a-1", "status?"), &r.owner, NOW).unwrap();
+    let items = JValue::Arr(vec![JValue::obj().with("onion", JValue::str(&r.owner.onion)).with("packet", admin.to_value())]);
+    api::handle(&r.node, "hub_send", &JValue::obj().with("items", items)).await.unwrap().unwrap();
+    settle().await;
+    assert!(got.lock().unwrap().is_empty(), "{:?}", got.lock().unwrap());
+    let ev = api::handle(&r.node, "hub_dm_events", &JValue::obj()).await.unwrap().unwrap();
+    assert!(ev["events"].as_array().unwrap().is_empty());
+}
+
+fn admin_dm(owner: &Identity, id: &str, text: &str) -> Packet {
+    let admin = admin::admin_id(owner);
+    let (ct, iv) = crate::dm::encrypt_v2(text, &owner.enc_public_key_b64, &owner.x25519_secret(), &owner.public_key_b64, &admin, id, None, NOW, crate::dm::DM_AAD_MESSAGE).unwrap();
+    let payload = JValue::obj().with("id", JValue::str(id)).with("nonce", JValue::str(iv)).with("ciphertext", JValue::str(ct)).with("timestamp", JValue::int(NOW)).with("v", JValue::int(2));
+    Packet::new("MESSAGE", &owner.public_key_b64, Some(&admin), payload, 1)
+}
+
+#[tokio::test]
+async fn a_schema_v1_database_gains_the_dm_events_table() {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+    sqlx::query("CREATE TABLE nh_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO nh_meta (key, value) VALUES ('schema_version', '1')").execute(&pool).await.unwrap();
+    let st = store::Store::open(pool).await.unwrap();
+    assert_eq!(st.meta_get("schema_version").await.unwrap().as_deref(), Some("2"));
+    assert!(st.dm_event_add("x", "p", "p", "hi", NOW).await.unwrap());
+    assert!(!st.dm_event_add("x", "p", "p", "hi", NOW).await.unwrap(), "once per message id");
+}

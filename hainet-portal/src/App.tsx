@@ -10,6 +10,7 @@ import Settings from './pages/Settings';
 import UserProfile from './pages/UserProfile';
 import { LogOverlay } from './components/LogOverlay';
 import { useState, useEffect } from 'react';
+import { DmNotificationsProvider } from './lib/dmNotifications';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -45,7 +46,7 @@ function App() {
             </Routes>
           </div>
         ) : (
-          <>
+          <DmNotificationsProvider>
             <Sidebar />
             <main className="flex-1 flex flex-col overflow-hidden relative">
               <Routes>
@@ -61,7 +62,7 @@ function App() {
               </Routes>
             </main>
             <LogOverlay />
-          </>
+          </DmNotificationsProvider>
         )}
       </div>
     </Router>

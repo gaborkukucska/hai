@@ -94,6 +94,7 @@ cookie for its own browser; `POST /api/auth/logout` ends it.
 | `hub_inbox_ack` | `up_to` | `deleted` |
 | `hub_contacts_push` | `contacts: [{public_key, identity, relationship, is_trusted, is_temporary, handle, onion_address, enc_public_key, declined_nonce}]`, `full` | `contacts`, `removed` |
 | `hub_feed_push` | `posts: [PostPayload]` | `posts_stored` (Web UI feed only; nothing is sent) |
+| `hub_dm_events` | `after`, `limit` (≤ 500) | `events: [{seq, dm_id, peer, sender, preview, at}]`, `latest` (incoming DMs that reached the Hub, §9) |
 | `creator_identity_set` | `public_key`, `private_key`, `enc_public_key`, `enc_private_key`, `display_name`, `replace` | `onion_address` |
 | `creator_identity_remove` | – | removes the keys, the creator content and followers |
 | `creator_profile_set` | `display_name`, `handle`, `bio`, `avatar_b64`, `fund_me_link`, `is_creator`, `is_discoverable` | – |
@@ -132,19 +133,48 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 ## 7. Tests
 
 * `cargo test -p hainet-noslop --features hub`: 7 cross-language vector tests (Gson / Bouncy Castle),
-  20 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
+  24 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
   and chunk serving, re-signing and relays, owner signatures, Admin AI, presence, inbox ACK, backup
-  sidecar and pruning).
-* End to end against the real `hainet-core` binary with an independent Python client (28 checks):
+  sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v2).
+* End to end against the real `hainet-core` binary with an independent Python client (32 checks):
   owner auth and replay, creator hand-over, a follower's handshake answered on its own connection,
-  dropped unsigned and forged frames, Admin AI round trip, streamed backup push / pull, portal
-  sessions, header limits, onion-only dialling.
+  dropped unsigned and forged frames, a follower's DM decrypted into the Web UI chat with one
+  notification event (and still in the phone's inbox), the owner's reply shown without one, Admin AI
+  round trip, streamed backup push / pull, portal sessions, header limits, onion-only dialling.
 
 ## 8. Not done yet
 
 * iOS (`mvp/`) has no owner-API client; iOS **followers** are served like any other.
-* The Hub does not relay gossip for others while the phone is offline (it never did), and it does
-  not decrypt DMs for the personal identity (they wait in the inbox for the phone).
+* The Hub does not relay gossip for others while the phone is offline (it never did).
 * Non-creator community mirroring and the discovery-cache work of the Enhancement Plan.
-* `sync_push_dms` / `get_dms` still mirror plaintext DMs for the Web UI chat (now behind owner auth).
+* Group messages are not shown in the Web UI chat (§9). A reply typed in the Web UI is still sent by
+  the phone, from the personal identity (`send_dm` only stores it).
+
+## 9. DMs in the Web UI (`NOSLOP_HUB_DM_VIEW_V1`, 2026-11-24)
+
+Before, the Web UI chat only had the plaintext copies the phone pushed (`sync_push_dms`), so a DM showed
+there only after the phone had pulled it from the Hub's inbox, decrypted and copied it; and the phone's
+copy tried only the personal keys, so every DM with a contact who follows the owner as a creator showed
+as `...` (fixed on the phone, NoSlop `NOSLOP_HUB_DM_MIRROR_KEYS_V1`).
+
+Now the Hub opens the owner's one-to-one DMs itself (`hainet-noslop/src/hub/dms.rs`), with the keys of
+both identities it holds:
+
+* **Incoming** (a contact's `MESSAGE` that reaches either onion): opened with the addressed identity,
+  then the other one, as `DmPacketHandler.handleDirectMessage` does (DM v2: directional HKDF key and
+  AAD). The packet still goes to the phone's inbox unchanged. Each one is also recorded once (by message
+  id) in `nh_dm_events` (schema v2; the newest 1,000 kept) for notifications.
+* **Outgoing** (the phone's `MESSAGE` through `hub_send`): opened with the sending identity, shown on the
+  owner's side, no notification.
+* **Not opened:** group messages (their keys come from a group directory the Hub does not keep), the
+  Admin AI conversation (§1), DMs from or to keys that are not in the contact list, anything that fails
+  authentication, and legacy v1 DMs (unauthenticated; the phone refuses them from senders that speak v2).
+* `hainet-core` writes each opened DM to the Web UI's `dms` table (`INSERT OR REPLACE` by message id, so
+  the phone's copies of the same messages never duplicate them).
+* **Web UI** (`hainet-portal/src/lib/dmNotifications.tsx`): polls `hub_dm_events` every 5 s; unread
+  counts on the Chat menu item, on each conversation and in the tab title, kept per browser
+  (localStorage; what was on the Hub before the first visit counts as read); a desktop notification per
+  new DM when Settings → "Enable Notifications" is on and the browser allows it (secure origins only:
+  `http://localhost`, or the `.onion` in Tor Browser), a short sound when "Enable Sound" is on. Clicking a
+  notification opens that conversation.
 <!-- # END OF FILE docs/NOSLOP_HUB.md -->

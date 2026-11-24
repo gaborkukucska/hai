@@ -24,6 +24,7 @@ pub mod admin;
 pub mod api;
 pub mod content;
 mod creator;
+pub mod dms;
 pub mod store;
 pub mod tor;
 
@@ -197,6 +198,7 @@ pub struct HubNode {
     send_slots: Arc<Semaphore>,
     onion: Option<tor::CreatorOnion>,
     admin_hook: RwLock<Option<AdminHook>>,
+    pub(crate) dm_hook: RwLock<Option<dms::DmHook>>,
     clock: Clock,
 }
 
@@ -243,6 +245,7 @@ impl HubNode {
             send_fn,
             onion,
             admin_hook: RwLock::new(None),
+            dm_hook: RwLock::new(None),
             clock,
             cfg,
             store,
@@ -257,6 +260,8 @@ impl HubNode {
     pub async fn profile(&self) -> CreatorProfile { self.profile.read().await.clone() }
     pub async fn hosting(&self) -> bool { *self.hosting.read().await }
     pub async fn set_admin_hook(&self, hook: AdminHook) { *self.admin_hook.write().await = Some(hook); }
+    /// NOSLOP_HUB_DM_VIEW_V1: where the owner's DMs the Hub can open go (the Web UI's `dms` table).
+    pub async fn set_dm_hook(&self, hook: dms::DmHook) { *self.dm_hook.write().await = Some(hook); }
 
     /// Whether the creator duties run on this Hub: hosting switched on and a creator identity present.
     pub async fn creator_active(&self) -> bool { self.hosting().await && self.creator().await.is_some() }
@@ -368,6 +373,12 @@ impl HubNode {
             }
             _ => which,
         };
+        // NOSLOP_HUB_DM_VIEW_V1: a DM for one of the owner's identities is also opened for the Web UI (the
+        // packet itself still goes to the phone unchanged).
+        if pkt.ptype == "MESSAGE" {
+            let (node, p) = (self.clone(), pkt.clone());
+            tokio::spawn(async move { dms::observe(&node, &p, true).await });
+        }
         if addressed == Listener::Creator && self.creator_active().await {
             let out = creator::handle(self, &pkt).await;
             if let Some(kind) = out.inbox {

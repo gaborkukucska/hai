@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen">
-  <img alt="Version" src="https://img.shields.io/badge/Version-0.58--alpha-blue">
+  <img alt="Version" src="https://img.shields.io/badge/Version-0.59--alpha-blue">
   <img alt="Phase" src="https://img.shields.io/badge/Phase-Integration_Active-orange">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple">
 </p>
@@ -302,7 +302,7 @@ hainet/
 
 ## 🚀 Current Status
 
-**Version 0.58-alpha — Integration Active**
+**Version 0.59-alpha — Integration Active**
 
 | Component | Status |
 |---|---|
