@@ -112,6 +112,45 @@ pub async fn open(node: &Arc<HubNode>, pkt: &Packet, incoming: bool) -> Option<D
     None
 }
 
+/// NOSLOP_HUB_WEBUI_SEND_V1 — a DM typed in the Web UI, sent by the Hub itself (DM v2) from the identity the
+/// contact knows (`nh_contacts.identity`, as the phone's `IdentityRouter` reports it): a creator follower only
+/// accepts DMs from the creator identity ("Dropping DM …: no X25519 key on record"). Before, the Web UI only
+/// stored the text, and the phone re-sent it later, always from the personal identity.
+pub async fn send_from_web_ui(node: &Arc<HubNode>, peer: &str, text: &str) -> Result<DmRecord, String> {
+    if text.is_empty() { return Err("empty message".into()); }
+    if text.len() > MAX_WEB_UI_DM_BYTES { return Err("message too long".into()); }
+    let contact = node.store.contact_get(peer).await.map_err(|e| e.to_string())?
+        .ok_or("not one of your contacts")?;
+    if matches!(contact.relationship.as_str(), "BLOCKED" | "DECLINED") {
+        return Err("this contact is blocked or declined".into());
+    }
+    let me = if contact.identity == "creator" {
+        node.creator().await.ok_or("this contact knows you as the creator, and the creator identity is not on this Hub")?
+    } else {
+        node.personal().await.ok_or("no personal identity on this Hub")?
+    };
+    if contact.enc_public_key.is_empty() {
+        return Err("no encryption key for this contact yet (no accepted handshake)".into());
+    }
+    if !super::tor::is_valid_onion(&contact.onion_address) {
+        return Err("no onion address for this contact".into());
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let ts = node.now();
+    let body = json::JValue::obj().with("content", json::JValue::str(text)).render();
+    let (ct, iv) = dm::encrypt_v2(&body, &contact.enc_public_key, &me.x25519_secret(), &me.public_key_b64, peer, &id, None, ts, dm::DM_AAD_MESSAGE)
+        .map_err(|e| e.to_string())?;
+    // EncryptedPayload's members, in its order (group_id is null for a DM, so absent).
+    let payload = json::JValue::obj().with("id", json::JValue::str(&id)).with("nonce", json::JValue::str(iv))
+        .with("ciphertext", json::JValue::str(ct)).with("timestamp", json::JValue::int(ts)).with("v", json::JValue::int(2));
+    let pkt = Packet::new("MESSAGE", &me.public_key_b64, Some(peer), payload, 3);
+    node.deliver(contact.onion_address.clone(), pkt, super::Retry::Spool);
+    Ok(DmRecord { id, peer: peer.to_string(), sender: me.public_key_b64.clone(), content: text.to_string(), timestamp: ts, media_id: None, media_type: None, incoming: false })
+}
+
+/// Longest Web UI message (the phone's composer allows far less; this keeps one packet well under a frame).
+pub const MAX_WEB_UI_DM_BYTES: usize = 16 * 1024;
+
 /// The message body as the phone writes it: `{"content": ..., "media": {"id", "type", ...}}`, or plain text.
 pub fn parse_body(plain: &str) -> (String, Option<String>, Option<String>) {
     match json::parse(plain) {

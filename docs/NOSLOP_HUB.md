@@ -133,13 +133,15 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 ## 7. Tests
 
 * `cargo test -p hainet-noslop --features hub`: 7 cross-language vector tests (Gson / Bouncy Castle),
-  24 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
+  26 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
   and chunk serving, re-signing and relays, owner signatures, Admin AI, presence, inbox ACK, backup
-  sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v2).
-* End to end against the real `hainet-core` binary with an independent Python client (32 checks):
+  sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v2, Web UI DMs sent from
+  the right identity and the ones refused).
+* End to end against the real `hainet-core` binary with an independent Python client (35 checks):
   owner auth and replay, creator hand-over, a follower's handshake answered on its own connection,
   dropped unsigned and forged frames, a follower's DM decrypted into the Web UI chat with one
-  notification event (and still in the phone's inbox), the owner's reply shown without one, Admin AI
+  notification event (and still in the phone's inbox), the owner's reply shown without one, a Web UI
+  reply sent by the Hub as the creator and flagged for the phone, no null media ids, Admin AI
   round trip, streamed backup push / pull, portal sessions, header limits, onion-only dialling.
 
 ## 8. Not done yet
@@ -147,8 +149,7 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 * iOS (`mvp/`) has no owner-API client; iOS **followers** are served like any other.
 * The Hub does not relay gossip for others while the phone is offline (it never did).
 * Non-creator community mirroring and the discovery-cache work of the Enhancement Plan.
-* Group messages are not shown in the Web UI chat (§9). A reply typed in the Web UI is still sent by
-  the phone, from the personal identity (`send_dm` only stores it).
+* Group messages are not shown in the Web UI chat (§9), and the Web UI sends text only (no attachments).
 
 ## 9. DMs in the Web UI (`NOSLOP_HUB_DM_VIEW_V1`, 2026-11-24)
 
@@ -177,4 +178,15 @@ both identities it holds:
   new DM when Settings → "Enable Notifications" is on and the browser allows it (secure origins only:
   `http://localhost`, or the `.onion` in Tor Browser), a short sound when "Enable Sound" is on. Clicking a
   notification opens that conversation.
+
+**Sending from the Web UI** (`NOSLOP_HUB_WEBUI_SEND_V1`, 2026-11-24). `send_dm {peer_id, content}` used to
+store the text only; the phone sent it later, always from the personal identity, so a contact who follows
+the owner as a creator dropped it ("no X25519 key on record"). Now the Hub sends it itself
+(`hub::dms::send_from_web_ui`): DM v2 from the identity the contact knows (`nh_contacts.identity`), to the
+contact's onion, signed, with the usual retries; the reply names the `id` and `sender`. It refuses a
+non-contact, a blocked or declined contact, one without an X25519 key yet, and a creator follower when the
+creator identity is not on the Hub. The `dms` row is flagged `sent_by_hub`, so the phone keeps a copy and
+does not send it again (NoSlop ≥ the 2026-11-24 build; an older phone sends it a second time with the same
+message id, which the contact drops as a duplicate). `get_dms` / `sync_pull_dms` never return a null
+`mediaId` / `mediaType` any more (the phone read null as the text "null": a phantom attachment).
 <!-- # END OF FILE docs/NOSLOP_HUB.md -->

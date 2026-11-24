@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use tracing::{error, debug};
+use tracing::{error, debug, info};
 
 use crate::{
     AppState, MetricsState, MetricsStorageState, SettingsState,
@@ -622,8 +622,11 @@ pub async fn handle_invoke(
                     "sender": row.try_get::<String, _>("sender").unwrap_or_default(),
                     "content": row.try_get::<String, _>("content").unwrap_or_default(),
                     "timestamp": row.try_get::<i64, _>("timestamp").unwrap_or_default(),
-                    "mediaId": row.try_get::<Option<String>, _>("media_id").unwrap_or_default(),
-                    "mediaType": row.try_get::<Option<String>, _>("media_type").unwrap_or_default(),
+                    // Never null: the phone reads these with optString, which turns null into the text "null"
+                    // (a phantom attachment that can never download).
+                    "mediaId": row.try_get::<Option<String>, _>("media_id").ok().flatten().unwrap_or_default(),
+                    "mediaType": row.try_get::<Option<String>, _>("media_type").ok().flatten().unwrap_or_default(),
+                    "sent_by_hub": row.try_get::<i64, _>("sent_by_hub").unwrap_or(0) != 0,
                 }));
             }
             Ok(json!({ "dms": dms }))
@@ -642,8 +645,11 @@ pub async fn handle_invoke(
                     "sender": row.try_get::<String, _>("sender").unwrap_or_default(),
                     "content": row.try_get::<String, _>("content").unwrap_or_default(),
                     "timestamp": row.try_get::<i64, _>("timestamp").unwrap_or_default(),
-                    "mediaId": row.try_get::<Option<String>, _>("media_id").unwrap_or_default(),
-                    "mediaType": row.try_get::<Option<String>, _>("media_type").unwrap_or_default(),
+                    // Never null: the phone reads these with optString, which turns null into the text "null"
+                    // (a phantom attachment that can never download).
+                    "mediaId": row.try_get::<Option<String>, _>("media_id").ok().flatten().unwrap_or_default(),
+                    "mediaType": row.try_get::<Option<String>, _>("media_type").ok().flatten().unwrap_or_default(),
+                    "sent_by_hub": row.try_get::<i64, _>("sent_by_hub").unwrap_or(0) != 0,
                 }));
             }
             Ok(json!({"status": "ok", "dms": dms}))
@@ -657,17 +663,14 @@ pub async fn handle_invoke(
                 return Err("Missing peer_id or content".to_string());
             }
 
-            let ident_dir = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/root")).join(".hainet/identity");
-            let my_node_id = std::fs::read_to_string(ident_dir.join("ed25519_pub.b64")).unwrap_or_default().trim().to_string();
-            
-            let id = uuid::Uuid::new_v4().to_string();
-            let timestamp = chrono::Utc::now().timestamp_millis();
-            
-            let _ = sqlx::query("INSERT INTO dms (id, peer, sender, content, timestamp) VALUES (?, ?, ?, ?, ?)")
-                .bind(&id).bind(&peer).bind(&my_node_id).bind(&content).bind(timestamp)
-                .execute(&app_state.social_db.pool).await;
-                
-            Ok(json!({"status": "ok", "id": id, "timestamp": timestamp}))
+            // NOSLOP_HUB_WEBUI_SEND_V1: the Hub sends it now (DM v2, from the identity this contact knows) instead
+            // of storing it for the phone to send later from the personal identity, which a creator follower drops.
+            let rec = hainet_noslop::hub::dms::send_from_web_ui(&app_state.noslop, &peer, &content).await?;
+            sqlx::query("INSERT OR REPLACE INTO dms (id, peer, sender, content, timestamp, media_id, media_type, sent_by_hub) VALUES (?, ?, ?, ?, ?, NULL, NULL, 1)")
+                .bind(&rec.id).bind(&rec.peer).bind(&rec.sender).bind(&rec.content).bind(rec.timestamp)
+                .execute(&app_state.social_db.pool).await.map_err(|e| e.to_string())?;
+            info!("NOSLOP_HUB: Web UI DM {} sent to {}", rec.id, &rec.peer.chars().take(16).collect::<String>());
+            Ok(json!({"status": "ok", "id": rec.id, "timestamp": rec.timestamp, "sender": rec.sender}))
         },
 
         // "sync_push_packets" / "sync_pull_packets" and every "hub_*" / "creator_*" command are handled

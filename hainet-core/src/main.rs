@@ -56,6 +56,9 @@ impl SocialDb {
         sqlx::query("CREATE TABLE IF NOT EXISTS mesh_peers (public_key TEXT PRIMARY KEY, is_trusted BOOLEAN, handle TEXT, onion_address TEXT);").execute(&pool).await?;
         let _ = sqlx::query("ALTER TABLE mesh_peers ADD COLUMN onion_address TEXT;").execute(&pool).await;
         let _ = sqlx::query("ALTER TABLE mesh_peers ADD COLUMN enc_public_key TEXT;").execute(&pool).await;
+        // NOSLOP_HUB_WEBUI_SEND_V1: 1 for a DM the Hub sent itself (typed in the Web UI): the phone keeps a copy
+        // but must not send it again.
+        let _ = sqlx::query("ALTER TABLE dms ADD COLUMN sent_by_hub INTEGER NOT NULL DEFAULT 0;").execute(&pool).await;
         Ok(Self { pool })
     }
 }

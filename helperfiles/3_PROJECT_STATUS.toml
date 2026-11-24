@@ -17,6 +17,7 @@ changes = [
     "nh_dm_events (store schema v2) and hub_dm_events: incoming DMs that reached the Hub, for notifications",
     "Portal: unread counts (menu, conversations, tab title), desktop notifications behind the existing setting, click opens the conversation",
     "Removed hai.patch, committed by mistake with Session 60",
+    "Web UI send_dm: the Hub sends the DM itself (v2, from the identity the contact knows) and flags it sent_by_hub; get_dms/sync_pull_dms never return null media ids",
 ]
 status = "success"
 next_session = "Device test of the Web UI DM view; then NoSlop discovery cache and community mirroring"

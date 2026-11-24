@@ -156,18 +156,18 @@ export default function ChatView() {
 
     if (isPeerChat) {
       try {
-        await invoke<any>('send_dm', {
+        // NOSLOP_HUB_WEBUI_SEND_V1: the Hub sends it (from the identity this contact knows) and returns its id.
+        const sent = await invoke<any>('send_dm', {
           peer_id: selectedPeerId,
           content: currentInput,
         });
         
-        // Optimistically add to DMs
         const newDm: PeerDM = {
-          id: Date.now().toString(),
+          id: sent?.id || Date.now().toString(),
           peer: selectedPeerId,
-          sender: "local_hub", // Will be replaced by actual on next sync
+          sender: sent?.sender || "local_hub",
           content: currentInput,
-          timestamp: Date.now()
+          timestamp: sent?.timestamp || Date.now()
         };
         setDms(prev => [...prev, newDm]);
       } catch (e: any) {

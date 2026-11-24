@@ -23,9 +23,18 @@ every message and no notifications. Reference: `docs/NOSLOP_HUB.md` §9.
   Settings asks the browser for permission and says when the address does not allow it.
 * Removed `hai.patch` (committed by mistake with Session 60).
 
+## Follow-up the same day: sending from the Web UI (`NOSLOP_HUB_WEBUI_SEND_V1`)
+Device test: a DM typed in the Web UI to Gabby never arrived (Gabby's log: "Dropping DM from MCowBQYDK2Vw: no
+X25519 key on record") and showed on the owner's phone with an attachment that never downloaded ("MEDIA_REQUEST
+for null").
+* `send_dm` only stored the text; the phone re-sent it from the personal identity, which a creator follower does
+  not know. Now `hub::dms::send_from_web_ui` sends it from the Hub, DM v2, as the identity the contact knows, and
+  the row is flagged `sent_by_hub` so the phone (NoSlop `NOSLOP_HUB_WEBUI_SEND_V1`) keeps a copy without sending it.
+* `get_dms` / `sync_pull_dms` returned `"mediaId": null`; the phone's `optString` made it `"null"`. Now `""`.
+
 ## Verification
-* `cargo test -p hainet-noslop --features hub`: 31 tests pass (7 vector, 24 behaviour; 4 new).
-* Real `hainet-core` binary + independent Python client: 32/32 end-to-end checks (4 new).
+* `cargo test -p hainet-noslop --features hub`: 33 tests pass (7 vector, 26 behaviour; 6 new).
+* Real `hainet-core` binary + independent Python client: 35/35 end-to-end checks (7 new).
 * Portal: `vite build` passes; `tsc --noEmit` reports the same 35 errors as before the change, none new.
 * Not verified here: a browser on the device, a live Tor Hub.
 <!-- # END OF FILE helperfiles/SESSION_61_NOSLOP_HUB_DM_VIEW.md -->

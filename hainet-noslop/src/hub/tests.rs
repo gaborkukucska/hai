@@ -592,3 +592,52 @@ async fn a_schema_v1_database_gains_the_dm_events_table() {
     assert!(st.dm_event_add("x", "p", "p", "hi", NOW).await.unwrap());
     assert!(!st.dm_event_add("x", "p", "p", "hi", NOW).await.unwrap(), "once per message id");
 }
+
+// --- NOSLOP_HUB_WEBUI_SEND_V1 ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn web_ui_dms_go_out_from_the_identity_each_contact_knows() {
+    let r = rig(true).await;
+    let (gabby, _) = ident(7);
+    let (friend, _) = ident(9);
+    add_contact(&r, &gabby, "creator").await;
+    add_contact(&r, &friend, "personal").await;
+    let a = dms::send_from_web_ui(&r.node, &gabby.public_key_b64, "hello from the Hub ✨").await.unwrap();
+    let b = dms::send_from_web_ui(&r.node, &friend.public_key_b64, "hi friend").await.unwrap();
+    assert_eq!((a.sender.as_str(), a.incoming), (r.creator.public_key_b64.as_str(), false), "a creator follower hears from the creator");
+    assert_eq!(b.sender, r.owner.public_key_b64);
+    settle().await;
+    let out = sent_of(&r, "MESSAGE");
+    assert_eq!(out.len(), 2, "{:?}", out);
+    for (onion, pkt, to, me, text) in [(&gabby.onion, &a, &gabby, &r.creator, "hello from the Hub ✨"), (&friend.onion, &b, &friend, &r.owner, "hi friend")] {
+        let (o, p) = out.iter().find(|(_, p)| p.p_str("id") == Some(pkt.id.as_str())).unwrap();
+        assert_eq!(o, onion);
+        assert_eq!((p.sender_id.as_str(), p.target_user_id.as_deref()), (me.public_key_b64.as_str(), Some(to.public_key_b64.as_str())));
+        assert_eq!(envelope::verify(p, NOW), envelope::Verdict::Valid, "signed by the sending identity");
+        // The contact opens it exactly as DmPacketHandler does.
+        let pl = p.payload.as_ref().unwrap();
+        let plain = crate::dm::decrypt_v2(pl.get_str("ciphertext").unwrap(), pl.get_str("nonce").unwrap(), &me.enc_public_key_b64, &to.x25519_secret(),
+            &me.public_key_b64, &to.public_key_b64, &pkt.id, None, pl.get_i64("timestamp").unwrap(), crate::dm::DM_AAD_MESSAGE).unwrap();
+        assert_eq!(dms::parse_body(&plain).0, text);
+        assert_eq!(pl.get_i64("v"), Some(2));
+    }
+}
+
+#[tokio::test]
+async fn web_ui_dms_are_refused_without_keys_or_to_blocked_contacts() {
+    let r = rig(false).await;
+    let (gabby, _) = ident(7);
+    let (stranger, _) = ident(8);
+    assert!(dms::send_from_web_ui(&r.node, &stranger.public_key_b64, "hi").await.is_err(), "not a contact");
+    add_contact(&r, &gabby, "personal").await;
+    let mut c = r.node.store.contact_get(&gabby.public_key_b64).await.unwrap().unwrap();
+    c.relationship = "BLOCKED".into();
+    r.node.store.contact_upsert(&c, NOW).await.unwrap();
+    assert!(dms::send_from_web_ui(&r.node, &gabby.public_key_b64, "hi").await.is_err(), "blocked");
+    c.relationship = "ACCEPTED".into();
+    c.enc_public_key = String::new();
+    r.node.store.contact_upsert(&c, NOW).await.unwrap();
+    assert!(dms::send_from_web_ui(&r.node, &gabby.public_key_b64, "hi").await.is_err(), "no X25519 key yet");
+    assert!(dms::send_from_web_ui(&r.node, &gabby.public_key_b64, "").await.is_err(), "empty");
+    assert!(sent_of(&r, "MESSAGE").is_empty());
+}
