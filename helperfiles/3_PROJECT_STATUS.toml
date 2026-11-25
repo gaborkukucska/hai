@@ -23,6 +23,7 @@ changes = [
     "DM attachments for the Web UI (hub::dm_media, nh_dm_media, schema v3): fetched from the contact with signed MEDIA_REQUEST ranges, or uploaded by the phone (dm_media_put); served by GET /api/noslop/dm_media/<id> with byte ranges; the chat shows images/GIFs, plays audio/video",
     "creator_onion_republish: a fresh creator onion descriptor after the phone hands the creator identity back",
     "Ollama client: thinking models no longer return empty answers (thinking/done_reason read, <think> stripped, one retry with think=false); the Hub never sends an empty Admin AI reply",
+    "Public repositories moved to DeveLooped-INC (hai and NoSlop); links updated; releases exported from the development repo with release-hai.sh. NoSlop 0.8.3-alpha's Deploy HUB clones DeveLooped-INC/hai; existing Hub checkouts keep their own origin until switched (before NoSlop 0.8.4-alpha, when the old repositories become private)",
 ]
 status = "success"
 next_session = "Device test of the Web UI DM view; then NoSlop discovery cache and community mirroring"
@@ -200,7 +201,7 @@ next_session = "Runtime Testing & Validation"
 current_phase = "Grand Integration — Unified Headless Portal & Daemon Consolidation"
 current_cycle = "Integration Phase 5 — UI & API Wiring (Completed)"
 context_budget_per_session = 200000
-repository = "https://github.com/gaborkukucska/hai.git"
+repository = "https://github.com/DeveLooped-INC/hai.git"
 
 # Development principles
 [development_principles]

@@ -1,7 +1,7 @@
 <!-- # START OF FILE docs/INSTALLATION_GUIDE.md -->
 
 > [!TIP]
-> **RECOMMENDED DEPLOYMENT:** The easiest and currently recommended way to deploy a single-device HAI-Net Home Hub is using the **[NoSlop Android app](https://github.com/gaborkukucska/NoSlop)**. NoSlop features a zero-terminal SSH deployer that automatically clones your cryptographic identity and provisions the node. *(Multi-device deployments are not yet supported via the mobile app and require the manual steps below).* 
+> **RECOMMENDED DEPLOYMENT:** The easiest and currently recommended way to deploy a single-device HAI-Net Home Hub is using the **[NoSlop Android app](https://github.com/DeveLooped-INC/NoSlop)**. NoSlop features a zero-terminal SSH deployer that automatically clones your cryptographic identity and provisions the node. *(Multi-device deployments are not yet supported via the mobile app and require the manual steps below).* 
 
 # HAI-Net Installation Guide
 
@@ -93,7 +93,7 @@ Perfect for trying HAI-Net on a single computer.
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/gaborkukucska/hai.git
+git clone https://github.com/DeveLooped-INC/hai.git
 cd hai
 ```
 
@@ -439,7 +439,7 @@ export HAINET_ROLE=master
 
 ```bash
 # Clone and build HAI-Net
-git clone https://github.com/gaborkukucska/hai.git
+git clone https://github.com/DeveLooped-INC/hai.git
 cd hai
 cargo build --release
 
@@ -681,7 +681,7 @@ sync_interval_secs = 300  # 5 minutes
 ## Getting Help
 
 - **Documentation**: `helperfiles/` folder
-- **GitHub Issues**: https://github.com/gaborkukucska/hai/issues
+- **GitHub Issues**: https://github.com/DeveLooped-INC/hai/issues
 - **Development Rules**: `helperfiles/0_DEVELOPMENT_RULES.md`
 - **Project Status**: `helperfiles/3_PROJECT_STATUS.toml`
 

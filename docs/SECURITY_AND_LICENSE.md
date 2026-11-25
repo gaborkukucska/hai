@@ -55,6 +55,6 @@ Special thanks to our AI contributors Claude (Anthropic) & Jules (Google), and t
 ## 📞 Contact
 
 - **Website:** https://hai-net.org (coming soon)
-- **GitHub:** https://github.com/gaborkukucska/hai
+- **GitHub:** https://github.com/DeveLooped-INC/hai
 - **Discord:** (coming soon)
 - **Forum:** (coming soon)

@@ -45,7 +45,7 @@ Instead of connecting to distant corporate servers, your devices form a **local 
 
 ## 🚀 Recommended Deployment (NoSlop App)
 
-**The recommended way to deploy a single-device HAI-Net system is via the [NoSlop Android app](https://github.com/gaborkukucska/NoSlop).**
+**The recommended way to deploy a single-device HAI-Net system is via the [NoSlop Android app](https://github.com/DeveLooped-INC/NoSlop).**
 NoSlop includes a built-in, zero-terminal SSH deployer that automatically scans your local network, securely clones your cryptographic identity to the Hub, and sets up the node seamlessly. *(Multi-device mesh deployments are not yet supported via the mobile app and require manual setup).*
 
 For **creators**, the Hub takes over the creator identity's onion: it accepts followers, serves your public posts and media, and announces you to the mesh while your phone is off. Every packet it handles is signature-checked, and only you can control it: your phone signs every request with your key, and the Web UI needs its own login per browser. Details: **[docs/NOSLOP_HUB.md](docs/NOSLOP_HUB.md)**. The NoSlop app needs a Hub build (`NOSLOP_ENABLE_HUB=true`) for this.
@@ -222,7 +222,7 @@ $13,763 First Flying Node    → Standard airship above proven ground station.
 $23,250 Full Edge Node       → 92 TB, 400 TOPS, 20–40 Gbps WiFi 7. The network is complete.
 ```
 
-→ [TropoMesh Proposal (full technical specification)](https://github.com/gaborkukucska/hai) *(coming soon)*
+→ [TropoMesh Proposal (full technical specification)](https://github.com/DeveLooped-INC/hai) *(coming soon)*
 
 ---
 
