@@ -20,6 +20,7 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   dynamicComponent?: DynamicComponent;
+  media?: { id: string; type: string };
 }
 
 interface PeerDM {
@@ -28,7 +29,38 @@ interface PeerDM {
   sender: string;
   content: string;
   timestamp: number;
+  mediaId?: string;
+  mediaType?: string;
 }
+
+// NOSLOP_HUB_DM_MEDIA_V1: a DM's attachment. A GIF from NoSlop's picker is a web link ("noslop-gif://https://...")
+// and loads only when asked, like the app's "Tap to load GIF from <host>" (loading it shows the GIF site this
+// computer's address). Other media stay on the sender's device and are fetched over the mesh by the phone.
+const DmMedia = ({ media }: { media: { id: string; type: string } }) => {
+  const [show, setShow] = useState(false);
+  const raw = media.id.startsWith('noslop-gif://') ? media.id.slice('noslop-gif://'.length) : '';
+  if (/^https?:\/\//i.test(raw)) {
+    let host = 'a remote host';
+    try { host = new URL(raw).host || host; } catch { /* keep the generic name */ }
+    return show ? (
+      <img src={raw} alt="GIF" referrerPolicy="no-referrer" className="mt-1 max-w-[240px] max-h-[240px] rounded-lg" />
+    ) : (
+      <button
+        onClick={() => setShow(true)}
+        className="mt-1 text-xs px-3 py-2 rounded-lg bg-theme-bg-tertiary hover:bg-theme-border transition-colors"
+        title="Loading it lets that site see this computer's address"
+      >
+        GIF · Load from {host}
+      </button>
+    );
+  }
+  const label = media.type === 'image' ? 'Image' : media.type === 'video' ? 'Video' : media.type === 'audio' ? 'Audio' : 'File';
+  return (
+    <p className="mt-1 text-xs text-theme-text-muted italic">
+      {label} attachment: open this conversation on your phone to view it.
+    </p>
+  );
+};
 
 const DynamicRenderer = ({ comp }: { comp: DynamicComponent | string }) => {
   if (typeof comp === 'string') return <span>{comp}</span>;
@@ -256,7 +288,8 @@ export default function ChatView() {
            // If the sender is the peer, they are the "assistant" (left side)
            // If the sender is NOT the peer, it must be the local mobile user (right side)
            role: dm.sender === selectedPeerId ? 'assistant' : 'user',
-           content: dm.content
+           content: dm.content,
+           media: dm.mediaId ? { id: dm.mediaId, type: dm.mediaType || '' } : undefined,
          }))
     : adminMessages;
 
@@ -372,6 +405,7 @@ export default function ChatView() {
                    : 'rounded-tl-none'
                }`}>
                   {msg.content && <p className="text-sm whitespace-pre-wrap">{msg.content}</p>}
+                  {msg.media && <DmMedia media={msg.media} />}
                   {msg.dynamicComponent && (
                     <div className="mt-2">
                       <DynamicRenderer comp={msg.dynamicComponent} />

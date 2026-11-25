@@ -641,3 +641,19 @@ async fn web_ui_dms_are_refused_without_keys_or_to_blocked_contacts() {
     assert!(dms::send_from_web_ui(&r.node, &gabby.public_key_b64, "").await.is_err(), "empty");
     assert!(sent_of(&r, "MESSAGE").is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_picker_gif_is_kept_as_a_link_and_announced_as_a_gif() {
+    let r = rig(true).await;
+    let got = capture_dms(&r);
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    let body = r#"{"content":"","media":{"id":"noslop-gif://https://media.example/x.gif","type":"image","mime_type":"image/gif","size":0,"chunk_count":0}}"#;
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.creator, "gif-1", body, None, NOW), &gabby, NOW), Listener::Creator).await;
+    settle().await;
+    let recs = got.lock().unwrap().clone();
+    assert_eq!(recs.len(), 1);
+    assert_eq!((recs[0].content.as_str(), recs[0].media_id.as_deref()), ("", Some("noslop-gif://https://media.example/x.gif")));
+    let ev = api::handle(&r.node, "hub_dm_events", &JValue::obj()).await.unwrap().unwrap();
+    assert_eq!(ev["events"][0]["preview"], "[GIF]");
+}

@@ -133,7 +133,7 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 ## 7. Tests
 
 * `cargo test -p hainet-noslop --features hub`: 7 cross-language vector tests (Gson / Bouncy Castle),
-  26 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
+  27 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
   and chunk serving, re-signing and relays, owner signatures, Admin AI, presence, inbox ACK, backup
   sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v2, Web UI DMs sent from
   the right identity and the ones refused).
@@ -150,6 +150,8 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 * The Hub does not relay gossip for others while the phone is offline (it never did).
 * Non-creator community mirroring and the discovery-cache work of the Enhancement Plan.
 * Group messages are not shown in the Web UI chat (§9), and the Web UI sends text only (no attachments).
+  Attachments other than picker GIFs are not shown there: they stay on the sender's device and the phone
+  fetches them over the mesh (the Web UI says so).
 
 ## 9. DMs in the Web UI (`NOSLOP_HUB_DM_VIEW_V1`, 2026-11-24)
 
@@ -189,4 +191,10 @@ creator identity is not on the Hub. The `dms` row is flagged `sent_by_hub`, so t
 does not send it again (NoSlop ≥ the 2026-11-24 build; an older phone sends it a second time with the same
 message id, which the contact drops as a duplicate). `get_dms` / `sync_pull_dms` never return a null
 `mediaId` / `mediaType` any more (the phone read null as the text "null": a phantom attachment).
+
+**Attachments in the Web UI** (`NOSLOP_HUB_DM_MEDIA_V1`, 2026-11-25). A GIF from NoSlop's picker is a link
+(`mediaId` `noslop-gif://https://…`, empty text), which showed as an empty message. The Web UI now shows a
+"GIF · Load from <host>" button and loads the GIF (no referrer) only when clicked, as the app asks before
+loading it (the GIF host sees the address of the computer that loads it). Other attachments say to open the
+conversation on the phone. The notification for a GIF reads "[GIF]".
 <!-- # END OF FILE docs/NOSLOP_HUB.md -->

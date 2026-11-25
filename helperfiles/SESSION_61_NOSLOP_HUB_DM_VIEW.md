@@ -32,8 +32,16 @@ for null").
   the row is flagged `sent_by_hub` so the phone (NoSlop `NOSLOP_HUB_WEBUI_SEND_V1`) keeps a copy without sending it.
 * `get_dms` / `sync_pull_dms` returned `"mediaId": null`; the phone's `optString` made it `"null"`. Now `""`.
 
+## Follow-up 2026-11-25: GIFs (`NOSLOP_HUB_DM_MEDIA_V1`)
+GIFs Gabby sent showed as empty messages in the Web UI: a picker GIF is a link in the media id
+(`noslop-gif://https://…`) with empty text, and the chat showed only the text. The chat now offers to load the
+GIF (on click, no referrer) and names other attachments as viewable on the phone; the notification says "[GIF]".
+Device observation the same day: in Hub mode the phone collects DMs from the Hub inbox only while open (it is
+frozen in the background, owner decision 2026-11-24), so the sender's app re-sends a DM every minute until the
+phone acknowledges it.
+
 ## Verification
-* `cargo test -p hainet-noslop --features hub`: 33 tests pass (7 vector, 26 behaviour; 6 new).
+* `cargo test -p hainet-noslop --features hub`: 34 tests pass (7 vector, 27 behaviour; 7 new).
 * Real `hainet-core` binary + independent Python client: 35/35 end-to-end checks (7 new).
 * Portal: `vite build` passes; `tsc --noEmit` reports the same 35 errors as before the change, none new.
 * Not verified here: a browser on the device, a live Tor Hub.

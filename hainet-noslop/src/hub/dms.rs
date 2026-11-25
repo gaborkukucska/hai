@@ -168,6 +168,8 @@ pub fn parse_body(plain: &str) -> (String, Option<String>, Option<String>) {
 fn preview(rec: &DmRecord) -> String {
     let text = rec.content.trim();
     if text.is_empty() {
+        // NOSLOP_HUB_DM_MEDIA_V1: a picker GIF is a link ("noslop-gif://https://..."), whatever its media type says.
+        if rec.media_id.as_deref().map_or(false, |m| m.starts_with("noslop-gif://")) { return "[GIF]".into(); }
         return match rec.media_type.as_deref() { Some(t) => format!("[{}]", t), None => String::new() };
     }
     let mut out: String = text.chars().take(PREVIEW_CHARS).collect();
