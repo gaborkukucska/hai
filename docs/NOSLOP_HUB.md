@@ -94,6 +94,7 @@ cookie for its own browser; `POST /api/auth/logout` ends it.
 | `hub_inbox_ack` | `up_to` | `deleted` |
 | `hub_contacts_push` | `contacts: [{public_key, identity, relationship, is_trusted, is_temporary, handle, onion_address, enc_public_key, declined_nonce}]`, `full` | `contacts`, `removed` |
 | `hub_feed_push` | `posts: [PostPayload]` | `posts_stored` (Web UI feed only; nothing is sent) |
+| `hub_dms_clear` | `peer`, `before` (ms; default now) | `deleted`, `before` (the conversation cleared on the phone, §9) |
 | `hub_dm_events` | `after`, `limit` (≤ 500) | `events: [{seq, dm_id, peer, sender, preview, at}]`, `latest` (incoming DMs that reached the Hub, §9) |
 | `creator_identity_set` | `public_key`, `private_key`, `enc_public_key`, `enc_private_key`, `display_name`, `replace` | `onion_address` |
 | `creator_identity_remove` | – | removes the keys, the creator content and followers |
@@ -133,15 +134,17 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 ## 7. Tests
 
 * `cargo test -p hainet-noslop --features hub`: 7 cross-language vector tests (Gson / Bouncy Castle),
-  27 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
+  30 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
   and chunk serving, re-signing and relays, owner signatures, Admin AI, presence, inbox ACK, backup
   sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v2, Web UI DMs sent from
-  the right identity and the ones refused).
-* End to end against the real `hainet-core` binary with an independent Python client (35 checks):
+  the right identity and the ones refused, signed deletes from either side and forged ones,
+  cleared conversations).
+* End to end against the real `hainet-core` binary with an independent Python client (37 checks):
   owner auth and replay, creator hand-over, a follower's handshake answered on its own connection,
   dropped unsigned and forged frames, a follower's DM decrypted into the Web UI chat with one
   notification event (and still in the phone's inbox), the owner's reply shown without one, a Web UI
-  reply sent by the Hub as the creator and flagged for the phone, no null media ids, Admin AI
+  reply sent by the Hub as the creator and flagged for the phone, no null media ids, a contact's signed
+  delete and a cleared conversation leaving the Web UI chat, Admin AI
   round trip, streamed backup push / pull, portal sessions, header limits, onion-only dialling.
 
 ## 8. Not done yet
@@ -191,6 +194,15 @@ creator identity is not on the Hub. The `dms` row is flagged `sent_by_hub`, so t
 does not send it again (NoSlop ≥ the 2026-11-24 build; an older phone sends it a second time with the same
 message id, which the contact drops as a duplicate). `get_dms` / `sync_pull_dms` never return a null
 `mediaId` / `mediaType` any more (the phone read null as the text "null": a phantom attachment).
+
+**Deletes and cleared chats** (`NOSLOP_HUB_DM_DELETE_V1`, 2026-11-25). A `DELETE_MESSAGE` for a one-to-one DM
+that passes through the Hub (a contact deleting their own message, or the owner deleting theirs through
+`hub_send`) also removes that message from the Web UI's chat and its notifications. It is checked as the phone
+checks it: the author is the packet's sender and signed `encodeForSigning(message_id, author_id, timestamp)` (or
+the older `id|author|ts` text). "Clear Chat" on the phone calls `hub_dms_clear {peer, before}`: the conversation
+up to `before` leaves the Web UI and its notifications, and older copies (a contact re-sending, a DM sync answer)
+are not shown again. The mark never moves back. NoSlop side: `NOSLOP_DM_DELETE_SIGNATURE_V1` (the phone itself
+never applied a DM delete before, see its TECHNICAL_REFERENCE §16.65) and `NOSLOP_DM_CLEAR_STICKS_V1`.
 
 **Attachments in the Web UI** (`NOSLOP_HUB_DM_MEDIA_V1`, 2026-11-25). A GIF from NoSlop's picker is a link
 (`mediaId` `noslop-gif://https://…`, empty text), which showed as an empty message. The Web UI now shows a

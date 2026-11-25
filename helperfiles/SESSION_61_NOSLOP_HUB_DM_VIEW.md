@@ -40,9 +40,17 @@ Device observation the same day: in Hub mode the phone collects DMs from the Hub
 frozen in the background, owner decision 2026-11-24), so the sender's app re-sends a DM every minute until the
 phone acknowledges it.
 
+## Follow-up 2026-11-25 (evening): deletes and "Clear Chat" (`NOSLOP_HUB_DM_DELETE_V1`)
+"Clear Chat" on the owner's phone came back a minute later, and a message Gabby deleted stayed. Two NoSlop bugs
+(fixed there, TECHNICAL_REFERENCE §16.65): the receiver checked a delete's signature against an older text than
+senders sign, so no DM delete was ever applied; and after a clear the next DM sync asked the contact for everything
+(`since=0`). On the Hub: `DELETE_MESSAGE`s passing through now remove the message from the Web UI chat (checked like
+the phone does), and `hub_dms_clear` (called by the phone's Clear Chat) clears the Web UI conversation and keeps
+older copies out.
+
 ## Verification
-* `cargo test -p hainet-noslop --features hub`: 34 tests pass (7 vector, 27 behaviour; 7 new).
-* Real `hainet-core` binary + independent Python client: 35/35 end-to-end checks (7 new).
+* `cargo test -p hainet-noslop --features hub`: 37 tests pass (7 vector, 30 behaviour; 10 new).
+* Real `hainet-core` binary + independent Python client: 37/37 end-to-end checks (9 new).
 * Portal: `vite build` passes; `tsc --noEmit` reports the same 35 errors as before the change, none new.
 * Not verified here: a browser on the device, a live Tor Hub.
 <!-- # END OF FILE helperfiles/SESSION_61_NOSLOP_HUB_DM_VIEW.md -->

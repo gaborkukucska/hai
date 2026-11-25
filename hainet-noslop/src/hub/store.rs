@@ -183,6 +183,16 @@ impl Store {
         Ok(added)
     }
 
+    /// NOSLOP_HUB_DM_DELETE_V1: a deleted message is no longer unread.
+    pub async fn dm_event_remove(&self, dm_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM nh_dm_events WHERE dm_id = ?").bind(dm_id).execute(&self.pool).await.map(|_| ())
+    }
+
+    /// NOSLOP_HUB_DM_DELETE_V1: a cleared conversation has no unread messages.
+    pub async fn dm_events_remove_peer(&self, peer: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM nh_dm_events WHERE peer = ?").bind(peer).execute(&self.pool).await.map(|_| ())
+    }
+
     /// Events after `after_seq`, oldest first, and the newest sequence number (0 when there are none).
     pub async fn dm_events_after(&self, after_seq: i64, limit: i64) -> Result<(Vec<DmEvent>, i64), sqlx::Error> {
         let rows = sqlx::query("SELECT seq, dm_id, peer, sender, preview, at FROM nh_dm_events WHERE seq > ? ORDER BY seq ASC LIMIT ?")

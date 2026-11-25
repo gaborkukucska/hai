@@ -321,6 +321,24 @@ async fn main() -> Result<()> {
             }
         })
     })).await;
+    // NOSLOP_HUB_DM_DELETE_V1: deletes and cleared conversations leave the Web UI's chat too.
+    let rm_pool = app_state.social_db.pool.clone();
+    noslop.set_dm_remove_hook(Arc::new(move |what: hainet_noslop::hub::dms::DmRemoval| {
+        let pool = rm_pool.clone();
+        Box::pin(async move {
+            use hainet_noslop::hub::dms::DmRemoval;
+            let res = match &what {
+                DmRemoval::Message { id, sender } => sqlx::query("DELETE FROM dms WHERE id = ? AND sender = ?")
+                    .bind(id).bind(sender).execute(&pool).await,
+                DmRemoval::Conversation { peer, before } => sqlx::query("DELETE FROM dms WHERE peer = ? AND timestamp <= ?")
+                    .bind(peer).bind(before).execute(&pool).await,
+            };
+            match res {
+                Ok(r) => r.rows_affected(),
+                Err(e) => { warn!("NOSLOP_HUB: could not apply {:?} to the Web UI chat: {}", what, e); 0 }
+            }
+        })
+    })).await;
     noslop.spawn_all();
     // Step 4: Start minimal TCP-based health/API endpoint
     let role_for_health = config.network.role.clone();

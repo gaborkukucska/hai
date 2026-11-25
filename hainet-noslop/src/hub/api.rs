@@ -94,6 +94,12 @@ pub async fn handle(node: &Arc<HubNode>, cmd: &str, args: &JValue) -> Option<Res
             node.store.inbox_ack(up_to).await.map(|n| json!({"status": "ok", "deleted": n})).map_err(|e| e.to_string())
         }
         "hub_contacts_push" => contacts_push(node, args).await,
+        "hub_dms_clear" => {
+            // NOSLOP_HUB_DM_DELETE_V1: "Clear Chat" on the phone clears the Web UI's copy of that conversation.
+            let Some(peer) = args.get_str("peer").filter(|p| !p.is_empty()) else { return Some(Err("peer required".into())) };
+            let before = args.get_i64("before").filter(|b| *b > 0).unwrap_or_else(|| node.now());
+            super::dms::clear_conversation(node, peer, before).await.map(|(n, kept)| json!({"deleted": n, "before": kept}))
+        }
         "hub_dm_events" => {
             // NOSLOP_HUB_DM_VIEW_V1: DMs from contacts that reached the Hub, for the Web UI's notifications.
             let after = args.get_i64("after").unwrap_or(0).max(0);
@@ -210,6 +216,9 @@ async fn observe_outgoing(node: &Arc<HubNode>, pkt: &Packet) -> bool {
     if pkt.ptype == "MESSAGE" {
         // NOSLOP_HUB_DM_VIEW_V1: the owner's own DMs show in the Web UI as soon as they leave through the Hub.
         super::dms::observe(node, pkt, false).await;
+    } else if pkt.ptype == "DELETE_MESSAGE" {
+        // NOSLOP_HUB_DM_DELETE_V1: the owner deleting their own message on the phone.
+        super::dms::observe_delete(node, pkt, false).await;
     }
     false
 }

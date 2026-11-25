@@ -37,6 +37,64 @@ pub struct DmRecord {
 
 pub type DmHook = Arc<dyn Fn(DmRecord) -> BoxFut<()> + Send + Sync>;
 
+/// NOSLOP_HUB_DM_DELETE_V1 — what the Web UI's chat must forget. The hook returns how many messages went.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DmRemoval {
+    /// One message, deleted by its author (`DELETE_MESSAGE`).
+    Message { id: String, sender: String },
+    /// A conversation the owner cleared on the phone, up to `before` (ms).
+    Conversation { peer: String, before: i64 },
+}
+
+pub type DmRemoveHook = Arc<dyn Fn(DmRemoval) -> BoxFut<u64> + Send + Sync>;
+
+fn cleared_key(peer: &str) -> String { format!("dm_cleared_before_{}", peer) }
+
+/// When the owner last cleared the conversation with `peer` (0: never).
+pub async fn cleared_before(node: &Arc<HubNode>, peer: &str) -> i64 {
+    node.store.meta_get(&cleared_key(peer)).await.ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+/// `hub_dms_clear`: forgets the conversation with `peer` up to `before`, and ignores older copies from now on
+/// (the phone's `NOSLOP_DM_CLEAR_STICKS_V1`; a contact may re-send what was cleared).
+/// Returns how many messages went and the cleared-up-to time kept (never earlier than an earlier clear).
+pub async fn clear_conversation(node: &Arc<HubNode>, peer: &str, before: i64) -> Result<(u64, i64), String> {
+    let before = before.max(cleared_before(node, peer).await);
+    node.store.meta_set(&cleared_key(peer), &before.to_string()).await.map_err(|e| e.to_string())?;
+    node.store.dm_events_remove_peer(peer).await.map_err(|e| e.to_string())?;
+    let hook = node.dm_remove_hook.read().await.clone();
+    let deleted = match hook { Some(h) => h(DmRemoval::Conversation { peer: peer.to_string(), before }).await, None => 0 };
+    Ok((deleted, before))
+}
+
+/// Applies a one-to-one `DELETE_MESSAGE` to the Web UI's chat: from a contact deleting their own message
+/// (`incoming`), or from the owner deleting theirs (`hub_send`). Checked as `DmPacketHandler.handleDeleteMessage`
+/// does: the author is the sender, and signed `encodeForSigning(message_id, author_id, timestamp)` (or the older
+/// `id|author|ts` text) by the author.
+pub async fn observe_delete(node: &Arc<HubNode>, pkt: &Packet, incoming: bool) {
+    if pkt.ptype != "DELETE_MESSAGE" { return; }
+    let Some(p) = pkt.payload.as_ref() else { return };
+    if p.get_str("group_id").map_or(false, |g| !g.is_empty()) { return; }
+    let (Some(id), Some(author), Some(ts)) = (p.get_str("message_id"), p.get_str("author_id"), p.get_i64("timestamp")) else { return };
+    let Some(sig) = p.get_str("signature").or(pkt.signature.as_deref()) else { return };
+    if author != pkt.sender_id { return; }
+    let personal = node.personal().await;
+    let creator = node.creator().await;
+    let is_ours = [&personal, &creator].into_iter().flatten().any(|i| i.public_key_b64 == author);
+    if is_ours == incoming { return; } // a contact deletes theirs when incoming; the owner deletes theirs when outgoing
+    let ts_s = ts.to_string();
+    let ok = crate::keys::verify(&crate::canon::efs(&[id, author, &ts_s]), sig, author)
+        || crate::keys::verify(&format!("{}|{}|{}", id, author, ts_s), sig, author);
+    if !ok {
+        debug!("NOSLOP_HUB: DELETE_MESSAGE for {} does not verify; ignored", id);
+        return;
+    }
+    if let Err(e) = node.store.dm_event_remove(id).await { debug!("NOSLOP_HUB: DM event not removed: {}", e); }
+    if let Some(h) = node.dm_remove_hook.read().await.clone() {
+        h(DmRemoval::Message { id: id.to_string(), sender: author.to_string() }).await;
+    }
+}
+
 /// Longest text kept in a notification event.
 pub const PREVIEW_CHARS: usize = 140;
 
@@ -45,6 +103,9 @@ pub const PREVIEW_CHARS: usize = 140;
 pub async fn observe(node: &Arc<HubNode>, pkt: &Packet, incoming: bool) {
     if pkt.ptype != "MESSAGE" { return; }
     let Some(rec) = open(node, pkt, incoming).await else { return };
+    // NOSLOP_HUB_DM_DELETE_V1: nothing from before the owner cleared this conversation comes back.
+    let cleared = cleared_before(node, &rec.peer).await;
+    if cleared > 0 && rec.timestamp <= cleared { return; }
     if incoming {
         let preview = preview(&rec);
         if let Err(e) = node.store.dm_event_add(&rec.id, &rec.peer, &rec.sender, &preview, node.now()).await {

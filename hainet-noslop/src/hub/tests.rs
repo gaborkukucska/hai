@@ -657,3 +657,100 @@ async fn a_picker_gif_is_kept_as_a_link_and_announced_as_a_gif() {
     let ev = api::handle(&r.node, "hub_dm_events", &JValue::obj()).await.unwrap().unwrap();
     assert_eq!(ev["events"][0]["preview"], "[GIF]");
 }
+
+// --- NOSLOP_HUB_DM_DELETE_V1 ----------------------------------------------------------------------------
+
+fn delete_packet(author: &Identity, to: &Identity, msg_id: &str, ts: i64, legacy: bool) -> Packet {
+    let ts_s = ts.to_string();
+    let text = if legacy { format!("{}|{}|{}", msg_id, author.public_key_b64, ts_s) } else { crate::canon::efs(&[msg_id, &author.public_key_b64, &ts_s]) };
+    let sig = author.sign(&text);
+    let payload = JValue::obj().with("message_id", JValue::str(msg_id)).with("author_id", JValue::str(&author.public_key_b64))
+        .with("timestamp", JValue::int(ts)).with("signature", JValue::str(&sig));
+    let mut p = Packet::new("DELETE_MESSAGE", &author.public_key_b64, Some(&to.public_key_b64), payload, 3);
+    p.signature = Some(sig);
+    p
+}
+
+fn capture_removals(r: &Rig) -> Arc<StdMutex<Vec<dms::DmRemoval>>> {
+    let got = Arc::new(StdMutex::new(Vec::new()));
+    let g = got.clone();
+    let node = r.node.clone();
+    futures_lite_block(async move {
+        node.set_dm_remove_hook(Arc::new(move |what| { g.lock().unwrap().push(what); Box::pin(async { 1u64 }) })).await;
+    });
+    got
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_contacts_signed_delete_removes_their_message_and_forgeries_do_not() {
+    let r = rig(true).await;
+    let removed = capture_removals(&r);
+    let _ = capture_dms(&r);
+    let (gabby, _) = ident(7);
+    let (mallory, _) = ident(8);
+    add_contact(&r, &gabby, "creator").await;
+    add_contact(&r, &mallory, "personal").await;
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.creator, "m-1", "oops", None, NOW - 9), &gabby, NOW), Listener::Creator).await;
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.creator, "m-2", "keep", None, NOW - 8), &gabby, NOW), Listener::Creator).await;
+    settle().await;
+    // Mallory cannot delete Gabby's message: the author must be the sender, and sign it.
+    let mut forged = delete_packet(&mallory, &r.creator, "m-1", NOW, false);
+    if let Some(pl) = forged.payload.as_mut() { pl.set("author_id", JValue::str(&gabby.public_key_b64)); }
+    r.node.handle_frame(&signed(forged, &mallory, NOW), Listener::Creator).await;
+    // A contact cannot delete one of the owner's messages either (the owner's key is not theirs).
+    r.node.handle_frame(&signed(delete_packet(&mallory, &r.owner, "m-2", NOW, false), &mallory, NOW), Listener::Personal).await;
+    settle().await;
+    assert!(removed.lock().unwrap().iter().all(|w| matches!(w, dms::DmRemoval::Message { sender, .. } if sender == &mallory.public_key_b64)),
+        "nothing of Gabby's removed by Mallory: {:?}", removed.lock().unwrap());
+    removed.lock().unwrap().clear();
+    // Gabby's own delete, current signature form, and the older form.
+    r.node.handle_frame(&signed(delete_packet(&gabby, &r.creator, "m-1", NOW, false), &gabby, NOW), Listener::Creator).await;
+    r.node.handle_frame(&signed(delete_packet(&gabby, &r.creator, "m-2", NOW, true), &gabby, NOW), Listener::Creator).await;
+    settle().await;
+    let got = removed.lock().unwrap().clone();
+    assert_eq!(got.len(), 2, "{:?}", got);
+    assert!(got.contains(&dms::DmRemoval::Message { id: "m-1".into(), sender: gabby.public_key_b64.clone() }));
+    let ev = api::handle(&r.node, "hub_dm_events", &JValue::obj()).await.unwrap().unwrap();
+    assert!(ev["events"].as_array().unwrap().is_empty(), "deleted messages are not unread any more");
+    // The phone still gets the delete packets.
+    let (items, _) = r.node.store.inbox_pull(0, 50, 1 << 20).await.unwrap();
+    assert!(items.iter().filter(|i| i.packet.contains("DELETE_MESSAGE")).count() >= 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_owners_delete_through_the_hub_removes_their_message() {
+    let r = rig(true).await;
+    let removed = capture_removals(&r);
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    let del = envelope::sign(&delete_packet(&r.creator, &gabby, "mine-1", NOW, false), &r.creator, NOW).unwrap();
+    let items = JValue::Arr(vec![JValue::obj().with("onion", JValue::str(&gabby.onion)).with("packet", del.to_value())]);
+    api::handle(&r.node, "hub_send", &JValue::obj().with("items", items)).await.unwrap().unwrap();
+    assert_eq!(removed.lock().unwrap().clone(), vec![dms::DmRemoval::Message { id: "mine-1".into(), sender: r.creator.public_key_b64.clone() }]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cleared_conversation_is_removed_and_older_copies_stay_out() {
+    let r = rig(true).await;
+    let removed = capture_removals(&r);
+    let got = capture_dms(&r);
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.creator, "old-1", "before", None, NOW - 100), &gabby, NOW), Listener::Creator).await;
+    settle().await;
+    let res = api::handle(&r.node, "hub_dms_clear", &JValue::obj().with("peer", JValue::str(&gabby.public_key_b64)).with("before", JValue::int(NOW - 50))).await.unwrap().unwrap();
+    assert_eq!((res["deleted"].as_u64(), res["before"].as_i64()), (Some(1), Some(NOW - 50)));
+    assert_eq!(removed.lock().unwrap().clone(), vec![dms::DmRemoval::Conversation { peer: gabby.public_key_b64.clone(), before: NOW - 50 }]);
+    let ev = api::handle(&r.node, "hub_dm_events", &JValue::obj()).await.unwrap().unwrap();
+    assert!(ev["events"].as_array().unwrap().is_empty());
+    got.lock().unwrap().clear();
+    // Gabby's app re-sends the old message (DM sync, retry): not shown again. A new one is.
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.creator, "old-1b", "before", None, NOW - 100), &gabby, NOW), Listener::Creator).await;
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.creator, "new-1", "after", None, NOW - 10), &gabby, NOW), Listener::Creator).await;
+    settle().await;
+    assert_eq!(got.lock().unwrap().iter().map(|d| d.id.clone()).collect::<Vec<_>>(), vec!["new-1".to_string()]);
+    // A later clear never moves the mark back.
+    let res = api::handle(&r.node, "hub_dms_clear", &JValue::obj().with("peer", JValue::str(&gabby.public_key_b64)).with("before", JValue::int(NOW - 90))).await.unwrap().unwrap();
+    assert_eq!(res["before"].as_i64(), Some(NOW - 50));
+    assert!(api::handle(&r.node, "hub_dms_clear", &JValue::obj()).await.unwrap().is_err(), "peer required");
+}
