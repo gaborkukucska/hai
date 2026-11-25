@@ -137,6 +137,11 @@ pub async fn handle_incoming_dm(app_state: Arc<AppState>, packet: hainet_noslop:
         }
         None => "⚠️ Admin AI is disabled on this node (not a Master node or failed to init).".to_string(),
     };
+    // OLLAMA_THINKING_EMPTY_ANSWER_V1: never send the owner an empty message.
+    let reply_text = if reply_text.trim().is_empty() {
+        tracing::warn!("Admin AI: the model returned an empty answer");
+        "⚠️ The Admin AI's model returned no answer. Please ask again, or choose another model for the Admin AI in the Hub's Web UI settings.".to_string()
+    } else { reply_text };
     match admin::reply_packet(&owner, &reply_text, node.now()) {
         Ok(reply) => {
             node.inbox("packet", &reply, &reply.to_wire()).await;

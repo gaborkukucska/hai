@@ -22,6 +22,7 @@ changes = [
     "Web UI send_dm: the Hub sends the DM itself (v2, from the identity the contact knows) and flags it sent_by_hub; get_dms/sync_pull_dms never return null media ids",
     "DM attachments for the Web UI (hub::dm_media, nh_dm_media, schema v3): fetched from the contact with signed MEDIA_REQUEST ranges, or uploaded by the phone (dm_media_put); served by GET /api/noslop/dm_media/<id> with byte ranges; the chat shows images/GIFs, plays audio/video",
     "creator_onion_republish: a fresh creator onion descriptor after the phone hands the creator identity back",
+    "Ollama client: thinking models no longer return empty answers (thinking/done_reason read, <think> stripped, one retry with think=false); the Hub never sends an empty Admin AI reply",
 ]
 status = "success"
 next_session = "Device test of the Web UI DM view; then NoSlop discovery cache and community mirroring"

@@ -244,4 +244,11 @@ for a while it published the creator onion itself; after handing it back, the ph
 on the directories and contacts kept finding the frozen phone ("Host unreachable") until the Hub restarted. On
 hand-back the phone now calls `creator_onion_republish`: the Hub withdraws and re-adds the onion (`DEL_ONION`,
 `ADD_ONION`), which uploads a fresh descriptor. NoSlop side: TECHNICAL_REFERENCE §16.66.
+
+**Empty Admin AI answers** (`OLLAMA_THINKING_EMPTY_ANSWER_V1`, same day). With a "thinking" Ollama model
+(qwen3.5 in the device test) the Admin AI's conversational call (512 tokens at most) could spend every token on
+reasoning, so `response` came back empty and the phone showed an empty message. `OllamaClient::generate` now
+reads `thinking` and `done_reason`, removes inline `<think>…</think>` blocks, and when the answer is empty after
+the model thought, asks once more with `"think": false` (only such a model gets the switch). The Hub never seals
+an empty Admin AI reply: it says the model gave no answer instead.
 <!-- # END OF FILE docs/NOSLOP_HUB.md -->

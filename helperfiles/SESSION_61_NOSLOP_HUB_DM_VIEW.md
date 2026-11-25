@@ -65,6 +65,14 @@ could not be checked.
   back only after 10 minutes of silence, DM attachments uploaded to the Hub, a refresh button and a Tor status line
   in the chat.
 
+## Follow-up 2026-11-25 (late): device test passed for attachments; empty Admin AI answers
+Image and GIF from Gabby were fetched by the Hub (15 KB, 3.8 MB) and an image the phone held was uploaded; the
+creator onion was published again on hand-back. The Admin AI's second answer reached the phone empty: the model
+(qwen3.5:9b, a thinking model) used its 512 tokens on reasoning. `hainet-persona` Ollama client: thinking-aware
+(`OLLAMA_THINKING_EMPTY_ANSWER_V1`, NOSLOP_HUB.md §10); `hainet-core` never sends an empty reply. The three
+outdated `OllamaClient::new` calls in that file's tests were updated (other persona test modules still do not
+compile, as before).
+
 ## Verification
 * `cargo test -p hainet-noslop --features hub`: 42 tests pass (7 vector, 35 behaviour; 15 new this session).
 * Real `hainet-core` binary + independent Python client: 43/43 end-to-end checks (15 new this session).
