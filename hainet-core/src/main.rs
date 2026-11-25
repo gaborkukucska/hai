@@ -567,6 +567,54 @@ async fn write_response(stream: &mut tokio::net::TcpStream, status: &str, conten
 
 fn json_body(v: &str) -> Vec<u8> { v.as_bytes().to_vec() }
 
+/// NOSLOP_HUB_DM_MEDIA_V1: streams a complete DM attachment, with one byte range when asked (`Range: bytes=a-b`,
+/// which browsers use to play and seek audio and video).
+async fn serve_dm_media(stream: &mut tokio::net::TcpStream, node: &hainet_noslop::hub::HubNode, id: &str, range: Option<&str>) {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+    let Some((file, mime, len)) = hainet_noslop::hub::dm_media::file_for(node, id).await else {
+        write_response(stream, "404 Not Found", "application/json", &[], br#"{"error":"not on this Hub (yet)"}"#).await;
+        return;
+    };
+    let len = len.max(0) as u64;
+    // "bytes=a-b", "bytes=a-" or "bytes=-n"; anything else (or several ranges) gets the whole file.
+    let parsed = range.and_then(|r| r.strip_prefix("bytes=")).filter(|r| !r.contains(',')).and_then(|r| {
+        let (a, b) = r.split_once('-')?;
+        let (a, b) = (a.trim(), b.trim());
+        if a.is_empty() {
+            let n: u64 = b.parse().ok()?;
+            if n == 0 { return None; }
+            Some((len.saturating_sub(n), len.checked_sub(1)?))
+        } else {
+            let start: u64 = a.parse().ok()?;
+            let end: u64 = if b.is_empty() { len.checked_sub(1)? } else { b.parse::<u64>().ok()?.min(len.checked_sub(1)?) };
+            Some((start, end))
+        }
+    });
+    if let Some((start, end)) = parsed {
+        if start > end || start >= len {
+            let head = format!("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", len);
+            let _ = stream.write_all(head.as_bytes()).await;
+            return;
+        }
+    }
+    let mut f = match tokio::fs::File::open(&file).await {
+        Ok(f) => f,
+        Err(e) => { write_response(stream, "500 Internal Server Error", "application/json", &[], &json_body(&serde_json::json!({"error": e.to_string()}).to_string())).await; return; }
+    };
+    // The type comes from the sender's description: never let a browser run it as a page.
+    let mime = if mime.contains('\r') || mime.contains('\n') || mime.to_ascii_lowercase().contains("html") || mime.to_ascii_lowercase().contains("xml") || mime.to_ascii_lowercase().contains("javascript") { "application/octet-stream".to_string() } else { mime };
+    let common = "Accept-Ranges: bytes\r\nCache-Control: private, max-age=86400\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; sandbox\r\nConnection: close";
+    let (head, start, count) = match parsed {
+        Some((start, end)) => (format!("HTTP/1.1 206 Partial Content\r\nContent-Type: {}\r\nContent-Range: bytes {}-{}/{}\r\nContent-Length: {}\r\n{}\r\n\r\n", mime, start, end, len, end - start + 1, common), start, end - start + 1),
+        None => (format!("HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}\r\n\r\n", mime, len, common), 0, len),
+    };
+    if start > 0 && f.seek(std::io::SeekFrom::Start(start)).await.is_err() { return; }
+    if stream.write_all(head.as_bytes()).await.is_ok() {
+        let _ = tokio::io::copy(&mut (&mut f).take(count), stream).await;
+    }
+    let _ = stream.flush().await;
+}
+
 /// Run a minimal TCP-based HTTP server for health checks and portal API.
 /// Uses raw TCP to avoid hyper version compatibility issues.
 ///
@@ -614,6 +662,20 @@ async fn run_health_server(
             let body_str = String::from_utf8_lossy(&req.body).into_owned();
             let mut extra_headers: Vec<String> = Vec::new();
             let owner_signed = req.headers.contains_key("x-noslop-hub-sig");
+
+            // --- DM attachments for the Web UI chat (NOSLOP_HUB_DM_MEDIA_V1) ------------------------
+            if method == "GET" && path.starts_with("/api/noslop/dm_media/") {
+                let authed = if owner_signed {
+                    hainet_noslop::hub::api::verify_owner_request(&app_state.noslop, &app_state.api_nonces, method, path, &req.headers, &req.body).await.is_ok()
+                } else { session_valid(&app_state.sessions, &req.headers).await };
+                if !authed {
+                    write_response(&mut stream, "401 Unauthorized", "application/json", &[], br#"{"error":"unauthorized"}"#).await;
+                    return;
+                }
+                let id = path.trim_start_matches("/api/noslop/dm_media/").split('?').next().unwrap_or("");
+                serve_dm_media(&mut stream, &app_state.noslop, id, req.headers.get("range").map(|s| s.as_str())).await;
+                return;
+            }
 
             // --- Backups (owner only) ---------------------------------------------------------
             if path == "/api/backup/push" && method == "POST" {

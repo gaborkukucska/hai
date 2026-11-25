@@ -588,7 +588,7 @@ async fn a_schema_v1_database_gains_the_dm_events_table() {
     sqlx::query("CREATE TABLE nh_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)").execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO nh_meta (key, value) VALUES ('schema_version', '1')").execute(&pool).await.unwrap();
     let st = store::Store::open(pool).await.unwrap();
-    assert_eq!(st.meta_get("schema_version").await.unwrap().as_deref(), Some("2"));
+    assert_eq!(st.meta_get("schema_version").await.unwrap().as_deref(), Some(store::SCHEMA_VERSION.to_string().as_str()));
     assert!(st.dm_event_add("x", "p", "p", "hi", NOW).await.unwrap());
     assert!(!st.dm_event_add("x", "p", "p", "hi", NOW).await.unwrap(), "once per message id");
 }
@@ -753,4 +753,179 @@ async fn a_cleared_conversation_is_removed_and_older_copies_stay_out() {
     let res = api::handle(&r.node, "hub_dms_clear", &JValue::obj().with("peer", JValue::str(&gabby.public_key_b64)).with("before", JValue::int(NOW - 90))).await.unwrap().unwrap();
     assert_eq!(res["before"].as_i64(), Some(NOW - 50));
     assert!(api::handle(&r.node, "hub_dms_clear", &JValue::obj()).await.unwrap().is_err(), "peer required");
+}
+
+// --- NOSLOP_HUB_DM_MEDIA_V1 -----------------------------------------------------------------------------
+
+fn media_body(id: &str, bytes: &[u8], sha: Option<&str>) -> String {
+    let sha = sha.map(String::from).unwrap_or_else(|| crate::envelope::sha256_hex(bytes));
+    format!(r#"{{"content":"","media":{{"id":"{}","type":"image","mime_type":"image/gif","size":{},"chunk_count":1,"sha256":"{}"}}}}"#, id, bytes.len(), sha)
+}
+
+/// The MEDIA_REQUESTs the Hub sent so far: (onion, packet).
+fn media_requests(r: &Rig) -> Vec<(String, Packet)> {
+    r.sent.lock().unwrap().iter().filter_map(|(o, l)| Packet::from_wire(l).ok().filter(|p| p.ptype == "MEDIA_REQUEST").map(|p| (o.clone(), p))).collect()
+}
+
+fn chunk_frame(from: &Identity, to: &Identity, media_id: &str, off: i64, data: &[u8], total: i64) -> String {
+    let payload = JValue::obj().with("media_id", JValue::str(media_id)).with("chunk_index", JValue::int(off / (128 * 1024)))
+        .with("total_chunks", JValue::int(999)).with("byte_offset", JValue::int(off)).with("total_size", JValue::int(total))
+        .with("data", JValue::str(keys::b64_encode(data)));
+    signed(Packet::new("MEDIA_CHUNK", &from.public_key_b64, Some(&to.public_key_b64), payload, 1), from, NOW)
+}
+
+async fn wait_for<F: Fn() -> bool>(f: F) -> bool {
+    for _ in 0..100 { if f() { return true; } tokio::time::sleep(std::time::Duration::from_millis(20)).await; }
+    false
+}
+
+/// Answers every MEDIA_REQUEST in `r.sent` from index `from` with the matching range of `file`.
+async fn answer_requests(r: &Rig, holder: &Identity, to: &Identity, file: &[u8], from: usize) -> usize {
+    let reqs = media_requests(r);
+    for (_, p) in reqs.iter().skip(from) {
+        let pl = p.payload.as_ref().unwrap();
+        let off = pl.get_i64("byte_offset").unwrap();
+        let len = pl.get_i64("byte_length").unwrap();
+        let end = (off + len).min(file.len() as i64) as usize;
+        let frame = chunk_frame(holder, to, pl.get_str("media_id").unwrap(), off, &file[off as usize..end], file.len() as i64);
+        r.node.handle_frame(&frame, Listener::Creator).await;
+    }
+    reqs.len()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_incoming_dm_attachment_is_fetched_from_the_sender_for_the_web_ui() {
+    let r = rig(true).await;
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    // 600 KiB: three ranges of at most 256 KiB.
+    let file: Vec<u8> = (0..600 * 1024).map(|i| (i % 251) as u8).collect();
+    let dm = signed(dm_packet(&gabby, &r.creator, "dm-m", &media_body("pic-1", &file, None), None, NOW - 5), &gabby, NOW);
+    r.node.handle_frame(&dm, Listener::Creator).await;
+    assert!(wait_for(|| media_requests(&r).len() >= 3).await, "the Hub asks the sender for the file");
+    let reqs = media_requests(&r);
+    for (onion, p) in &reqs {
+        assert_eq!(onion, &gabby.onion, "asked from the sender's onion");
+        assert_eq!(p.sender_id, r.creator.public_key_b64, "as the identity the DM was sent to");
+        assert_eq!(p.target_user_id.as_deref(), Some(gabby.public_key_b64.as_str()));
+        let pl = p.payload.as_ref().unwrap();
+        let (off, len) = (pl.get_i64("byte_offset").unwrap(), pl.get_i64("byte_length").unwrap());
+        assert!(len <= dm_media::CHUNK_BYTES && len > 0);
+        let signed_text = canon::media_request(&p.sender_id, p.target_user_id.as_deref(), "pic-1", pl.get_i64("chunk_index").unwrap(), pl.get_i64("chunk_size").unwrap(), Some(off), Some(len), pl.get_i64("timestamp"));
+        assert!(keys::verify(&signed_text, p.signature.as_deref().unwrap(), &r.creator.public_key_b64), "signed as MediaManager signs it");
+    }
+    let info = api::handle(&r.node, "hub_dm_media_info", &JValue::obj().with("media_ids", JValue::Arr(vec![JValue::str("pic-1")]))).await.unwrap().unwrap();
+    assert_eq!(info["items"][0]["state"], "fetch");
+    let inbox_before = r.node.store.inbox_pull(0, 100, 1 << 30).await.unwrap().0.len();
+    answer_requests(&r, &gabby, &r.creator, &file, 0).await;
+    assert!(wait_for(|| media_requests(&r).len() >= 3).await);
+    // The third range is requested once the window has room; answer what came since.
+    let mut seen = 3;
+    for _ in 0..20 {
+        let n = media_requests(&r).len();
+        if n > seen { seen = answer_requests(&r, &gabby, &r.creator, &file, seen).await; }
+        if dm_media::file_for(&r.node, "pic-1").await.is_some() { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    let (path, mime, len) = dm_media::file_for(&r.node, "pic-1").await.expect("complete");
+    assert_eq!((mime.as_str(), len), ("image/gif", file.len() as i64));
+    assert_eq!(std::fs::read(path).unwrap(), file);
+    // The chunks were for the Hub: none of them went to the phone's inbox.
+    let after: Vec<_> = r.node.store.inbox_pull(0, 100, 1 << 30).await.unwrap().0;
+    assert_eq!(after.len(), inbox_before);
+    assert!(after.iter().all(|i| !i.packet.contains("MEDIA_CHUNK")));
+    let info = api::handle(&r.node, "hub_dm_media_info", &JValue::obj().with("media_ids", JValue::Arr(vec![JValue::str("pic-1")]))).await.unwrap().unwrap();
+    assert_eq!((info["items"][0]["state"].as_str(), info["items"][0]["incoming"].as_bool()), (Some("complete"), Some(true)));
+    // Deleting the DM takes the attachment with it.
+    let del = signed(delete_packet(&gabby, &r.creator, "dm-m", NOW - 1, false), &gabby, NOW);
+    r.node.handle_frame(&del, Listener::Creator).await;
+    settle().await;
+    assert!(wait_for(|| !dm_media::dir(&r.node).join("pic-1").exists()).await, "file removed");
+    assert!(r.node.store.dm_media_get("pic-1").await.unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_chunk_from_anyone_else_or_for_no_fetch_still_goes_to_the_phone_and_a_bad_file_is_refused() {
+    let r = rig(true).await;
+    let (gabby, _) = ident(7);
+    let (mallory, _) = ident(9);
+    add_contact(&r, &gabby, "creator").await;
+    let file = b"tiny gif bytes".to_vec();
+    // Declared SHA-256 that the bytes will not match.
+    let dm = signed(dm_packet(&gabby, &r.creator, "dm-x", &media_body("pic-2", &file, Some(&"ab".repeat(32))), None, NOW - 5), &gabby, NOW);
+    r.node.handle_frame(&dm, Listener::Creator).await;
+    assert!(wait_for(|| !media_requests(&r).is_empty()).await);
+    // Someone else's chunk for the same id is not taken: it goes to the phone as before.
+    r.node.handle_frame(&chunk_frame(&mallory, &r.creator, "pic-2", 0, &file, file.len() as i64), Listener::Creator).await;
+    // A chunk for media nobody here is fetching goes to the phone too.
+    r.node.handle_frame(&chunk_frame(&gabby, &r.creator, "other", 0, &file, file.len() as i64), Listener::Creator).await;
+    settle().await;
+    let inbox: Vec<_> = r.node.store.inbox_pull(0, 100, 1 << 30).await.unwrap().0;
+    assert_eq!(inbox.iter().filter(|i| i.packet.contains("MEDIA_CHUNK")).count(), 2);
+    // The holder's answer does not match the declared SHA-256: refused, nothing kept.
+    answer_requests(&r, &gabby, &r.creator, &file, 0).await;
+    let failed = || async { r.node.store.dm_media_get("pic-2").await.unwrap().map(|m| m.state) };
+    let mut state = None;
+    for _ in 0..50 { state = failed().await; if state.as_deref() == Some("failed") { break; } tokio::time::sleep(std::time::Duration::from_millis(20)).await; }
+    assert_eq!(state.as_deref(), Some("failed"));
+    assert!(dm_media::file_for(&r.node, "pic-2").await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_owners_phone_uploads_its_own_dm_attachments_and_a_cleared_chat_removes_them() {
+    let r = rig(true).await;
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    // The owner's own DM with an attachment, passing through hub_send: recorded as waiting for the phone.
+    let file: Vec<u8> = (0..1500u32).map(|i| (i % 7) as u8).collect();
+    let sha = crate::envelope::sha256_hex(&file);
+    let out = dm_packet(&r.creator, &gabby, "dm-o", &media_body("vid-1", &file, None), None, NOW - 3);
+    dms::observe(&r.node, &out, false).await;
+    let row = r.node.store.dm_media_get("vid-1").await.unwrap().unwrap();
+    assert_eq!((row.state.as_str(), row.holder.as_str()), ("upload", r.creator.public_key_b64.as_str()));
+    assert!(media_requests(&r).is_empty(), "the Hub never asks its own identity");
+    let put = |off: usize, end: usize, sha: &str| JValue::obj().with("media_id", JValue::str("vid-1")).with("sha256", JValue::str(sha))
+        .with("size", JValue::int(file.len() as i64)).with("offset", JValue::int(off as i64)).with("data", JValue::str(keys::b64_encode(&file[off..end])))
+        .with("peer", JValue::str(&gabby.public_key_b64)).with("type", JValue::str("video")).with("mime_type", JValue::str("video/mp4"));
+    let a = api::handle(&r.node, "dm_media_put", &put(0, 1000, &sha)).await.unwrap().unwrap();
+    assert_eq!((a["received"].as_i64(), a["complete"].as_bool()), (Some(1000), Some(false)));
+    let resume = api::handle(&r.node, "dm_media_put", &put(1200, 1500, &sha)).await.unwrap().unwrap();
+    assert_eq!((resume["status"].as_str(), resume["received"].as_i64()), (Some("resume"), Some(1000)));
+    let b = api::handle(&r.node, "dm_media_put", &put(1000, 1500, &sha)).await.unwrap().unwrap();
+    assert_eq!(b["complete"].as_bool(), Some(true));
+    assert_eq!(std::fs::read(dm_media::file_for(&r.node, "vid-1").await.unwrap().0).unwrap(), file);
+    // An attachment the Hub does not know yet (an older DM the phone mirrors) is recorded from the upload.
+    let bad = api::handle(&r.node, "dm_media_put", &put(0, 1500, &"cd".repeat(32)).with("media_id", JValue::str("old-1"))).await.unwrap();
+    assert!(bad.is_err(), "a file that does not match its SHA-256 is refused");
+    let old = r.node.store.dm_media_get("old-1").await.unwrap().unwrap();
+    assert_eq!((old.peer.as_str(), old.mime_type.as_str(), old.received), (gabby.public_key_b64.as_str(), "video/mp4", 0));
+    // Clear Chat on the phone: the conversation's attachments go with it.
+    api::handle(&r.node, "hub_dms_clear", &JValue::obj().with("peer", JValue::str(&gabby.public_key_b64)).with("before", JValue::int(NOW))).await.unwrap().unwrap();
+    assert!(r.node.store.dm_media_get("vid-1").await.unwrap().is_none());
+    assert!(!dm_media::dir(&r.node).join("vid-1").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_picker_gif_or_an_oversized_attachment_is_not_fetched() {
+    let r = rig(true).await;
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    let gif = r#"{"content":"","media":{"id":"noslop-gif://https://media.example/x.gif","type":"image","mime_type":"image/gif","size":0,"chunk_count":0}}"#;
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.creator, "dm-g", gif, None, NOW - 5), &gabby, NOW), Listener::Creator).await;
+    let huge = format!(r#"{{"content":"","media":{{"id":"big-1","type":"video","mime_type":"video/mp4","size":{},"chunk_count":1}}}}"#, dm_media::max_bytes() + 1);
+    r.node.handle_frame(&signed(dm_packet(&gabby, &r.creator, "dm-h", &huge, None, NOW - 4), &gabby, NOW), Listener::Creator).await;
+    settle().await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(media_requests(&r).is_empty());
+    assert_eq!(r.node.store.dm_media_get("big-1").await.unwrap().map(|m| m.state).as_deref(), Some("too_large"));
+}
+
+#[tokio::test]
+async fn republishing_the_creator_onion_needs_hosting() {
+    let r = rig(true).await;
+    let res = api::handle(&r.node, "creator_onion_republish", &JValue::obj()).await.unwrap().unwrap();
+    assert_eq!(res["republished"].as_bool(), Some(true));
+    api::handle(&r.node, "creator_hosting_set", &JValue::obj().with("enabled", JValue::Bool(false))).await.unwrap().unwrap();
+    let res = api::handle(&r.node, "creator_onion_republish", &JValue::obj()).await.unwrap().unwrap();
+    assert_eq!(res["republished"].as_bool(), Some(false));
 }

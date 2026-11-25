@@ -54,12 +54,70 @@ const DmMedia = ({ media }: { media: { id: string; type: string } }) => {
       </button>
     );
   }
-  const label = media.type === 'image' ? 'Image' : media.type === 'video' ? 'Video' : media.type === 'audio' ? 'Audio' : 'File';
-  return (
-    <p className="mt-1 text-xs text-theme-text-muted italic">
-      {label} attachment: open this conversation on your phone to view it.
-    </p>
-  );
+  return <DmAttachment media={media} />;
+};
+
+// NOSLOP_HUB_DM_MEDIA_V1: an attachment the Hub keeps (fetched from the contact, or uploaded by the owner's phone).
+type DmMediaInfo = { state: string; type: string; mime_type: string; size: number; received: number; incoming: boolean; error: string };
+
+const DmAttachment = ({ media }: { media: { id: string; type: string } }) => {
+  const [info, setInfo] = useState<DmMediaInfo | null | undefined>(undefined);
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const res: any = await invoke('hub_dm_media_info', { media_ids: [media.id] });
+        const item = Array.isArray(res?.items) ? res.items.find((i: any) => i.media_id === media.id) : undefined;
+        if (stopped) return;
+        setInfo(item ?? null);
+        // Still on its way: look again in a while.
+        if (!item || item.state === 'fetch' || item.state === 'upload') timer = setTimeout(load, 15000);
+      } catch {
+        if (!stopped) { setInfo(null); timer = setTimeout(load, 30000); }
+      }
+    };
+    load();
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
+  }, [media.id]);
+
+  const kind = info?.type || media.type;
+  const label = kind === 'image' ? 'Image' : kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : 'File';
+  const src = `/api/noslop/dm_media/${encodeURIComponent(media.id)}`;
+  const note = (text: string) => <p className="mt-1 text-xs text-theme-text-muted italic">{text}</p>;
+
+  if (info === undefined) return note(`${label} attachment…`);
+  if (info && info.state === 'complete') {
+    const mime = (info.mime_type || '').toLowerCase();
+    if (kind === 'image' || mime.startsWith('image/')) {
+      return (
+        <a href={src} target="_blank" rel="noopener noreferrer">
+          <img src={src} alt={label} loading="lazy" className="mt-1 max-w-[280px] max-h-[280px] rounded-lg object-contain bg-black/10" />
+        </a>
+      );
+    }
+    if (kind === 'video' || mime.startsWith('video/')) {
+      return <video src={src} controls preload="metadata" className="mt-1 max-w-[320px] max-h-[280px] rounded-lg bg-black" />;
+    }
+    if (kind === 'audio' || mime.startsWith('audio/')) {
+      return <audio src={src} controls preload="metadata" className="mt-1 w-[260px] max-w-full" />;
+    }
+    return (
+      <a href={src} download={media.id} className="mt-1 inline-block text-xs px-3 py-2 rounded-lg bg-theme-bg-tertiary hover:bg-theme-border transition-colors">
+        Download file ({Math.max(1, Math.round(info.size / 1024))} KB)
+      </a>
+    );
+  }
+  if (info && info.state === 'fetch') {
+    const pct = info.size > 0 ? Math.floor((info.received * 100) / info.size) : 0;
+    return note(`${label} attachment: fetching it from the sender${pct > 0 ? ` (${pct}%)` : ''}… It shows here once their phone is online.`);
+  }
+  if (info && info.state === 'upload') {
+    return note(`${label} attachment: it shows here once your phone has uploaded it to the Hub (open NoSlop on your phone).`);
+  }
+  if (info && info.state === 'too_large') return note(`${label} attachment: too large to keep on the Hub; open this conversation on your phone to view it.`);
+  if (info && info.state === 'failed') return note(`${label} attachment could not be fetched${info.error ? ` (${info.error})` : ''}; open this conversation on your phone to view it.`);
+  return note(`${label} attachment: open this conversation on your phone to view it.`);
 };
 
 const DynamicRenderer = ({ comp }: { comp: DynamicComponent | string }) => {

@@ -11,10 +11,12 @@
 //!   `PostPayload` JSON, and the engagement on them, served to followers exactly as received.
 //! * `nh_media`: public creator media held for followers (bytes on disk, see `HubPaths::media_dir`).
 //! * `nh_meta`: key/value settings (creator profile, hosting switch, schema version).
+//! * `nh_dm_media` (v3): attachments of the owner's one-to-one DMs, kept for the Web UI chat (bytes in
+//!   `<noslop_dir>/dm_media`, see `dm_media.rs`).
 
 use sqlx::{sqlite::SqlitePool, Row};
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Clone)]
 pub struct Store {
@@ -33,6 +35,35 @@ pub struct DmEvent {
     pub sender: String,
     pub preview: String,
     pub at: i64,
+}
+
+/// NOSLOP_HUB_DM_MEDIA_V1: one DM attachment the Web UI chat shows (`nh_dm_media`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DmMediaRow {
+    pub media_id: String,
+    /// The DM that carries it, and when that DM was written (for deletes and cleared chats).
+    pub dm_id: String,
+    pub dm_ts: i64,
+    /// The contact (the conversation).
+    pub peer: String,
+    /// Who holds the file: the contact for an incoming DM (the Hub fetches it), one of the owner's identities
+    /// for an outgoing one (the owner's phone uploads it).
+    pub holder: String,
+    /// The owner's identity the contact knows (the one the Hub asks as).
+    pub as_key: String,
+    pub mtype: String,
+    pub mime_type: String,
+    pub size: i64,
+    /// Lower-case hex, or empty when the sender did not say.
+    pub sha256: String,
+    pub access_key: String,
+    pub received: i64,
+    /// `fetch` (the Hub fetches it from the contact), `upload` (waiting for the owner's phone), `complete`,
+    /// `too_large` or `failed`.
+    pub state: String,
+    pub attempts: i64,
+    pub next_at: i64,
+    pub error: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -114,6 +145,14 @@ impl Store {
             // NOSLOP_HUB_DM_VIEW_V1: DMs from contacts that reached the Hub, for the Web UI's notifications.
             let mut tx = self.pool.begin().await?;
             sqlx::query("CREATE TABLE IF NOT EXISTS nh_dm_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, dm_id TEXT NOT NULL UNIQUE, peer TEXT NOT NULL, sender TEXT NOT NULL, preview TEXT NOT NULL, at INTEGER NOT NULL)").execute(&mut *tx).await?;
+            sqlx::query("INSERT OR REPLACE INTO nh_meta (key, value) VALUES ('schema_version', '2')").execute(&mut *tx).await?;
+            tx.commit().await?;
+        }
+        if current < 3 {
+            // NOSLOP_HUB_DM_MEDIA_V1: DM attachments for the Web UI chat.
+            let mut tx = self.pool.begin().await?;
+            sqlx::query("CREATE TABLE IF NOT EXISTS nh_dm_media (media_id TEXT PRIMARY KEY, dm_id TEXT NOT NULL, dm_ts INTEGER NOT NULL, peer TEXT NOT NULL, holder TEXT NOT NULL, as_key TEXT NOT NULL, mtype TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, access_key TEXT NOT NULL, received INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL)").execute(&mut *tx).await?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS nh_dm_media_peer ON nh_dm_media (peer, dm_ts)").execute(&mut *tx).await?;
             sqlx::query("INSERT OR REPLACE INTO nh_meta (key, value) VALUES ('schema_version', ?)").bind(SCHEMA_VERSION.to_string()).execute(&mut *tx).await?;
             tx.commit().await?;
         }
@@ -201,6 +240,59 @@ impl Store {
         Ok((rows.into_iter().map(|r| DmEvent {
             seq: r.get(0), dm_id: r.get(1), peer: r.get(2), sender: r.get(3), preview: r.get(4), at: r.get(5),
         }).collect(), latest.unwrap_or(0)))
+    }
+
+    // --- DM attachments (NOSLOP_HUB_DM_MEDIA_V1) -----------------------------------------------
+
+    fn row_to_dm_media(r: &sqlx::sqlite::SqliteRow) -> DmMediaRow {
+        DmMediaRow {
+            media_id: r.get("media_id"), dm_id: r.get("dm_id"), dm_ts: r.get("dm_ts"), peer: r.get("peer"), holder: r.get("holder"),
+            as_key: r.get("as_key"), mtype: r.get("mtype"), mime_type: r.get("mime_type"), size: r.get("size"), sha256: r.get("sha256"),
+            access_key: r.get("access_key"), received: r.get("received"), state: r.get("state"), attempts: r.get("attempts"),
+            next_at: r.get("next_at"), error: r.get("error"),
+        }
+    }
+
+    /// Records an attachment once (the first DM that names it wins); returns whether it was new.
+    pub async fn dm_media_add(&self, m: &DmMediaRow, now: i64) -> Result<bool, sqlx::Error> {
+        Ok(sqlx::query("INSERT OR IGNORE INTO nh_dm_media (media_id, dm_id, dm_ts, peer, holder, as_key, mtype, mime_type, size, sha256, access_key, received, state, attempts, next_at, error, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(&m.media_id).bind(&m.dm_id).bind(m.dm_ts).bind(&m.peer).bind(&m.holder).bind(&m.as_key).bind(&m.mtype).bind(&m.mime_type)
+            .bind(m.size).bind(&m.sha256).bind(&m.access_key).bind(m.received).bind(&m.state).bind(m.attempts).bind(m.next_at).bind(&m.error).bind(now)
+            .execute(&self.pool).await?.rows_affected() > 0)
+    }
+
+    pub async fn dm_media_get(&self, media_id: &str) -> Result<Option<DmMediaRow>, sqlx::Error> {
+        Ok(sqlx::query("SELECT * FROM nh_dm_media WHERE media_id = ?").bind(media_id).fetch_optional(&self.pool).await?.as_ref().map(Self::row_to_dm_media))
+    }
+
+    /// Saves the progress fields of `m` (state, received, attempts, next_at, error, and the declared file).
+    pub async fn dm_media_update(&self, m: &DmMediaRow, now: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE nh_dm_media SET mtype = ?, mime_type = ?, size = ?, sha256 = ?, received = ?, state = ?, attempts = ?, next_at = ?, error = ?, updated_at = ? WHERE media_id = ?")
+            .bind(&m.mtype).bind(&m.mime_type).bind(m.size).bind(&m.sha256).bind(m.received).bind(&m.state).bind(m.attempts).bind(m.next_at).bind(&m.error).bind(now).bind(&m.media_id)
+            .execute(&self.pool).await.map(|_| ())
+    }
+
+    /// Attachments the Hub should fetch now (state `fetch`, due), oldest DM first.
+    pub async fn dm_media_due(&self, now: i64, limit: i64) -> Result<Vec<DmMediaRow>, sqlx::Error> {
+        Ok(sqlx::query("SELECT * FROM nh_dm_media WHERE state = 'fetch' AND next_at <= ? ORDER BY dm_ts ASC LIMIT ?").bind(now).bind(limit)
+            .fetch_all(&self.pool).await?.iter().map(Self::row_to_dm_media).collect())
+    }
+
+    /// Bytes of DM attachments on disk (complete or partly received).
+    pub async fn dm_media_total_bytes(&self) -> Result<i64, sqlx::Error> {
+        Ok(sqlx::query("SELECT COALESCE(SUM(received), 0) FROM nh_dm_media").fetch_one(&self.pool).await?.get(0))
+    }
+
+    /// Forgets the attachments of one DM, or of a conversation up to `before`; returns their media ids.
+    pub async fn dm_media_remove_dm(&self, dm_id: &str) -> Result<Vec<String>, sqlx::Error> {
+        let ids: Vec<String> = sqlx::query("SELECT media_id FROM nh_dm_media WHERE dm_id = ?").bind(dm_id).fetch_all(&self.pool).await?.into_iter().map(|r| r.get(0)).collect();
+        sqlx::query("DELETE FROM nh_dm_media WHERE dm_id = ?").bind(dm_id).execute(&self.pool).await?;
+        Ok(ids)
+    }
+    pub async fn dm_media_remove_peer(&self, peer: &str, before: i64) -> Result<Vec<String>, sqlx::Error> {
+        let ids: Vec<String> = sqlx::query("SELECT media_id FROM nh_dm_media WHERE peer = ? AND dm_ts <= ?").bind(peer).bind(before).fetch_all(&self.pool).await?.into_iter().map(|r| r.get(0)).collect();
+        sqlx::query("DELETE FROM nh_dm_media WHERE peer = ? AND dm_ts <= ?").bind(peer).bind(before).execute(&self.pool).await?;
+        Ok(ids)
     }
 
     pub async fn inbox_stats(&self) -> Result<(i64, i64), sqlx::Error> {

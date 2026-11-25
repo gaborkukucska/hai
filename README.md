@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen">
-  <img alt="Version" src="https://img.shields.io/badge/Version-0.59--alpha-blue">
+  <img alt="Version" src="https://img.shields.io/badge/Version-0.60--alpha-blue">
   <img alt="Phase" src="https://img.shields.io/badge/Phase-Integration_Active-orange">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple">
 </p>
@@ -302,14 +302,14 @@ hainet/
 
 ## 🚀 Current Status
 
-**Version 0.59-alpha — Integration Active**
+**Version 0.60-alpha — Integration Active**
 
 | Component | Status |
 |---|---|
 | hainet-core (networking, multimodal, storage) | ✅ Stable |
 | hainet-persona (TrippleEffect agentic core) | ✅ Phase 1 Complete |
 | hainet-social (gChat gossip mesh, E2EE, media relay) | ✅ Ported to Rust (SQLite synced w/ NoSlop) |
-| hainet-noslop (NoSlop 0.8 Home HUB: verified mesh, creator hosting, owner-signed API) | ✅ Built, tested (unit, vectors, end to end); device test pending |
+| hainet-noslop (NoSlop 0.8 Home HUB: verified mesh, creator hosting, owner-signed API, DMs and their attachments in the Web UI) | ✅ Built, tested (unit, vectors, end to end); device-tested in parts |
 | hainet-chain (blockchain, identity, governance) | ✅ Functional |
 | hainet-collab (compute sharing, PPLPWR integration) | 🔄 Phase 2 Active |
 | hainet-seed (smart installer, mobile-assisted mesh deployment) | ✅ Operational |

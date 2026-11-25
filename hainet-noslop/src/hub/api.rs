@@ -24,6 +24,9 @@
 //! | `creator_content_sync` | `{posts, comments, reactions, keep_ids, full}`: the creator's public content |
 //! | `creator_media_put` / `creator_media_status` | resumable upload of the creator's public media |
 //! | `sync_push_packets` / `sync_pull_packets` | older clients: same paths, without destinations / ACKs |
+//! | `creator_onion_republish` | publishes the creator onion again (fresh descriptor) after the phone handed it back |
+//! | `dm_media_put` | resumable upload of an attachment of one of the owner's DMs (the Web UI chat shows it) |
+//! | `hub_dm_media_info` | `{media_ids}`: whether each DM attachment is on the Hub (`complete`) or still coming |
 
 use super::{admin, content, creator, store::Contact, tor, CreatorProfile, HubNode, Retry};
 use crate::{canon, envelope::sha256_hex, json::JValue, keys, packet::Packet};
@@ -99,6 +102,21 @@ pub async fn handle(node: &Arc<HubNode>, cmd: &str, args: &JValue) -> Option<Res
             let Some(peer) = args.get_str("peer").filter(|p| !p.is_empty()) else { return Some(Err("peer required".into())) };
             let before = args.get_i64("before").filter(|b| *b > 0).unwrap_or_else(|| node.now());
             super::dms::clear_conversation(node, peer, before).await.map(|(n, kept)| json!({"deleted": n, "before": kept}))
+        }
+        "hub_dm_media_info" => {
+            // NOSLOP_HUB_DM_MEDIA_V1: for the Web UI chat (and the phone, to see what it still has to upload).
+            let ids: Vec<String> = arr(args, "media_ids").iter().filter_map(|v| v.as_str().map(String::from)).collect();
+            super::dm_media::info(node, &ids).await.map(|items| json!({"items": items.iter().map(|i| i.to_serde()).collect::<Vec<_>>()}))
+        }
+        "dm_media_put" => super::dm_media::put(node, args).await.map(|v| v.to_serde()),
+        "creator_onion_republish" => {
+            // NOSLOP_HUB_ONION_REPUBLISH_V1 (see HubNode::republish_creator_onion).
+            if node.republish_creator_onion().await {
+                info!("NOSLOP_HUB: creator onion published again at the phone's request (fresh descriptor)");
+                Ok(json!({"status": "ok", "republished": true}))
+            } else {
+                Ok(json!({"status": "ok", "republished": false}))
+            }
         }
         "hub_dm_events" => {
             // NOSLOP_HUB_DM_VIEW_V1: DMs from contacts that reached the Hub, for the Web UI's notifications.

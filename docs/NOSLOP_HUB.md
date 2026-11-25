@@ -96,6 +96,9 @@ cookie for its own browser; `POST /api/auth/logout` ends it.
 | `hub_feed_push` | `posts: [PostPayload]` | `posts_stored` (Web UI feed only; nothing is sent) |
 | `hub_dms_clear` | `peer`, `before` (ms; default now) | `deleted`, `before` (the conversation cleared on the phone, §9) |
 | `hub_dm_events` | `after`, `limit` (≤ 500) | `events: [{seq, dm_id, peer, sender, preview, at}]`, `latest` (incoming DMs that reached the Hub, §9) |
+| `hub_dm_media_info` | `media_ids` (≤ 200) | `items: [{media_id, state, type, mime_type, size, received, incoming, error, next_at}]` (DM attachments, §10) |
+| `dm_media_put` | `media_id`, `sha256`, `size`, `offset`, `data` (≤ 1 MB, Base64); first call also `peer`, `dm_id`, `dm_ts`, `as_key`, `incoming`, `type`, `mime_type` | `status` (`ok`, `resume`, `busy`), `received`, `complete` (§10) |
+| `creator_onion_republish` | none | `republished`: the creator onion published again with a fresh descriptor (§3) |
 | `creator_identity_set` | `public_key`, `private_key`, `enc_public_key`, `enc_private_key`, `display_name`, `replace` | `onion_address` |
 | `creator_identity_remove` | – | removes the keys, the creator content and followers |
 | `creator_profile_set` | `display_name`, `handle`, `bio`, `avatar_b64`, `fund_me_link`, `is_creator`, `is_discoverable` | – |
@@ -127,6 +130,7 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 | `HAINET_MESH_MAX_CONNECTIONS` / `HAINET_MESH_MAX_SENDS` | 64 / 16 |
 | `HAINET_INBOX_MAX_ITEMS` / `_MAX_BYTES` / `_MAX_PER_SENDER` | 20,000 / 512 MB / 2,000 |
 | `HAINET_NOSLOP_MEDIA_QUOTA` | 20 GB |
+| `HAINET_NOSLOP_DM_MEDIA_QUOTA` / `HAINET_NOSLOP_DM_MEDIA_MAX` | 5 GB / 100 MB (DM attachments, §10) |
 | `HAINET_NOSLOP_BACKUP_MAX` / `HAINET_NOSLOP_BACKUP_KEEP` | 2 GB / 5 |
 | `HAINET_SESSION_TTL_HOURS` | 168 |
 | `HAINET_HTTP_MAX_HEADER_BYTES` / `HAINET_HTTP_MAX_BODY_BYTES` | 32 KB / 16 MB |
@@ -136,10 +140,13 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 * `cargo test -p hainet-noslop --features hub`: 7 cross-language vector tests (Gson / Bouncy Castle),
   30 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
   and chunk serving, re-signing and relays, owner signatures, Admin AI, presence, inbox ACK, backup
-  sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v2, Web UI DMs sent from
+  sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v3, Web UI DMs sent from
   the right identity and the ones refused, signed deletes from either side and forged ones,
-  cleared conversations).
-* End to end against the real `hainet-core` binary with an independent Python client (37 checks):
+  cleared conversations), plus 5 for DM attachments (fetched from the sender with signed ranges and kept out of
+  the phone's inbox, chunks from anyone else passed on, a wrong SHA-256 refused, the owner's resumable upload,
+  deletes and cleared chats removing files, picker GIFs and oversized files not fetched, onion republish).
+* End to end against the real `hainet-core` binary with an independent Python client (43 checks, 6 for DM
+  attachments: upload, session required, served with its type and `nosniff`, a byte range, 404, state):
   owner auth and replay, creator hand-over, a follower's handshake answered on its own connection,
   dropped unsigned and forged frames, a follower's DM decrypted into the Web UI chat with one
   notification event (and still in the phone's inbox), the owner's reply shown without one, a Web UI
@@ -153,8 +160,8 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 * The Hub does not relay gossip for others while the phone is offline (it never did).
 * Non-creator community mirroring and the discovery-cache work of the Enhancement Plan.
 * Group messages are not shown in the Web UI chat (§9), and the Web UI sends text only (no attachments).
-  Attachments other than picker GIFs are not shown there: they stay on the sender's device and the phone
-  fetches them over the mesh (the Web UI says so).
+* The Hub does not serve the owner's own DM attachments to the contact while the phone is away (the contact's
+  phone asks the owner's phone, as before).
 
 ## 9. DMs in the Web UI (`NOSLOP_HUB_DM_VIEW_V1`, 2026-11-24)
 
@@ -208,5 +215,33 @@ never applied a DM delete before, see its TECHNICAL_REFERENCE §16.65) and `NOSL
 (`mediaId` `noslop-gif://https://…`, empty text), which showed as an empty message. The Web UI now shows a
 "GIF · Load from <host>" button and loads the GIF (no referrer) only when clicked, as the app asks before
 loading it (the GIF host sees the address of the computer that loads it). Other attachments say to open the
-conversation on the phone. The notification for a GIF reads "[GIF]".
+conversation on the phone. The notification for a GIF reads "[GIF]". Superseded for other attachments by §10.
+
+## 10. DM attachments in the Web UI chat (`NOSLOP_HUB_DM_MEDIA_V1`, 2026-11-25)
+
+A DM carries only an attachment's description (`MediaMetadata`: id, type, mime type, size, SHA-256); the file stays
+with the sender. The Hub now keeps a copy for the Web UI (`hub/dm_media.rs`, table `nh_dm_media`, store schema v3,
+files in `<noslop_dir>/dm_media`):
+
+* **A contact's attachment** is fetched by the Hub from the contact as soon as it opens the DM: byte ranges of at
+  most 256 KiB (what a phone serves), 4 in flight, each `MEDIA_REQUEST` signed `noslop-media-req-v1` and sent as
+  the owner's identity the DM was addressed to. The contact's phone allows it (the requester is the DM's other
+  party) and answers to that identity's onion, which is the Hub's. A `MEDIA_CHUNK` that belongs to such a fetch
+  (same id, from the holder, a range asked for) stays on the Hub; every other chunk goes to the phone's inbox as
+  before. The file must have the declared size and, when given, SHA-256. A contact that does not answer (three
+  90 s rounds) is asked again later (1, 5, 15, 30, 60 min …) for up to three days. Picker GIFs (links) and files
+  over `HAINET_NOSLOP_DM_MEDIA_MAX` are not fetched.
+* **The owner's own attachments** (and the contact's ones the phone already downloaded) are uploaded by the phone
+  (`dm_media_put`, owner-signed, resumable) when it mirrors its DMs, after asking `hub_dm_media_info` what is missing.
+* **Web UI**: `GET /api/noslop/dm_media/<id>` (session cookie, or an owner signature) streams a complete file with
+  its type, one byte range when asked (audio and video seek), `nosniff`, a sandboxing CSP, and never an HTML or
+  script type. The chat shows images and GIFs, plays audio, voice recordings and video, offers other files for
+  download, and says when an attachment is still being fetched or waits for the phone.
+* A deleted DM (`DELETE_MESSAGE`) or a cleared conversation (`hub_dms_clear`) takes its attachments with it.
+
+**Creator onion republish** (`NOSLOP_HUB_ONION_REPUBLISH_V1`, same day). When the phone could not reach the Hub
+for a while it published the creator onion itself; after handing it back, the phone's descriptor stayed the newest
+on the directories and contacts kept finding the frozen phone ("Host unreachable") until the Hub restarted. On
+hand-back the phone now calls `creator_onion_republish`: the Hub withdraws and re-adds the onion (`DEL_ONION`,
+`ADD_ONION`), which uploads a fresh descriptor. NoSlop side: TECHNICAL_REFERENCE §16.66.
 <!-- # END OF FILE docs/NOSLOP_HUB.md -->

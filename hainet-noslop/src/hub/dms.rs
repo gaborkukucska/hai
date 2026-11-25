@@ -33,6 +33,10 @@ pub struct DmRecord {
     pub media_type: Option<String>,
     /// True when the contact wrote it (a notification), false when the owner did.
     pub incoming: bool,
+    /// NOSLOP_HUB_DM_MEDIA_V1: the owner's identity in this conversation, and the attachment's full description
+    /// (`MediaMetadata`) when there is one.
+    pub me: String,
+    pub media: Option<json::JValue>,
 }
 
 pub type DmHook = Arc<dyn Fn(DmRecord) -> BoxFut<()> + Send + Sync>;
@@ -64,6 +68,7 @@ pub async fn clear_conversation(node: &Arc<HubNode>, peer: &str, before: i64) ->
     node.store.dm_events_remove_peer(peer).await.map_err(|e| e.to_string())?;
     let hook = node.dm_remove_hook.read().await.clone();
     let deleted = match hook { Some(h) => h(DmRemoval::Conversation { peer: peer.to_string(), before }).await, None => 0 };
+    super::dm_media::forget_conversation(node, peer, before).await;
     Ok((deleted, before))
 }
 
@@ -90,6 +95,7 @@ pub async fn observe_delete(node: &Arc<HubNode>, pkt: &Packet, incoming: bool) {
         return;
     }
     if let Err(e) = node.store.dm_event_remove(id).await { debug!("NOSLOP_HUB: DM event not removed: {}", e); }
+    super::dm_media::forget_dm(node, id).await;
     if let Some(h) = node.dm_remove_hook.read().await.clone() {
         h(DmRemoval::Message { id: id.to_string(), sender: author.to_string() }).await;
     }
@@ -106,6 +112,10 @@ pub async fn observe(node: &Arc<HubNode>, pkt: &Packet, incoming: bool) {
     // NOSLOP_HUB_DM_DELETE_V1: nothing from before the owner cleared this conversation comes back.
     let cleared = cleared_before(node, &rec.peer).await;
     if cleared > 0 && rec.timestamp <= cleared { return; }
+    // NOSLOP_HUB_DM_MEDIA_V1: the attachment is kept for the Web UI (fetched from the contact, or uploaded by the phone).
+    if let Some(d) = rec.media.as_ref().and_then(super::dm_media::describe) {
+        super::dm_media::register(node, d, &rec.id, rec.timestamp, &rec.peer, &rec.me, incoming).await;
+    }
     if incoming {
         let preview = preview(&rec);
         if let Err(e) = node.store.dm_event_add(&rec.id, &rec.peer, &rec.sender, &preview, node.now()).await {
@@ -157,6 +167,7 @@ pub async fn open(node: &Arc<HubNode>, pkt: &Packet, incoming: bool) -> Option<D
         let secret = me.x25519_secret();
         if let Ok(plain) = dm::decrypt_v2(ct, nonce, &their_enc, &secret, sender, recipient, id, None, ts, dm::DM_AAD_MESSAGE) {
             let (content, media_id, media_type) = parse_body(&plain);
+            let media = json::parse(&plain).ok().and_then(|v| v.get("media").filter(|m| matches!(m, json::JValue::Obj(_))).cloned());
             return Some(DmRecord {
                 id: id.to_string(),
                 peer: peer.clone(),
@@ -166,6 +177,8 @@ pub async fn open(node: &Arc<HubNode>, pkt: &Packet, incoming: bool) -> Option<D
                 media_id,
                 media_type,
                 incoming,
+                me: me.public_key_b64.clone(),
+                media,
             });
         }
     }
@@ -206,7 +219,7 @@ pub async fn send_from_web_ui(node: &Arc<HubNode>, peer: &str, text: &str) -> Re
         .with("ciphertext", json::JValue::str(ct)).with("timestamp", json::JValue::int(ts)).with("v", json::JValue::int(2));
     let pkt = Packet::new("MESSAGE", &me.public_key_b64, Some(peer), payload, 3);
     node.deliver(contact.onion_address.clone(), pkt, super::Retry::Spool);
-    Ok(DmRecord { id, peer: peer.to_string(), sender: me.public_key_b64.clone(), content: text.to_string(), timestamp: ts, media_id: None, media_type: None, incoming: false })
+    Ok(DmRecord { id, peer: peer.to_string(), sender: me.public_key_b64.clone(), content: text.to_string(), timestamp: ts, media_id: None, media_type: None, incoming: false, me: me.public_key_b64.clone(), media: None })
 }
 
 /// Longest Web UI message (the phone's composer allows far less; this keeps one packet well under a frame).

@@ -24,6 +24,7 @@ pub mod admin;
 pub mod api;
 pub mod content;
 mod creator;
+pub mod dm_media;
 pub mod dms;
 pub mod store;
 pub mod tor;
@@ -200,6 +201,8 @@ pub struct HubNode {
     admin_hook: RwLock<Option<AdminHook>>,
     pub(crate) dm_hook: RwLock<Option<dms::DmHook>>,
     pub(crate) dm_remove_hook: RwLock<Option<dms::DmRemoveHook>>,
+    /// NOSLOP_HUB_DM_MEDIA_V1: DM attachments being fetched, by media id.
+    pub(crate) dm_fetches: Mutex<HashMap<String, dm_media::ActiveFetch>>,
     clock: Clock,
 }
 
@@ -248,6 +251,7 @@ impl HubNode {
             admin_hook: RwLock::new(None),
             dm_hook: RwLock::new(None),
             dm_remove_hook: RwLock::new(None),
+            dm_fetches: Mutex::new(HashMap::new()),
             clock,
             cfg,
             store,
@@ -281,6 +285,16 @@ impl HubNode {
     }
 
     pub async fn reload_personal(&self) { *self.personal.write().await = load_identity(&self.cfg.identity_dir); }
+
+    /// NOSLOP_HUB_ONION_REPUBLISH_V1: publishes the creator onion again (a fresh descriptor) while it is hosted
+    /// here. When the phone published the creator onion itself while it could not reach the Hub, its descriptor
+    /// is the newest one on the directories, and contacts keep finding the phone's (dead) introduction points
+    /// until this Hub's Tor uploads its own again, which can take an hour. Returns whether it is hosted.
+    pub(crate) async fn republish_creator_onion(&self) -> bool {
+        if !self.creator_active().await { return false; }
+        self.apply_hosting().await; // a new value on the watch: DEL_ONION, then ADD_ONION
+        true
+    }
 
     pub(crate) async fn set_creator(&self, id: Option<Identity>) {
         *self.creator.write().await = id;
@@ -377,6 +391,10 @@ impl HubNode {
             }
             _ => which,
         };
+        // NOSLOP_HUB_DM_MEDIA_V1: a chunk of a DM attachment the Hub is fetching for the Web UI stays here.
+        if pkt.ptype == "MEDIA_CHUNK" && dm_media::on_chunk(self, &pkt).await {
+            return vec![];
+        }
         // NOSLOP_HUB_DM_VIEW_V1: a DM for one of the owner's identities is also opened for the Web UI (the
         // packet itself still goes to the phone unchanged).
         if pkt.ptype == "MESSAGE" {
@@ -544,13 +562,14 @@ impl HubNode {
         }
     }
 
-    /// Starts the listeners and the presence loop.
+    /// Starts the listeners, the presence loop and the DM attachment fetcher.
     pub fn spawn_all(self: &Arc<Self>) {
-        let (n1, n2, n3) = (self.clone(), self.clone(), self.clone());
+        let (n1, n2, n3, n4) = (self.clone(), self.clone(), self.clone(), self.clone());
         let (a1, a2) = (self.cfg.personal_listen, self.cfg.creator_listen);
         tokio::spawn(async move { if let Err(e) = n1.serve(a1, Listener::Personal).await { warn!("NOSLOP_HUB: personal mesh listener failed on {}: {}", a1, e); } });
         tokio::spawn(async move { if let Err(e) = n2.serve(a2, Listener::Creator).await { warn!("NOSLOP_HUB: creator mesh listener failed on {}: {}", a2, e); } });
         tokio::spawn(async move { n3.run_presence().await });
+        tokio::spawn(async move { dm_media::run(n4).await });
     }
 }
 

@@ -48,9 +48,26 @@ senders sign, so no DM delete was ever applied; and after a clear the next DM sy
 the phone does), and `hub_dms_clear` (called by the phone's Clear Chat) clears the Web UI conversation and keeps
 older copies out.
 
+## Follow-up 2026-11-25 (night): attachments, and the split creator onion (`NOSLOP_HUB_DM_MEDIA_V1`)
+Device test: an image and a GIF Gabby sent showed only "open this conversation on your phone", and nothing reached
+the owner's phone for half an hour. Logs: from 19:00 the phone's signed calls to the Hub's onion timed out after
+20 s; at 19:03 and 19:27 it took the creator onion back ("Hub unreachable for 3 rounds") while the Hub kept
+publishing it; Gabby got "SOCKS: Host unreachable" for the creator onion from 19:14 until the Hub restarted at
+19:19 (a fresh descriptor), and again after 19:27. The Hub's journal has no Tor lines, so the Hub's own circuits
+could not be checked.
+* `hub/dm_media.rs` (new, `nh_dm_media`, schema v3): the Hub fetches a contact's DM attachments itself (signed
+  `MEDIA_REQUEST` ranges as the addressed identity; its chunks stay on the Hub) and takes the owner's from the phone
+  (`dm_media_put`); `GET /api/noslop/dm_media/<id>` serves them to the Web UI with byte ranges; deletes and cleared
+  chats remove them. NOSLOP_HUB.md §10.
+* `creator_onion_republish`: the phone calls it when it hands the creator onion back (fresh descriptor).
+* Portal: the chat shows images and GIFs, plays audio and video, offers files, and says when one is on its way.
+* NoSlop (§16.66): 45 s onion connect, one failed connection per round instead of one per call, creator onion taken
+  back only after 10 minutes of silence, DM attachments uploaded to the Hub, a refresh button and a Tor status line
+  in the chat.
+
 ## Verification
-* `cargo test -p hainet-noslop --features hub`: 37 tests pass (7 vector, 30 behaviour; 10 new).
-* Real `hainet-core` binary + independent Python client: 37/37 end-to-end checks (9 new).
+* `cargo test -p hainet-noslop --features hub`: 42 tests pass (7 vector, 35 behaviour; 15 new this session).
+* Real `hainet-core` binary + independent Python client: 43/43 end-to-end checks (15 new this session).
 * Portal: `vite build` passes; `tsc --noEmit` reports the same 35 errors as before the change, none new.
 * Not verified here: a browser on the device, a live Tor Hub.
 <!-- # END OF FILE helperfiles/SESSION_61_NOSLOP_HUB_DM_VIEW.md -->
