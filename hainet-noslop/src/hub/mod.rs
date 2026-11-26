@@ -26,6 +26,7 @@ pub mod content;
 mod creator;
 pub mod dm_media;
 pub mod dms;
+pub mod outbox;
 pub mod store;
 pub mod tor;
 
@@ -391,6 +392,8 @@ impl HubNode {
             }
             _ => which,
         };
+        // NOSLOP_HUB_OUTBOX_V1: a contact we just heard from gets what waits for them now.
+        outbox::wake(self, &pkt.sender_id);
         // NOSLOP_HUB_DM_MEDIA_V1: a chunk of a DM attachment the Hub is fetching for the Web UI stays here.
         if pkt.ptype == "MEDIA_CHUNK" && dm_media::on_chunk(self, &pkt).await {
             return vec![];
@@ -562,14 +565,15 @@ impl HubNode {
         }
     }
 
-    /// Starts the listeners, the presence loop and the DM attachment fetcher.
+    /// Starts the listeners, the presence loop, the DM attachment fetcher and the outbox.
     pub fn spawn_all(self: &Arc<Self>) {
-        let (n1, n2, n3, n4) = (self.clone(), self.clone(), self.clone(), self.clone());
+        let (n1, n2, n3, n4, n5) = (self.clone(), self.clone(), self.clone(), self.clone(), self.clone());
         let (a1, a2) = (self.cfg.personal_listen, self.cfg.creator_listen);
         tokio::spawn(async move { if let Err(e) = n1.serve(a1, Listener::Personal).await { warn!("NOSLOP_HUB: personal mesh listener failed on {}: {}", a1, e); } });
         tokio::spawn(async move { if let Err(e) = n2.serve(a2, Listener::Creator).await { warn!("NOSLOP_HUB: creator mesh listener failed on {}: {}", a2, e); } });
         tokio::spawn(async move { n3.run_presence().await });
         tokio::spawn(async move { dm_media::run(n4).await });
+        tokio::spawn(async move { outbox::run(n5).await });
     }
 }
 

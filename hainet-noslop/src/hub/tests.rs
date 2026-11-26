@@ -32,6 +32,8 @@ struct Rig {
     sent: Arc<StdMutex<Vec<(String, String)>>>,
     owner: Identity,
     creator: Identity,
+    /// Whether sends succeed (the contact is reachable).
+    reachable: Arc<std::sync::atomic::AtomicBool>,
     _dir: std::path::PathBuf,
 }
 
@@ -50,7 +52,13 @@ async fn rig(creator_mode: bool) -> Rig {
     cfg.noslop_dir = dir.join("noslop");
     let sent = Arc::new(StdMutex::new(Vec::new()));
     let s2 = sent.clone();
-    let send: SendFn = Arc::new(move |onion, line| { s2.lock().unwrap().push((onion, line)); Box::pin(async { true }) });
+    let reachable = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let r2 = reachable.clone();
+    let send: SendFn = Arc::new(move |onion, line| {
+        s2.lock().unwrap().push((onion, line));
+        let ok = r2.load(std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async move { ok })
+    });
     let node = HubNode::new(cfg, store, Some(send), false, Arc::new(|| NOW)).await;
     let args = JValue::obj().with("public_key", JValue::str(&c[0])).with("private_key", JValue::str(&c[1]))
         .with("enc_public_key", JValue::str(&c[2])).with("enc_private_key", JValue::str(&c[3])).with("display_name", JValue::str("Studio.tag12345"));
@@ -60,7 +68,7 @@ async fn rig(creator_mode: bool) -> Rig {
         .with("is_creator", JValue::Bool(creator_mode)).with("is_discoverable", JValue::Bool(true));
     api::handle(&node, "creator_profile_set", &prof).await.unwrap().unwrap();
     api::handle(&node, "creator_hosting_set", &JValue::obj().with("enabled", JValue::Bool(true))).await.unwrap().unwrap();
-    Rig { node, sent, owner, creator, _dir: dir }
+    Rig { node, sent, owner, creator, reachable, _dir: dir }
 }
 
 fn signed(p: Packet, id: &Identity, now: i64) -> String { envelope::sign(&p, id, now).unwrap().to_wire() }
@@ -929,3 +937,49 @@ async fn republishing_the_creator_onion_needs_hosting() {
     let res = api::handle(&r.node, "creator_onion_republish", &JValue::obj()).await.unwrap().unwrap();
     assert_eq!(res["republished"].as_bool(), Some(false));
 }
+
+// --- NOSLOP_HUB_OUTBOX_V1 -------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_web_ui_dm_to_an_unreachable_contact_waits_and_goes_when_they_are_heard_from() {
+    let r = rig(true).await;
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    r.reachable.store(false, std::sync::atomic::Ordering::SeqCst);
+    let a = dms::send_from_web_ui(&r.node, &gabby.public_key_b64, "are you there?").await.unwrap();
+    settle().await;
+    let waiting = r.node.store.outbox_get(&a.id).await.unwrap().expect("kept in the outbox");
+    assert_eq!((waiting.attempts, waiting.peer.as_str(), waiting.onion.as_str()), (1, gabby.public_key_b64.as_str(), gabby.onion.as_str()));
+    assert!(waiting.next_at > NOW, "the next round is scheduled, not immediate");
+    assert_eq!(sent_of(&r, "MESSAGE").len(), 1, "tried once");
+    // Gabby comes back: any verified frame from her sends what waits.
+    r.reachable.store(true, std::sync::atomic::Ordering::SeqCst);
+    let hello = signed(Packet::new("ANNOUNCE_PEER", &gabby.public_key_b64, None, JValue::obj().with("onion_address", JValue::str(&gabby.onion)), 1), &gabby, NOW);
+    r.node.handle_frame(&hello, Listener::Creator).await;
+    for _ in 0..50 { if r.node.store.outbox_get(&a.id).await.unwrap().is_none() { break; } tokio::time::sleep(std::time::Duration::from_millis(20)).await; }
+    assert!(r.node.store.outbox_get(&a.id).await.unwrap().is_none(), "delivered and removed");
+    let sends = sent_of(&r, "MESSAGE");
+    assert_eq!(sends.len(), 2);
+    let (onion, p) = &sends[1];
+    assert_eq!((onion.as_str(), p.p_str("id")), (gabby.onion.as_str(), Some(a.id.as_str())));
+    assert_eq!(envelope::verify(p, NOW), envelope::Verdict::Valid, "signed again for the new attempt");
+}
+
+#[tokio::test]
+async fn a_cleared_chat_or_a_deleted_dm_leaves_the_outbox() {
+    let r = rig(true).await;
+    let (gabby, _) = ident(7);
+    add_contact(&r, &gabby, "creator").await;
+    r.reachable.store(false, std::sync::atomic::Ordering::SeqCst);
+    let a = dms::send_from_web_ui(&r.node, &gabby.public_key_b64, "one").await.unwrap();
+    let b = dms::send_from_web_ui(&r.node, &gabby.public_key_b64, "two").await.unwrap();
+    settle().await;
+    // The owner deletes "one" (DELETE_MESSAGE through the Hub).
+    let del = delete_packet(&r.creator, &gabby, &a.id, NOW, false);
+    dms::observe_delete(&r.node, &del, false).await;
+    assert!(r.node.store.outbox_get(&a.id).await.unwrap().is_none());
+    assert!(r.node.store.outbox_get(&b.id).await.unwrap().is_some());
+    api::handle(&r.node, "hub_dms_clear", &JValue::obj().with("peer", JValue::str(&gabby.public_key_b64)).with("before", JValue::int(NOW))).await.unwrap().unwrap();
+    assert!(r.node.store.outbox_get(&b.id).await.unwrap().is_none(), "a cleared chat sends nothing more");
+}
+

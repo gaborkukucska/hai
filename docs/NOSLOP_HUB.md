@@ -140,7 +140,7 @@ onion keeps `HiddenServicePort 8080` (owner API, signed) and `9999`; the creator
 * `cargo test -p hainet-noslop --features hub`: 7 cross-language vector tests (Gson / Bouncy Castle),
   30 unit and behaviour tests (follower accept, declined / blocked, sync and inventory, media upload
   and chunk serving, re-signing and relays, owner signatures, Admin AI, presence, inbox ACK, backup
-  sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v3, Web UI DMs sent from
+  sidecar and pruning, DMs opened for the Web UI and the ones that must not be, schema v1 → v4, Web UI DMs sent from
   the right identity and the ones refused, signed deletes from either side and forged ones,
   cleared conversations), plus 5 for DM attachments (fetched from the sender with signed ranges and kept out of
   the phone's inbox, chunks from anyone else passed on, a wrong SHA-256 refused, the owner's resumable upload,
@@ -251,4 +251,14 @@ reasoning, so `response` came back empty and the phone showed an empty message. 
 reads `thinking` and `done_reason`, removes inline `<think>…</think>` blocks, and when the answer is empty after
 the model thought, asks once more with `"think": false` (only such a model gets the switch). The Hub never seals
 an empty Admin AI reply: it says the model gave no answer instead.
+
+## 11. The Hub's outbox (`NOSLOP_HUB_OUTBOX_V1`, 2026-11-26)
+
+DMs written in the Web UI are sent by the Hub itself, often while the owner's phone is off, so the Hub keeps
+them like the phone keeps its own: `hub/outbox.rs`, table `nh_outbox` (store schema v4). A DM is tried at once;
+if the contact cannot be reached it stays in the outbox and is tried again after 30 s, 2, 5, 10 and 30 minutes,
+then hourly, for seven days, and at once whenever the contact is heard from (any verified frame from them).
+It survives a Hub restart, is signed again at every attempt, and is removed when delivered, when the owner
+deletes the DM, or when the conversation is cleared. Before this a Web UI DM was tried for 12 minutes, in
+memory only. Delivery still needs the contact's phone to be online with working Tor.
 <!-- # END OF FILE docs/NOSLOP_HUB.md -->

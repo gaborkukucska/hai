@@ -73,8 +73,15 @@ creator onion was published again on hand-back. The Admin AI's second answer rea
 outdated `OllamaClient::new` calls in that file's tests were updated (other persona test modules still do not
 compile, as before).
 
+## Follow-up 2026-11-26: the Hub's outbox (`NOSLOP_HUB_OUTBOX_V1`)
+With the owner's phone off, two DMs written in the Web UI (11:28) never reached Gabby. Gabby's log: her phone
+reached no onion all morning (every send "SOCKS: Host unreachable", nothing received), and the Hub could not
+reach her either; the Hub retried each DM for 12 minutes, in memory. Now Web UI DMs wait in `nh_outbox` (schema
+v4) for up to seven days, are retried with back-off and at once when the contact is heard from, survive a
+restart, and leave the outbox when the DM is deleted or the chat cleared (NOSLOP_HUB.md §11). 2 new tests.
+
 ## Verification
-* `cargo test -p hainet-noslop --features hub`: 42 tests pass (7 vector, 35 behaviour; 15 new this session).
+* `cargo test -p hainet-noslop --features hub`: 44 tests pass (7 vector, 37 behaviour; 17 new this session).
 * Real `hainet-core` binary + independent Python client: 43/43 end-to-end checks (15 new this session).
 * Portal: `vite build` passes; `tsc --noEmit` reports the same 35 errors as before the change, none new.
 * Not verified here: a browser on the device, a live Tor Hub.

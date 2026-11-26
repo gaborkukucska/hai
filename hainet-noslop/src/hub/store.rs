@@ -13,10 +13,11 @@
 //! * `nh_meta`: key/value settings (creator profile, hosting switch, schema version).
 //! * `nh_dm_media` (v3): attachments of the owner's one-to-one DMs, kept for the Web UI chat (bytes in
 //!   `<noslop_dir>/dm_media`, see `dm_media.rs`).
+//! * `nh_outbox` (v4): packets the Hub sends on its own (Web UI DMs) until they are delivered (`outbox.rs`).
 
 use sqlx::{sqlite::SqlitePool, Row};
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 #[derive(Clone)]
 pub struct Store {
@@ -35,6 +36,21 @@ pub struct DmEvent {
     pub sender: String,
     pub preview: String,
     pub at: i64,
+}
+
+/// NOSLOP_HUB_OUTBOX_V1: a packet the Hub sends on its own until it is delivered (`nh_outbox`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutboxItem {
+    /// The packet's own id (a DM's message id).
+    pub id: String,
+    pub peer: String,
+    pub onion: String,
+    pub ptype: String,
+    /// The packet without its envelope (signed again at every attempt).
+    pub packet: String,
+    pub created_at: i64,
+    pub attempts: i64,
+    pub next_at: i64,
 }
 
 /// NOSLOP_HUB_DM_MEDIA_V1: one DM attachment the Web UI chat shows (`nh_dm_media`).
@@ -153,6 +169,14 @@ impl Store {
             let mut tx = self.pool.begin().await?;
             sqlx::query("CREATE TABLE IF NOT EXISTS nh_dm_media (media_id TEXT PRIMARY KEY, dm_id TEXT NOT NULL, dm_ts INTEGER NOT NULL, peer TEXT NOT NULL, holder TEXT NOT NULL, as_key TEXT NOT NULL, mtype TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, access_key TEXT NOT NULL, received INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL)").execute(&mut *tx).await?;
             sqlx::query("CREATE INDEX IF NOT EXISTS nh_dm_media_peer ON nh_dm_media (peer, dm_ts)").execute(&mut *tx).await?;
+            sqlx::query("INSERT OR REPLACE INTO nh_meta (key, value) VALUES ('schema_version', '3')").execute(&mut *tx).await?;
+            tx.commit().await?;
+        }
+        if current < 4 {
+            // NOSLOP_HUB_OUTBOX_V1: what the Hub sends on its own is kept until it is delivered.
+            let mut tx = self.pool.begin().await?;
+            sqlx::query("CREATE TABLE IF NOT EXISTS nh_outbox (id TEXT PRIMARY KEY, peer TEXT NOT NULL, onion TEXT NOT NULL, ptype TEXT NOT NULL, packet TEXT NOT NULL, created_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0)").execute(&mut *tx).await?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS nh_outbox_due ON nh_outbox (next_at)").execute(&mut *tx).await?;
             sqlx::query("INSERT OR REPLACE INTO nh_meta (key, value) VALUES ('schema_version', ?)").bind(SCHEMA_VERSION.to_string()).execute(&mut *tx).await?;
             tx.commit().await?;
         }
@@ -240,6 +264,42 @@ impl Store {
         Ok((rows.into_iter().map(|r| DmEvent {
             seq: r.get(0), dm_id: r.get(1), peer: r.get(2), sender: r.get(3), preview: r.get(4), at: r.get(5),
         }).collect(), latest.unwrap_or(0)))
+    }
+
+    // --- Outbox (NOSLOP_HUB_OUTBOX_V1) --------------------------------------------------------
+
+    pub async fn outbox_add(&self, o: &OutboxItem) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT OR REPLACE INTO nh_outbox (id, peer, onion, ptype, packet, created_at, attempts, next_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(&o.id).bind(&o.peer).bind(&o.onion).bind(&o.ptype).bind(&o.packet).bind(o.created_at).bind(o.attempts).bind(o.next_at)
+            .execute(&self.pool).await.map(|_| ())
+    }
+    fn row_to_outbox(r: &sqlx::sqlite::SqliteRow) -> OutboxItem {
+        OutboxItem { id: r.get("id"), peer: r.get("peer"), onion: r.get("onion"), ptype: r.get("ptype"), packet: r.get("packet"),
+            created_at: r.get("created_at"), attempts: r.get("attempts"), next_at: r.get("next_at") }
+    }
+    pub async fn outbox_due(&self, now: i64, limit: i64) -> Result<Vec<OutboxItem>, sqlx::Error> {
+        Ok(sqlx::query("SELECT * FROM nh_outbox WHERE next_at <= ? ORDER BY created_at ASC LIMIT ?").bind(now).bind(limit)
+            .fetch_all(&self.pool).await?.iter().map(Self::row_to_outbox).collect())
+    }
+    pub async fn outbox_get(&self, id: &str) -> Result<Option<OutboxItem>, sqlx::Error> {
+        Ok(sqlx::query("SELECT * FROM nh_outbox WHERE id = ?").bind(id).fetch_optional(&self.pool).await?.as_ref().map(Self::row_to_outbox))
+    }
+    pub async fn outbox_reschedule(&self, id: &str, attempts: i64, next_at: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE nh_outbox SET attempts = ?, next_at = ? WHERE id = ?").bind(attempts).bind(next_at).bind(id).execute(&self.pool).await.map(|_| ())
+    }
+    /// Everything waiting for this contact becomes due now (they were just heard from).
+    pub async fn outbox_wake_peer(&self, peer: &str) -> Result<u64, sqlx::Error> {
+        Ok(sqlx::query("UPDATE nh_outbox SET next_at = 0 WHERE peer = ? AND next_at > 0").bind(peer).execute(&self.pool).await?.rows_affected())
+    }
+    pub async fn outbox_remove(&self, id: &str) -> Result<u64, sqlx::Error> {
+        Ok(sqlx::query("DELETE FROM nh_outbox WHERE id = ?").bind(id).execute(&self.pool).await?.rows_affected())
+    }
+    pub async fn outbox_remove_peer(&self, peer: &str, before: i64) -> Result<u64, sqlx::Error> {
+        Ok(sqlx::query("DELETE FROM nh_outbox WHERE peer = ? AND created_at <= ?").bind(peer).bind(before).execute(&self.pool).await?.rows_affected())
+    }
+    /// Ids still waiting, of the given ones (the Web UI shows them as "sending").
+    pub async fn outbox_pending_ids(&self, peer: &str) -> Result<Vec<String>, sqlx::Error> {
+        Ok(sqlx::query("SELECT id FROM nh_outbox WHERE peer = ?").bind(peer).fetch_all(&self.pool).await?.into_iter().map(|r| r.get(0)).collect())
     }
 
     // --- DM attachments (NOSLOP_HUB_DM_MEDIA_V1) -----------------------------------------------

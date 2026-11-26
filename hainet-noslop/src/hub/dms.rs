@@ -69,6 +69,7 @@ pub async fn clear_conversation(node: &Arc<HubNode>, peer: &str, before: i64) ->
     let hook = node.dm_remove_hook.read().await.clone();
     let deleted = match hook { Some(h) => h(DmRemoval::Conversation { peer: peer.to_string(), before }).await, None => 0 };
     super::dm_media::forget_conversation(node, peer, before).await;
+    if let Err(e) = node.store.outbox_remove_peer(peer, before).await { debug!("NOSLOP_HUB: outbox of a cleared chat not emptied: {}", e); }
     Ok((deleted, before))
 }
 
@@ -96,6 +97,7 @@ pub async fn observe_delete(node: &Arc<HubNode>, pkt: &Packet, incoming: bool) {
     }
     if let Err(e) = node.store.dm_event_remove(id).await { debug!("NOSLOP_HUB: DM event not removed: {}", e); }
     super::dm_media::forget_dm(node, id).await;
+    if let Err(e) = node.store.outbox_remove(id).await { debug!("NOSLOP_HUB: outbox entry not removed: {}", e); }
     if let Some(h) = node.dm_remove_hook.read().await.clone() {
         h(DmRemoval::Message { id: id.to_string(), sender: author.to_string() }).await;
     }
@@ -218,7 +220,8 @@ pub async fn send_from_web_ui(node: &Arc<HubNode>, peer: &str, text: &str) -> Re
     let payload = json::JValue::obj().with("id", json::JValue::str(&id)).with("nonce", json::JValue::str(iv))
         .with("ciphertext", json::JValue::str(ct)).with("timestamp", json::JValue::int(ts)).with("v", json::JValue::int(2));
     let pkt = Packet::new("MESSAGE", &me.public_key_b64, Some(peer), payload, 3);
-    node.deliver(contact.onion_address.clone(), pkt, super::Retry::Spool);
+    // NOSLOP_HUB_OUTBOX_V1: kept and tried again until the contact gets it (the phone may be off).
+    super::outbox::send(node, &id, peer, &contact.onion_address, pkt).await?;
     Ok(DmRecord { id, peer: peer.to_string(), sender: me.public_key_b64.clone(), content: text.to_string(), timestamp: ts, media_id: None, media_type: None, incoming: false, me: me.public_key_b64.clone(), media: None })
 }
 
